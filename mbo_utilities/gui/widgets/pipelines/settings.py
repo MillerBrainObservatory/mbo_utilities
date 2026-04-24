@@ -273,8 +273,8 @@ class Suite2pSettings:
     torch_device: str = "cuda"  # passed through; _assign_torch_device falls back to cpu on allocation failure
     tau: float = 1.0  # upstream default
     fs: float = 10.0  # upstream default
-    diameter_y: float = 12.0  # upstream default [12., 12.]
-    diameter_x: float = 12.0
+    diameter_y: float = 4.0  # LBM default (upstream default is [12., 12.])
+    diameter_x: float = 4.0
 
     # run section
     do_registration: int = 1  # 0=skip, 1=run, 2=force
@@ -315,7 +315,7 @@ class Suite2pSettings:
 
     # detection section (algorithm is derived from sparse_mode + anatomical_only at serialize time)
     sparse_mode: bool = True  # user-visible per spec
-    anatomical_only: int = 0  # user-visible per spec; 0..4; non-zero => cellpose
+    anatomical_only: int = 3  # LBM default: enhanced mean image (cellpose)
     denoise: bool = False
     det_block_size_y: int = 64
     det_block_size_x: int = 64
@@ -343,15 +343,16 @@ class Suite2pSettings:
     cellpose_model: str = "cpsam"
     cellpose_img: str = "max_proj / meanImg"
     highpass_spatial: float = 0.0  # was fork's "spatial_hp_cp"
-    flow_threshold: float = 0.4  # upstream default (fork was 0)
-    cellprob_threshold: float = 0.0  # upstream default (fork was -6)
+    flow_threshold: float = 0.0  # LBM default (flow-check disabled); upstream default is 0.4
+    cellprob_threshold: float = 0.0  # LBM default (= upstream default)
 
-    # classification section
+    # classification section (upstream settings keys)
     classifier_path: str = ""
     use_builtin_classifier: bool = False
     preclassify: float = 0.0
     skip_classification: bool = False
-    accept_all_cells: bool = False
+    # `accept_all_cells` is NOT an upstream settings key; it's an
+    # lbm_suite2p_python.run_plane kwarg — moved to MboSuite2pExtras.
 
     # extraction section
     snr_threshold: float = 0.0
@@ -453,7 +454,6 @@ class Suite2pSettings:
                 "use_builtin_classifier": self.use_builtin_classifier,
                 "preclassify": self.preclassify,
                 "skip_classification": self.skip_classification,
-                "accept_all_cells": self.accept_all_cells,
             },
             "extraction": {
                 "snr_threshold": self.snr_threshold,
@@ -555,6 +555,9 @@ class MboSuite2pExtras:
     keep_reg: bool = True
     force_reg: bool = False
     force_detect: bool = False
+    # when True, lbm's run_plane keeps every detected ROI after upstream
+    # classification (mirrors the `accept_all_cells` kwarg in lsp.pipeline).
+    accept_all_cells: bool = False
     dff_window_size: int = 300
     dff_percentile: int = 20
     dff_smooth_window: int = 0
@@ -663,6 +666,29 @@ def _init_s2p_selection_state(self):
         self._s2p_c_stop = num_channels
         self._s2p_c_step = 1
         self._s2p_last_num_channels = num_channels
+
+        # Auto-fill Sampling Rate (Hz) from source metadata on file change.
+        # User-edited metadata wins over source (mirrors task_suite2p's
+        # resolution order). Only overwrites when a valid fs is found so a
+        # user value entered in the GUI is preserved when loading files
+        # without metadata fs.
+        try:
+            from mbo_utilities.metadata import get_param
+            src_fs = None
+            if hasattr(self, "image_widget") and self.image_widget.data:
+                mdata = getattr(self.image_widget.data[0], "metadata", {}) or {}
+                src_fs = get_param(mdata, "fs")
+            # prefer user-edited fs from the metadata editor if present
+            custom = getattr(self, "_custom_metadata", None) or {}
+            if "fs" in custom and custom["fs"] is not None:
+                src_fs = custom["fs"]
+            if src_fs is not None and self.s2p is not None:
+                try:
+                    self.s2p.fs = float(src_fs)
+                except (TypeError, ValueError):
+                    pass
+        except Exception:
+            pass
 
     # check if max changed
     if not hasattr(self, "_s2p_last_max_tp"):
@@ -1009,51 +1035,6 @@ def _draw_section_suite2p_content(self):
         self._saveas_select_metadata_tab = True
     set_tooltip("Edit dataset metadata prior to processing")
 
-    # --- Device badge (torch_device from Main settings) ---------------------
-    # show the current torch device + its real-world availability so users
-    # see at a glance whether the run will actually use GPU. cached per
-    # frame to avoid re-probing torch.cuda every frame.
-    imgui.same_line()
-    if not hasattr(self, "_device_probe_cache"):
-        self._device_probe_cache = {}
-    device_setting = getattr(self.s2p, "torch_device", "cuda")
-    probe_key = device_setting
-    if probe_key not in self._device_probe_cache:
-        actual = device_setting
-        reason = ""
-        try:
-            import torch
-            if device_setting == "cuda":
-                if not torch.cuda.is_available():
-                    actual = "cpu"
-                    reason = "CUDA unavailable at runtime; will fall back to CPU"
-            elif device_setting == "mps":
-                mps_ok = getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
-                if not mps_ok:
-                    actual = "cpu"
-                    reason = "MPS unavailable at runtime; will fall back to CPU"
-        except ImportError:
-            actual = "cpu"
-            reason = "torch not installed"
-        self._device_probe_cache[probe_key] = (actual, reason)
-    actual_device, probe_reason = self._device_probe_cache[probe_key]
-
-    gpu_like = actual_device in ("cuda", "mps")
-    if actual_device == device_setting:
-        label = f"[{device_setting.upper()}]"
-        color = imgui.ImVec4(0.3, 0.85, 0.3, 1.0) if gpu_like else imgui.ImVec4(0.75, 0.75, 0.75, 1.0)
-        tip = (
-            f"Compute device: {device_setting} (GPU accelerated)"
-            if gpu_like else
-            "Compute device: cpu (no GPU acceleration)"
-        ) + "\nChange via Run → Main → Settings → Torch Device"
-    else:
-        label = f"[{device_setting.upper()}→{actual_device.upper()}]"
-        color = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
-        tip = f"{probe_reason}\nChange via Run → Main → Settings → Torch Device"
-    imgui.text_colored(color, label)
-    set_tooltip(tip)
-
     # draw the selection popup
     _draw_s2p_selection_popup(self)
 
@@ -1121,7 +1102,7 @@ def _draw_section_suite2p_content(self):
     imgui.spacing()
 
     # === PIPELINE SETTINGS ===
-    imgui.separator_text("Pipeline Settings")
+    imgui.separator_text("Processing Pipeline Settings")
 
     # --- Main settings (closure, drawn inside the popup block below
     # alongside Registration / ROI Detection / etc., so it follows the
@@ -1140,10 +1121,6 @@ def _draw_section_suite2p_content(self):
         )
         if device_changed:
             self.s2p.torch_device = device_options[selected_device_idx]
-            # badge probes torch.cuda once and caches; drop that cache so
-            # the badge reflects the new setting on the next frame
-            if hasattr(self, "_device_probe_cache"):
-                self._device_probe_cache.clear()
         set_tooltip(
             "GPU device for registration / detection / extraction / dcnv.\n"
             "'cuda' falls back to 'cpu' at runtime if allocation fails."
@@ -1230,7 +1207,7 @@ def _draw_section_suite2p_content(self):
 
         if num_planes_main > 1 and n_selected_main > 1:
             _, self._parallel_processing = imgui.checkbox(
-                "Parallel plane processing", self._parallel_processing
+                "Parallel plane processing (experimental)", self._parallel_processing
             )
             set_tooltip("Process multiple planes simultaneously (uses more memory)")
             if self._parallel_processing:
@@ -1239,6 +1216,14 @@ def _draw_section_suite2p_content(self):
                     "Max parallel jobs", self._max_parallel_jobs, step=1
                 )
                 self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected_main))
+
+        # Report timing — grouped with the parallel/background processing
+        # controls since it's a runtime-behaviour toggle, not a pipeline
+        # parameter.
+        _, self.s2p_extras.report_time = imgui.checkbox(
+            "Report Timing", self.s2p_extras.report_time
+        )
+        set_tooltip("Return timing dictionary for each processing stage.")
 
     # --- Registration ---
     def draw_registration_settings():
@@ -1555,6 +1540,21 @@ def _draw_section_suite2p_content(self):
         _, self.s2p.nbins = imgui.input_int("Max Binned Frames", self.s2p.nbins)
         set_tooltip("Maximum number of binned frames for ROI detection.")
 
+        # soma_crop lives in settings["detection"] upstream; moved here
+        # from the old Classification popup where it was previously shown.
+        _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
+        set_tooltip("Crop dendrites for soma-shape classification stats.")
+
+        # Channel 2 (moved here from old Output panel)
+        imgui.spacing()
+        imgui.separator()
+        imgui.text("Channel 2:")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.chan2_threshold = imgui.input_float(
+            "Chan2 Detection Threshold", self.s2p.chan2_threshold
+        )
+        set_tooltip("Threshold for calling an ROI detected on channel 2.")
+
     # --- Signal Extraction ---
     def draw_signal_extraction_settings():
         _, self.s2p.allow_overlap = imgui.checkbox(
@@ -1578,36 +1578,8 @@ def _draw_section_suite2p_content(self):
         set_tooltip("Percentile of Lambda used for neuropil exclusion.")
 
     # --- Classification ---
-    def draw_classification_settings():
-        _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
-        set_tooltip("Crop dendrites for soma classification.")
-
-        imgui.spacing()
-        imgui.text("Classifier Path:")
-        path_display = self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
-        imgui.text(path_display)
-        imgui.pop_text_wrap_pos()
-        imgui.same_line()
-        if imgui.button("Browse##classifier"):
-            default_dir = str(Path(self.s2p.classifier_path).parent) if self.s2p.classifier_path else str(Path.home())
-            self._classifier_dialog = pfd.open_file(
-                "Select classifier file",
-                default_dir,
-                ["Classifier files", "*.npy *.pkl *.pickle", "All files", "*"],
-            )
-        set_tooltip("Select custom classifier file (e.g., .npy or .pkl)")
-
-        # handle file dialog result
-        if hasattr(self, "_classifier_dialog") and self._classifier_dialog is not None:
-            if self._classifier_dialog.ready():
-                result = self._classifier_dialog.result()
-                if result:
-                    self.s2p.classifier_path = result[0] if isinstance(result, list) else result
-                self._classifier_dialog = None
-
-    # --- Spike Deconvolution ---
-    def draw_spike_deconv_settings():
+    # --- Deconv / Classify (combined: spike deconvolution + classification) ---
+    def draw_deconv_classify_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.neuropil_coefficient = imgui.input_float(
             "Neuropil Coefficient", self.s2p.neuropil_coefficient
@@ -1661,35 +1633,69 @@ def _draw_section_suite2p_content(self):
         )
         set_tooltip("Percentile of trace for 'prctile' baseline method.")
 
-    # --- Output Settings ---
-    def draw_output_settings():
+        # --- Classification (moved here from the old Classification panel) ---
+        imgui.spacing()
+        imgui.separator()
+        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Classification")
+        imgui.spacing()
+
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.preclassify = imgui.input_float(
             "Preclassify Threshold", self.s2p.preclassify
         )
-        set_tooltip("Probability threshold to apply classifier before extraction.")
-        _, self.s2p.save_NWB = imgui.checkbox("Save NWB", self.s2p.save_NWB)
-        _, self.s2p.save_mat = imgui.checkbox("Save MATLAB File", self.s2p.save_mat)
-        set_tooltip("Export results to Fall.mat for MATLAB analysis.")
-        _, self.s2p.combined = imgui.checkbox(
-            "Combine Across Planes", self.s2p.combined
+        set_tooltip(
+            "Probability threshold to apply classifier before extraction. "
+            "0 = skip pre-classification."
         )
-        set_tooltip("Combine per-plane results into one GUI-loadable folder.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p_extras.aspect = imgui.input_float("Aspect Ratio", self.s2p_extras.aspect)
-        set_tooltip("um/pixel ratio X/Y for correct GUI aspect display.")
-        _, self.s2p_extras.report_time = imgui.checkbox("Report Timing", self.s2p_extras.report_time)
-        set_tooltip("Return timing dictionary for each processing stage.")
 
-        # Channel 2 settings
-        imgui.spacing()
-        imgui.separator()
-        imgui.text("Channel 2:")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.chan2_threshold = imgui.input_float(
-            "Chan2 Detection Threshold", self.s2p.chan2_threshold
+        _, self.s2p.use_builtin_classifier = imgui.checkbox(
+            "Use built-in classifier", self.s2p.use_builtin_classifier
         )
-        set_tooltip("Threshold for calling ROI detected on channel 2.")
+        set_tooltip(
+            "Forces the shipped suite2p classifier. Only takes effect when "
+            "Classifier Path below is empty AND you have a saved "
+            "~/.suite2p/classifiers/classifier_user.npy — otherwise suite2p "
+            "would pick that user file; this forces the shipped one instead. "
+            "Classification runs either way."
+        )
+
+        _, self.s2p_extras.accept_all_cells = imgui.checkbox(
+            "Accept all cells", self.s2p_extras.accept_all_cells
+        )
+        set_tooltip(
+            "When checked, every detected ROI is accepted regardless of "
+            "classifier output."
+        )
+
+        imgui.spacing()
+        imgui.text("Classifier Path:")
+        path_display = self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
+        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
+        imgui.text(path_display)
+        imgui.pop_text_wrap_pos()
+        imgui.same_line()
+        if imgui.button("Browse##classifier"):
+            default_dir = (
+                str(Path(self.s2p.classifier_path).parent)
+                if self.s2p.classifier_path
+                else str(Path.home())
+            )
+            self._classifier_dialog = pfd.open_file(
+                "Select classifier file",
+                default_dir,
+                ["Classifier files", "*.npy *.pkl *.pickle", "All files", "*"],
+            )
+        set_tooltip("Select custom classifier file (e.g. .npy or .pkl)")
+
+        # handle deferred file-dialog result
+        if getattr(self, "_classifier_dialog", None) is not None:
+            if self._classifier_dialog.ready():
+                result = self._classifier_dialog.result()
+                if result:
+                    self.s2p.classifier_path = (
+                        result[0] if isinstance(result, list) else result
+                    )
+                self._classifier_dialog = None
 
     # === PIPELINE SETTINGS TABLE ===
     # tabular layout: [checkbox/empty] | [label] | [settings button]
@@ -1725,6 +1731,14 @@ def _draw_section_suite2p_content(self):
                 _popup_states["data_options"] = True
                 imgui.open_popup("Data Options##data_options")
             set_tooltip("Data-specific options (scan-phase correction, frame averaging, etc.)")
+
+            # spacer row — visually separates the global configuration
+            # (Main / Data Options) from the per-pipeline-step rows below.
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.dummy(imgui.ImVec2(0, 8))
+            imgui.table_next_column()
+            imgui.table_next_column()
 
             # --- Registration row (with checkbox) ---
             # do_registration is an int 0/1/2 upstream; the table-level control
@@ -1771,42 +1785,27 @@ def _draw_section_suite2p_content(self):
                 imgui.open_popup("Signal Extraction##extract_settings")
             set_tooltip("Configure signal extraction parameters")
 
-            # --- Classification row ---
+            # --- Deconv / Classify row (with checkbox for spike deconv) ---
+            # Classification always runs regardless of this checkbox;
+            # classifier choice and accept_all_cells live inside the popup.
             imgui.table_next_row()
             imgui.table_next_column()
-            _, self.s2p.use_builtin_classifier = imgui.checkbox("##classify_cb", self.s2p.use_builtin_classifier)
-            set_tooltip("Enable/disable ROI classification")
+            _, self.s2p.do_deconvolution = imgui.checkbox(
+                "##spike_cb", self.s2p.do_deconvolution
+            )
+            set_tooltip(
+                "Enable/disable spike deconvolution.\n"
+                "Note: classification always runs at the end of the pipeline — "
+                "this checkbox does NOT turn classification off. It only "
+                "controls whether OASIS spike inference produces spks.npy."
+            )
             imgui.table_next_column()
-            imgui.text("Classification")
-            imgui.table_next_column()
-            if imgui.button("Settings##classify"):
-                _popup_states["classify_settings"] = True
-                imgui.open_popup("Classification##classify_settings")
-            set_tooltip("Configure ROI classification settings")
-
-            # --- Spike Deconvolution row (with checkbox) ---
-            imgui.table_next_row()
-            imgui.table_next_column()
-            _, self.s2p.do_deconvolution = imgui.checkbox("##spike_cb", self.s2p.do_deconvolution)
-            set_tooltip("Enable/disable spike deconvolution")
-            imgui.table_next_column()
-            imgui.text("Spike Deconv")
+            imgui.text("Deconv/Classify")
             imgui.table_next_column()
             if imgui.button("Settings##spike"):
                 _popup_states["spike_settings"] = True
-                imgui.open_popup("Spike Deconv##spike_settings")
-            set_tooltip("Configure spike deconvolution parameters")
-
-            # --- Output row (no checkbox) ---
-            imgui.table_next_row()
-            imgui.table_next_column()  # empty checkbox column
-            imgui.table_next_column()
-            imgui.text("Output")
-            imgui.table_next_column()
-            if imgui.button("Settings##output"):
-                _popup_states["output_settings"] = True
-                imgui.open_popup("Output##output_settings")
-            set_tooltip("Configure output options")
+                imgui.open_popup("Deconv/Classify##spike_settings")
+            set_tooltip("Spike deconvolution + classifier / accept-all-cells controls")
 
             # --- Draw all popups INSIDE the table/if-block ---
             # imgui's open_popup → begin_popup_modal chain only fires when
@@ -1905,32 +1904,10 @@ def _draw_section_suite2p_content(self):
                 finally:
                     imgui.end_popup()
 
-            # Classification popup
+            # Deconv / Classify popup (combined spike deconv + classification)
             imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
             opened, visible = imgui.begin_popup_modal(
-                "Classification##classify_settings",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["classify_settings"] = False
-                        imgui.close_current_popup()
-                    else:
-                        draw_classification_settings()
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##classify", imgui.ImVec2(80, 0)):
-                            _popup_states["classify_settings"] = False
-                            imgui.close_current_popup()
-                finally:
-                    imgui.end_popup()
-
-            # Spike Deconv popup
-            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "Spike Deconv##spike_settings",
+                "Deconv/Classify##spike_settings",
                 p_open=True,
                 flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
             )
@@ -1940,33 +1917,11 @@ def _draw_section_suite2p_content(self):
                         _popup_states["spike_settings"] = False
                         imgui.close_current_popup()
                     else:
-                        draw_spike_deconv_settings()
+                        draw_deconv_classify_settings()
                         imgui.spacing()
                         imgui.separator()
                         if imgui.button("Close##spike", imgui.ImVec2(80, 0)):
                             _popup_states["spike_settings"] = False
-                            imgui.close_current_popup()
-                finally:
-                    imgui.end_popup()
-
-            # Output popup
-            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "Output##output_settings",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["output_settings"] = False
-                        imgui.close_current_popup()
-                    else:
-                        draw_output_settings()
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##output", imgui.ImVec2(80, 0)):
-                            _popup_states["output_settings"] = False
                             imgui.close_current_popup()
                 finally:
                     imgui.end_popup()
@@ -2134,6 +2089,7 @@ def run_process(self):
                         "keep_reg": self.s2p_extras.keep_reg,
                         "force_reg": self.s2p_extras.force_reg,
                         "force_detect": self.s2p_extras.force_detect,
+                        "accept_all_cells": self.s2p_extras.accept_all_cells,
                         "dff_window_size": self.s2p_extras.dff_window_size,
                         "dff_percentile": self.s2p_extras.dff_percentile,
                         "dff_smooth_window": self.s2p_extras.dff_smooth_window,
@@ -2179,6 +2135,7 @@ def run_process(self):
             keep_reg = self.s2p_extras.keep_reg
             force_reg = self.s2p_extras.force_reg
             force_detect = self.s2p_extras.force_detect
+            accept_all_cells = self.s2p_extras.accept_all_cells
             dff_window_size = self.s2p_extras.dff_window_size
             dff_percentile = self.s2p_extras.dff_percentile
             dff_smooth_window = self.s2p_extras.dff_smooth_window
@@ -2247,6 +2204,7 @@ def run_process(self):
                             "keep_reg": keep_reg,
                             "force_reg": force_reg,
                             "force_detect": force_detect,
+                            "accept_all_cells": accept_all_cells,
                             "dff_window_size": dff_window_size,
                             "dff_percentile": dff_percentile,
                             "dff_smooth_window": dff_smooth_window,
@@ -2568,6 +2526,7 @@ def _run_plane_worker_thread(config):
             keep_reg=config["keep_reg"],
             force_reg=config["force_reg"],
             force_detect=config["force_detect"],
+            accept_all_cells=config.get("accept_all_cells", False),
             dff_window_size=config["dff_window_size"],
             dff_percentile=config["dff_percentile"],
             dff_smooth_window=config["dff_smooth_window"] if config["dff_smooth_window"] > 0 else None,

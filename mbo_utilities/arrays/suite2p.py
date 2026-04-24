@@ -327,24 +327,32 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         self.num_rois = get_param(self._metadata, "num_rois", default=1)
         self.filenames = [p.active_file for p in self._planes]
 
-        # adjust z-step based on plane directory numbering (e.g. planes 1, 3, 5 -> step=2)
-        if self._nz > 1:
-            plane_nums = []
-            for pdir in plane_dirs:
-                pnum = _extract_plane_number(pdir.name)
-                if pnum is not None:
-                    plane_nums.append(pnum)
-
+        # Trust ops.npy's `dz` / `_metadata_provenance` as the authoritative
+        # stride-aware record — they were stamped by the writer. Inferring
+        # a stride from directory names and multiplying here would double-
+        # scale whenever ops.dz is already the effective (post-stride)
+        # value (which is true for every mbo-authored ops.npy).
+        #
+        # Flag the legacy case: stride-suggesting dir names + no
+        # provenance marker => the writer that produced this dir may
+        # pre-date provenance tracking. We don't mutate dz — we leave it
+        # to the user to set explicitly if it's wrong — but log once so
+        # the mismatch is visible.
+        if self._nz > 1 and "_metadata_provenance" not in self._metadata:
+            plane_nums = [
+                _extract_plane_number(pdir.name) for pdir in plane_dirs
+            ]
+            plane_nums = [n for n in plane_nums if n is not None]
             if len(plane_nums) == self._nz:
-                steps = [plane_nums[i + 1] - plane_nums[i] for i in range(len(plane_nums) - 1)]
-                unique_steps = set(steps)
-                if len(unique_steps) == 1:
-                    z_step_factor = steps[0]
-                    if z_step_factor > 1:
-                        orig_dz = get_param(self._metadata, "dz")
-                        if orig_dz is not None:
-                            self._metadata["dz"] = orig_dz * z_step_factor
-                            logger.info(f"Adjusted dz by factor {z_step_factor} (new dz: {self._metadata['dz']})")
+                steps = [plane_nums[i + 1] - plane_nums[i]
+                         for i in range(len(plane_nums) - 1)]
+                if steps and len(set(steps)) == 1 and steps[0] > 1:
+                    logger.info(
+                        f"Plane dir names suggest stride={steps[0]} but ops.npy "
+                        "carries no provenance marker. Treating saved dz as the "
+                        "base value; if this volume was written with stride "
+                        "already baked into dz, override `dz` explicitly in ops."
+                    )
 
         logger.info(
             f"Loaded Suite2p volume: {self._nframes} frames, {self._nz} planes, "

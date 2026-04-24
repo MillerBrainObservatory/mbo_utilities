@@ -273,14 +273,40 @@ class OutputMetadata:
         return self.source_num_planes
 
     # scale properties
+    #
+    # provenance model: stride-aware fields (dz, fs) carry a small
+    # `_metadata_provenance` dict through every reactive pass so re-reading
+    # already-scaled metadata doesn't double-scale. one invariant per field:
+    #   effective_dz = base_dz * cumulative_stride
+    #   effective_fs = base_fs / cumulative_stride
+    # on each write we read the prior base+stride (or treat raw `dz`/`fs`
+    # as the base when no provenance is present — legacy path), multiply in
+    # this pass's stride, and emit the updated provenance in to_dict().
+
+    def _provenance(self) -> dict:
+        """Current provenance dict from source (empty when absent)."""
+        prov = self.source.get("_metadata_provenance")
+        return dict(prov) if isinstance(prov, dict) else {}
+
+    def _field_base_and_prior_stride(self, field_name: str) -> tuple[Any, int]:
+        """(base, cumulative_stride_applied_before_this_call) for a field.
+
+        Falls back to treating the current value of the field as the base
+        (with prior stride = 1) when no provenance is stamped — this keeps
+        legacy ops.npy files that pre-date provenance tracking working.
+        """
+        prov = self._provenance().get(field_name) or {}
+        if "base" in prov:
+            return prov["base"], int(prov.get("stride", 1))
+        return get_param(self.source, field_name), 1
 
     @property
     def dz(self) -> float | None:
         """adjusted z-step for output planes."""
-        source_dz = get_param(self.source, "dz")
-        if source_dz is None:
+        base, prior = self._field_base_and_prior_stride("dz")
+        if base is None:
             return None
-        return source_dz * self._z_step_factor
+        return float(base) * prior * self._z_step_factor
 
     @property
     def dx(self) -> float:
@@ -306,10 +332,31 @@ class OutputMetadata:
         """frame rate - only valid for contiguous frames."""
         if not self._is_contiguous:
             return None
-        source_fs = get_param(self.source, "fs")
-        if source_fs is None:
+        base, prior = self._field_base_and_prior_stride("fs")
+        if base is None:
             return None
-        return source_fs / self._frame_step
+        denom = prior * self._frame_step
+        if denom <= 0:
+            return None
+        return float(base) / denom
+
+    def _build_provenance_stamp(self) -> dict:
+        """Return the provenance dict to emit on the output, accumulating
+        this pass's stride into the existing record."""
+        prov = self._provenance()
+        dz_base, dz_prior = self._field_base_and_prior_stride("dz")
+        fs_base, fs_prior = self._field_base_and_prior_stride("fs")
+        if dz_base is not None:
+            prov["dz"] = {
+                "base": float(dz_base),
+                "stride": int(dz_prior * self._z_step_factor),
+            }
+        if fs_base is not None:
+            prov["fs"] = {
+                "base": float(fs_base),
+                "stride": int(fs_prior * self._frame_step),
+            }
+        return prov
 
     @property
     def finterval(self) -> float | None:
@@ -515,6 +562,12 @@ class OutputMetadata:
         # update with computed voxel size
         vs = self.voxel_size
         result.update(vs.to_dict(include_aliases=include_aliases))
+
+        # stamp provenance for stride-aware fields so later reads of this
+        # metadata don't treat our scaled `dz`/`fs` as if they were raw.
+        prov_stamp = self._build_provenance_stamp()
+        if prov_stamp:
+            result["_metadata_provenance"] = prov_stamp
 
         # frame rate / timing
         if self._is_contiguous:

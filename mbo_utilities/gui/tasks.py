@@ -675,6 +675,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             keep_reg=s2p_settings.get("keep_reg", True),
             force_reg=s2p_settings.get("force_reg", False),
             force_detect=s2p_settings.get("force_detect", False),
+            accept_all_cells=s2p_settings.get("accept_all_cells", False),
             dff_window_size=s2p_settings.get("dff_window_size", 300),
             dff_percentile=s2p_settings.get("dff_percentile", 20),
             dff_smooth_window=s2p_settings.get("dff_smooth_window"),
