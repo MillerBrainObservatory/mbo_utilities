@@ -1,0 +1,618 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mbo_utilities.arrays &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="../../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=26413419" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../_static/togglebutton.js?v=b8b12719"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '_modules/mbo_utilities/arrays';</script>
+    <link rel="icon" href="../../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <img src="../../_static/logo_utilities.png" class="logo__image only-light pst-js-only" alt="mbo_utilities - Home"/>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../usage/gui_guide.html">Miller Brain Studio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../../development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2F_modules/mbo_utilities/arrays.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button"
+   title="Open an issue"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1></h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <h1>Source code for mbo_utilities.arrays</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Array types for mbo_utilities.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TYPE_CHECKING</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays._base</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">CHUNKS_3D</span><span class="p">,</span>
+    <span class="n">CHUNKS_4D</span><span class="p">,</span>
+    <span class="n">DIMS</span><span class="p">,</span>
+    <span class="n">Shape5DMixin</span><span class="p">,</span>
+    <span class="n">_axes_or_guess</span><span class="p">,</span>
+    <span class="n">_build_output_path</span><span class="p">,</span>
+    <span class="n">_imwrite_base</span><span class="p">,</span>
+    <span class="n">_normalize_planes</span><span class="p">,</span>
+    <span class="n">_sanitize_suffix</span><span class="p">,</span>
+    <span class="n">iter_rois</span><span class="p">,</span>
+    <span class="n">normalize_roi</span><span class="p">,</span>
+    <span class="n">supports_roi</span><span class="p">,</span>
+<span class="p">)</span>
+
+<div class="viewcode-block" id="files_to_dask">
+<a class="viewcode-back" href="../../api/io.html#mbo_utilities.files_to_dask">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">files_to_dask</span><span class="p">(</span><span class="n">files</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span><span class="p">],</span> <span class="n">astype</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">chunk_t</span><span class="o">=</span><span class="mi">250</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Lazily build a Dask array or list of arrays depending on filename tags.</span>
+
+<span class="sd">    - &quot;plane&quot;, &quot;z&quot;, or &quot;chan&quot; -&gt; stacked along Z (TZYX)</span>
+<span class="sd">    - &quot;roi&quot; -&gt; list of 3D (T,Y,X) arrays, one per ROI</span>
+<span class="sd">    - otherwise -&gt; concatenate all files in time (T)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">dask.array</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">da</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">tifffile</span><span class="w"> </span><span class="kn">import</span> <span class="n">tifffile</span>
+
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">Path</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">files</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;No input files provided.&quot;</span><span class="p">)</span>
+
+    <span class="n">has_plane</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(plane|z|chan)[_-]?\d+&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">)</span>
+    <span class="n">has_roi</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;roi[_-]?\d+&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">suffix</span> <span class="o">==</span> <span class="s2">&quot;.npy&quot;</span><span class="p">:</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">mmap_mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">f</span><span class="o">.</span><span class="n">suffix</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;.tif&quot;</span><span class="p">,</span> <span class="s2">&quot;.tiff&quot;</span><span class="p">):</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">tifffile</span><span class="o">.</span><span class="n">memmap</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;r&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported file type: </span><span class="si">{</span><span class="n">f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">chunks</span> <span class="o">=</span> <span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">chunk_t</span><span class="p">,</span> <span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="o">*</span><span class="n">arr</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+        <span class="k">return</span> <span class="n">da</span><span class="o">.</span><span class="n">from_array</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="n">chunks</span><span class="o">=</span><span class="n">chunks</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">has_roi</span><span class="p">:</span>
+        <span class="n">roi_groups</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;roi[_-]?(\d+)&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+            <span class="n">roi_groups</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span> <span class="k">if</span> <span class="n">m</span> <span class="k">else</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="n">roi_arrays</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_idx</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">roi_groups</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="n">darr</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">group</span><span class="p">)],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">roi_arrays</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">darr</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">astype</span><span class="p">)</span> <span class="k">if</span> <span class="n">astype</span> <span class="k">else</span> <span class="n">darr</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">roi_arrays</span>
+
+    <span class="k">if</span> <span class="n">has_plane</span><span class="p">:</span>
+        <span class="n">plane_groups</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(plane|z|chan)[_-]?(\d+)&quot;</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+            <span class="n">plane_groups</span><span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span> <span class="k">if</span> <span class="n">m</span> <span class="k">else</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="n">plane_stacks</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">da</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">group</span><span class="p">)],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">_z</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">plane_groups</span><span class="o">.</span><span class="n">items</span><span class="p">())</span>
+        <span class="p">]</span>
+        <span class="n">full</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">plane_stacks</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">full</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">astype</span><span class="p">)</span> <span class="k">if</span> <span class="n">astype</span> <span class="k">else</span> <span class="n">full</span>
+
+    <span class="n">full</span> <span class="o">=</span> <span class="n">da</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">load_lazy</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">files</span><span class="p">)],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">full</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">astype</span><span class="p">)</span> <span class="k">if</span> <span class="n">astype</span> <span class="k">else</span> <span class="n">full</span></div>
+
+
+
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays._registration</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+        <span class="n">compute_axial_shifts</span> <span class="k">as</span> <span class="n">compute_axial_shifts</span><span class="p">,</span>
+        <span class="n">validate_axial_shifts</span> <span class="k">as</span> <span class="n">validate_axial_shifts</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.bin</span><span class="w"> </span><span class="kn">import</span> <span class="n">BinArray</span> <span class="k">as</span> <span class="n">BinArray</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.h5</span><span class="w"> </span><span class="kn">import</span> <span class="n">H5Array</span> <span class="k">as</span> <span class="n">H5Array</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.isoview</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+        <span class="n">ClusterPTArray</span> <span class="k">as</span> <span class="n">ClusterPTArray</span><span class="p">,</span>
+        <span class="n">IsoviewArray</span> <span class="k">as</span> <span class="n">IsoviewArray</span><span class="p">,</span>
+        <span class="n">IsoViewOutputArray</span> <span class="k">as</span> <span class="n">IsoViewOutputArray</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.numpy</span><span class="w"> </span><span class="kn">import</span> <span class="n">NumpyArray</span> <span class="k">as</span> <span class="n">NumpyArray</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.nwb</span><span class="w"> </span><span class="kn">import</span> <span class="n">NWBArray</span> <span class="k">as</span> <span class="n">NWBArray</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.suite2p</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+        <span class="n">Suite2pArray</span> <span class="k">as</span> <span class="n">Suite2pArray</span><span class="p">,</span>
+        <span class="n">find_suite2p_plane_dirs</span> <span class="k">as</span> <span class="n">find_suite2p_plane_dirs</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.tiff</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+        <span class="n">LBMPiezoArray</span> <span class="k">as</span> <span class="n">LBMPiezoArray</span><span class="p">,</span>
+        <span class="n">ImageJHyperstackArray</span> <span class="k">as</span> <span class="n">ImageJHyperstackArray</span><span class="p">,</span>
+        <span class="n">LBMArray</span> <span class="k">as</span> <span class="n">LBMArray</span><span class="p">,</span>
+        <span class="n">PiezoArray</span> <span class="k">as</span> <span class="n">PiezoArray</span><span class="p">,</span>
+        <span class="n">ScanImageArray</span> <span class="k">as</span> <span class="n">ScanImageArray</span><span class="p">,</span>
+        <span class="n">SinglePlaneArray</span> <span class="k">as</span> <span class="n">SinglePlaneArray</span><span class="p">,</span>
+        <span class="n">TiffArray</span> <span class="k">as</span> <span class="n">TiffArray</span><span class="p">,</span>
+        <span class="n">find_tiff_plane_files</span> <span class="k">as</span> <span class="n">find_tiff_plane_files</span><span class="p">,</span>
+        <span class="n">open_scanimage</span> <span class="k">as</span> <span class="n">open_scanimage</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.arrays.zarr</span><span class="w"> </span><span class="kn">import</span> <span class="n">ZarrArray</span> <span class="k">as</span> <span class="n">ZarrArray</span>
+
+<span class="c1"># lazy loading map: name -&gt; (module, attr)</span>
+<span class="n">_LAZY_IMPORTS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="c1"># array classes</span>
+    <span class="s2">&quot;Suite2pArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.suite2p&quot;</span><span class="p">,</span> <span class="s2">&quot;Suite2pArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;find_suite2p_plane_dirs&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.suite2p&quot;</span><span class="p">,</span> <span class="s2">&quot;find_suite2p_plane_dirs&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;H5Array&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.h5&quot;</span><span class="p">,</span> <span class="s2">&quot;H5Array&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;TiffArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;TiffArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;ScanImageArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;ScanImageArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;LBMArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;LBMArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;PiezoArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;PiezoArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;LBMPiezoArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;LBMPiezoArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;SinglePlaneArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;SinglePlaneArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;ImageJHyperstackArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;ImageJHyperstackArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;open_scanimage&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;open_scanimage&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;find_tiff_plane_files&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;find_tiff_plane_files&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;NumpyArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.numpy&quot;</span><span class="p">,</span> <span class="s2">&quot;NumpyArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;NWBArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.nwb&quot;</span><span class="p">,</span> <span class="s2">&quot;NWBArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;ZarrArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.zarr&quot;</span><span class="p">,</span> <span class="s2">&quot;ZarrArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;BinArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.bin&quot;</span><span class="p">,</span> <span class="s2">&quot;BinArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;IsoviewArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.isoview&quot;</span><span class="p">,</span> <span class="s2">&quot;IsoviewArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;IsoViewOutputArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.isoview&quot;</span><span class="p">,</span> <span class="s2">&quot;IsoViewOutputArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;ClusterPTArray&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.isoview&quot;</span><span class="p">,</span> <span class="s2">&quot;ClusterPTArray&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;_extract_tiff_plane_number&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.tiff&quot;</span><span class="p">,</span> <span class="s2">&quot;_extract_tiff_plane_number&quot;</span><span class="p">),</span>
+    <span class="c1"># registration</span>
+    <span class="s2">&quot;compute_axial_shifts&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;._registration&quot;</span><span class="p">,</span> <span class="s2">&quot;compute_axial_shifts&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;validate_axial_shifts&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;._registration&quot;</span><span class="p">,</span> <span class="s2">&quot;validate_axial_shifts&quot;</span><span class="p">),</span>
+    <span class="c1"># features subpackage</span>
+    <span class="s2">&quot;features&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.features&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+    <span class="c1"># ROI mixin</span>
+    <span class="s2">&quot;RoiFeatureMixin&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;.features._roi&quot;</span><span class="p">,</span> <span class="s2">&quot;RoiFeatureMixin&quot;</span><span class="p">),</span>
+<span class="p">}</span>
+
+<span class="c1"># cache loaded modules</span>
+<span class="n">_loaded</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="fm">__getattr__</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">_loaded</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_loaded</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+
+    <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">_LAZY_IMPORTS</span><span class="p">:</span>
+        <span class="n">module_name</span><span class="p">,</span> <span class="n">attr_name</span> <span class="o">=</span> <span class="n">_LAZY_IMPORTS</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">importlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">import_module</span>
+
+        <span class="n">module</span> <span class="o">=</span> <span class="n">import_module</span><span class="p">(</span><span class="n">module_name</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="s2">&quot;mbo_utilities.arrays&quot;</span><span class="p">)</span>
+        <span class="c1"># if attr_name is None, return the module itself (for subpackages)</span>
+        <span class="n">obj</span> <span class="o">=</span> <span class="n">module</span> <span class="k">if</span> <span class="n">attr_name</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">attr_name</span><span class="p">)</span>
+        <span class="n">_loaded</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">obj</span>
+        <span class="k">return</span> <span class="n">obj</span>
+
+    <span class="k">raise</span> <span class="ne">AttributeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;module </span><span class="si">{</span><span class="vm">__name__</span><span class="si">!r}</span><span class="s2"> has no attribute </span><span class="si">{</span><span class="n">name</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="fm">__dir__</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">__all__</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">register_all_pipelines</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Import all array modules to trigger pipeline registration.</span>
+
+<span class="sd">    Call this before using pipeline_registry if you want all</span>
+<span class="sd">    array types registered.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">importlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">import_module</span>
+
+    <span class="c1"># import all array modules to trigger their pipeline registrations</span>
+    <span class="k">for</span> <span class="n">module_name</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">set</span><span class="p">(</span><span class="n">_LAZY_IMPORTS</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+        <span class="n">import_module</span><span class="p">(</span><span class="n">module_name</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="s2">&quot;mbo_utilities.arrays&quot;</span><span class="p">)</span>
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">&quot;CHUNKS_3D&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;CHUNKS_4D&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;BinArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ClusterPTArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;LBMPiezoArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;H5Array&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ImageJHyperstackArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;IsoviewArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;IsoViewOutputArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;LBMArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;NWBArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;NumpyArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;PiezoArray&quot;</span><span class="p">,</span>
+    <span class="c1"># ROI mixin</span>
+    <span class="s2">&quot;RoiFeatureMixin&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ScanImageArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;SinglePlaneArray&quot;</span><span class="p">,</span>
+    <span class="c1"># Array classes</span>
+    <span class="s2">&quot;Suite2pArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;TiffArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ZarrArray&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;_axes_or_guess&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;_build_output_path&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;_extract_tiff_plane_number&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;_imwrite_base&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;_normalize_planes&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;_sanitize_suffix&quot;</span><span class="p">,</span>
+    <span class="c1"># Features subpackage</span>
+    <span class="s2">&quot;features&quot;</span><span class="p">,</span>
+    <span class="c1"># Suite2p helpers</span>
+    <span class="s2">&quot;find_suite2p_plane_dirs&quot;</span><span class="p">,</span>
+    <span class="c1"># TIFF helpers</span>
+    <span class="s2">&quot;find_tiff_plane_files&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;iter_rois&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;normalize_roi&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;open_scanimage&quot;</span><span class="p">,</span>
+    <span class="c1"># Pipeline registration</span>
+    <span class="s2">&quot;register_all_pipelines&quot;</span><span class="p">,</span>
+    <span class="c1"># Helpers</span>
+    <span class="s2">&quot;supports_roi&quot;</span><span class="p">,</span>
+    <span class="c1"># Registration</span>
+    <span class="s2">&quot;compute_axial_shifts&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;validate_axial_shifts&quot;</span><span class="p">,</span>
+<span class="p">]</span>
+</pre></div>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

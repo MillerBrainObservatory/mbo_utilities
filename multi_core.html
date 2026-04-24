@@ -1,0 +1,711 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>multi-core parallel processing &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=26413419" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=b8b12719"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="_static/tippy/multi_core.16ab6b1f-68c3-408c-9ac0-97a2c8a5b7ac.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'multi_core';</script>
+    <link rel="icon" href="_static/utilities.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <img src="_static/logo_utilities.png" class="logo__image only-light pst-js-only" alt="mbo_utilities - Home"/>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/gui_guide.html">Miller Brain Studio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="development.html">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/multi_core.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/multi_core.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fmulti_core.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/multi_core.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>multi-core parallel processing</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#execution-modes">execution modes</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mode-a-background-subprocess-default">mode A: background subprocess (default)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mode-b-in-gui-daemon-threads">mode B: in-gui daemon threads</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-files">key files</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#worker-function">worker function</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-flow">data flow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#open-bugs">open bugs</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#lbm-suite2p-python-80-is-volumetric-unboundlocalerror">lbm-suite2p-python#80 - <code class="docutils literal notranslate"><span class="pre">is_volumetric</span></code> UnboundLocalError</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#shared-arr-metadata-mutated-across-threads">#158 - shared <code class="docutils literal notranslate"><span class="pre">arr.metadata</span></code> mutated across threads</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#parallel-checkbox-hidden-for-5d-data">#159 - parallel checkbox hidden for 5D data</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#log-directory-path-mismatch">#160 - log directory path mismatch</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#file-handle-leak-double-save">#161 - file handle leak + double <code class="docutils literal notranslate"><span class="pre">_save()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#potential-improvements">potential improvements</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-per-plane-parallelism-in-background-mode">no per-plane parallelism in background mode</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-cancellation-for-in-gui-mode">no cancellation for in-gui mode</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-progress-reporting-for-in-gui-parallel-mode">no progress reporting for in-gui parallel mode</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#threadpoolexecutor-vs-processpoolexecutor">ThreadPoolExecutor vs ProcessPoolExecutor</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#executor-shutdown-wait-false-in-finally-block">executor.shutdown(wait=False) in finally block</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="multi-core-parallel-processing">
+<h1>multi-core parallel processing<a class="headerlink" href="#multi-core-parallel-processing" title="Link to this heading">#</a></h1>
+<p>architecture notes for suite2p parallel plane processing via the gui RUN tab.</p>
+<section id="execution-modes">
+<h2>execution modes<a class="headerlink" href="#execution-modes" title="Link to this heading">#</a></h2>
+<p>the gui provides two modes, toggled by “Run in background” checkbox.</p>
+<section id="mode-a-background-subprocess-default">
+<h3>mode A: background subprocess (default)<a class="headerlink" href="#mode-a-background-subprocess-default" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">process_manager.py:spawn()</span></code> launches a detached subprocess per channel</p></li>
+<li><p>invoked as <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span> <span class="pre">mbo_utilities.gui._worker</span> <span class="pre">suite2p</span> <span class="pre">{args_json}</span></code></p></li>
+<li><p>subprocess calls <code class="docutils literal notranslate"><span class="pre">lbm_suite2p_python.pipeline()</span></code> which processes all selected planes <strong>sequentially</strong></p></li>
+<li><p>survives gui closure; monitored via json sidecar files (<code class="docutils literal notranslate"><span class="pre">progress_{uuid}.json</span></code>)</p></li>
+<li><p>watchdog thread kills the process if no progress for 120 minutes</p></li>
+<li><p>windows: uses <code class="docutils literal notranslate"><span class="pre">DETACHED_PROCESS</span> <span class="pre">|</span> <span class="pre">CREATE_NEW_PROCESS_GROUP</span> <span class="pre">|</span> <span class="pre">CREATE_NO_WINDOW</span></code></p></li>
+<li><p>unix: uses <code class="docutils literal notranslate"><span class="pre">start_new_session=True</span></code></p></li>
+</ul>
+</section>
+<section id="mode-b-in-gui-daemon-threads">
+<h3>mode B: in-gui daemon threads<a class="headerlink" href="#mode-b-in-gui-daemon-threads" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>builds a list of per-plane config dicts (<code class="docutils literal notranslate"><span class="pre">settings.py:1906-1952</span></code>)</p></li>
+<li><p>if parallel enabled + multiple jobs: <code class="docutils literal notranslate"><span class="pre">ThreadPoolExecutor(max_workers=max_jobs)</span></code> at <code class="docutils literal notranslate"><span class="pre">settings.py:1963</span></code></p></li>
+<li><p>each plane submitted as a future, results collected via <code class="docutils literal notranslate"><span class="pre">as_completed()</span></code></p></li>
+<li><p>suite2p internal parallelism disabled (<code class="docutils literal notranslate"><span class="pre">num_workers=0</span></code>) to avoid oversubscription</p></li>
+<li><p>runs inside a daemon thread so gui stays responsive</p></li>
+<li><p>if parallel disabled or single job: runs sequentially in a single daemon thread</p></li>
+</ul>
+</section>
+</section>
+<section id="key-files">
+<h2>key files<a class="headerlink" href="#key-files" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>file</p></th>
+<th class="head"><p>role</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gui/widgets/pipelines/settings.py</span></code></p></td>
+<td><p>gui controls, job config building, thread dispatch</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">gui/_worker.py</span></code></p></td>
+<td><p>subprocess entry point, watchdog, status reporting</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gui/tasks.py</span></code></p></td>
+<td><p>task registry, <code class="docutils literal notranslate"><span class="pre">task_suite2p()</span></code>, <code class="docutils literal notranslate"><span class="pre">_ChannelView</span></code>, <code class="docutils literal notranslate"><span class="pre">TaskMonitor</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">gui/widgets/process_manager.py</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">ProcessManager.spawn()</span></code>, <code class="docutils literal notranslate"><span class="pre">ProcessInfo</span></code>, sidecar reads</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">gui/panels/process_manager.py</span></code></p></td>
+<td><p>gui display panel for background processes</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="worker-function">
+<h2>worker function<a class="headerlink" href="#worker-function" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">_run_plane_worker_thread(config)</span></code> at <code class="docutils literal notranslate"><span class="pre">settings.py:2014</span></code> is a pure function taking a snapshot dict.
+all gui state is pre-extracted into the config before thread launch to avoid data races.
+each worker: writes binary data via <code class="docutils literal notranslate"><span class="pre">imwrite(.bin)</span></code> -&gt; calls <code class="docutils literal notranslate"><span class="pre">lbm_suite2p_python.run_plane()</span></code>.</p>
+</section>
+<section id="data-flow">
+<h2>data flow<a class="headerlink" href="#data-flow" title="Link to this heading">#</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>run_process()
+  |
+  +-- background mode? --&gt; ProcessManager.spawn() --&gt; _worker.py --&gt; task_suite2p() --&gt; pipeline()
+  |
+  +-- daemon thread mode?
+        |
+        +-- build jobs[] (one config dict per plane/channel/roi combo)
+        |
+        +-- parallel? --&gt; ThreadPoolExecutor --&gt; _run_plane_worker_thread(config) per future
+        |
+        +-- sequential? --&gt; _run_plane_worker_thread(config) in loop
+</pre></div>
+</div>
+</section>
+<section id="open-bugs">
+<h2>open bugs<a class="headerlink" href="#open-bugs" title="Link to this heading">#</a></h2>
+<section id="lbm-suite2p-python-80-is-volumetric-unboundlocalerror">
+<h3><a class="reference external" href="https://github.com/MillerBrainObservatory/LBM-Suite2p-Python/issues/80">lbm-suite2p-python#80</a> - <code class="docutils literal notranslate"><span class="pre">is_volumetric</span></code> UnboundLocalError<a class="headerlink" href="#lbm-suite2p-python-80-is-volumetric-unboundlocalerror" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">pipeline()</span></code> in <code class="docutils literal notranslate"><span class="pre">run_lsp.py:289</span></code> crashes because <code class="docutils literal notranslate"><span class="pre">is_volumetric</span></code> is only assigned inside
+<code class="docutils literal notranslate"><span class="pre">if</span> <span class="pre">roi_mode</span> <span class="pre">is</span> <span class="pre">not</span> <span class="pre">None</span> <span class="pre">and</span> <span class="pre">supports_roi(arr):</span></code>. the normal path (<code class="docutils literal notranslate"><span class="pre">roi_mode=None</span></code>) skips
+the block entirely, leaving the variable unbound.</p>
+<p>error log from a real run (pid=25612, 10 tiff files, planes=[1,3,5]):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="ne">UnboundLocalError</span><span class="p">:</span> <span class="n">cannot</span> <span class="n">access</span> <span class="n">local</span> <span class="n">variable</span> <span class="s1">&#39;is_volumetric&#39;</span> <span class="n">where</span> <span class="n">it</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">associated</span> <span class="k">with</span> <span class="n">a</span> <span class="n">value</span>
+  <span class="n">File</span> <span class="s2">&quot;lbm_suite2p_python/run_lsp.py&quot;</span><span class="p">,</span> <span class="n">line</span> <span class="mi">289</span><span class="p">,</span> <span class="ow">in</span> <span class="n">pipeline</span>
+</pre></div>
+</div>
+</section>
+<section id="shared-arr-metadata-mutated-across-threads">
+<h3><a class="reference external" href="https://github.com/MillerBrainObservatory/mbo_utilities/issues/158">#158</a> - shared <code class="docutils literal notranslate"><span class="pre">arr.metadata</span></code> mutated across threads<a class="headerlink" href="#shared-arr-metadata-mutated-across-threads" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">_run_plane_worker_thread()</span></code> at <code class="docutils literal notranslate"><span class="pre">settings.py:2089-2094</span></code> calls <code class="docutils literal notranslate"><span class="pre">arr.metadata.pop()</span></code> on the
+original shared array object. all parallel threads share the same <code class="docutils literal notranslate"><span class="pre">arr</span></code>, creating a dict
+mutation race. the local <code class="docutils literal notranslate"><span class="pre">lazy_mdata</span></code> copy is correct but the original shouldn’t be touched.</p>
+</section>
+<section id="parallel-checkbox-hidden-for-5d-data">
+<h3><a class="reference external" href="https://github.com/MillerBrainObservatory/mbo_utilities/issues/159">#159</a> - parallel checkbox hidden for 5D data<a class="headerlink" href="#parallel-checkbox-hidden-for-5d-data" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">settings.py:688</span></code> only checks <code class="docutils literal notranslate"><span class="pre">data.ndim</span> <span class="pre">==</span> <span class="pre">4</span></code> for num_planes detection. 5D TCZYX data
+(<code class="docutils literal notranslate"><span class="pre">ndim</span> <span class="pre">==</span> <span class="pre">5</span></code>) falls through, <code class="docutils literal notranslate"><span class="pre">num_planes</span></code> stays 1, and the parallel checkbox never appears.</p>
+</section>
+<section id="log-directory-path-mismatch">
+<h3><a class="reference external" href="https://github.com/MillerBrainObservatory/mbo_utilities/issues/160">#160</a> - log directory path mismatch<a class="headerlink" href="#log-directory-path-mismatch" title="Link to this heading">#</a></h3>
+<p>sidecar writers use <code class="docutils literal notranslate"><span class="pre">~/mbo/logs/</span></code>, but <code class="docutils literal notranslate"><span class="pre">spawn()</span></code> creates log files in <code class="docutils literal notranslate"><span class="pre">~/.mbo/logs/</span></code>.
+works by accident since they’re tracked independently, but fragile.</p>
+</section>
+<section id="file-handle-leak-double-save">
+<h3><a class="reference external" href="https://github.com/MillerBrainObservatory/mbo_utilities/issues/161">#161</a> - file handle leak + double <code class="docutils literal notranslate"><span class="pre">_save()</span></code><a class="headerlink" href="#file-handle-leak-double-save" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">spawn()</span></code> opens <code class="docutils literal notranslate"><span class="pre">f_out</span></code> for log redirection but never closes it in the parent process.
+also calls <code class="docutils literal notranslate"><span class="pre">self._save()</span></code> twice in a row.</p>
+</section>
+</section>
+<section id="potential-improvements">
+<h2>potential improvements<a class="headerlink" href="#potential-improvements" title="Link to this heading">#</a></h2>
+<section id="no-per-plane-parallelism-in-background-mode">
+<h3>no per-plane parallelism in background mode<a class="headerlink" href="#no-per-plane-parallelism-in-background-mode" title="Link to this heading">#</a></h3>
+<p>background subprocess mode (the default) processes planes sequentially via <code class="docutils literal notranslate"><span class="pre">pipeline()</span></code>.
+users who enable “parallel” but leave “run in background” checked get no parallelism.
+the parallel checkbox only applies to daemon-thread mode. consider either disabling
+the checkbox when background mode is on, or passing parallelism settings to the worker.</p>
+</section>
+<section id="no-cancellation-for-in-gui-mode">
+<h3>no cancellation for in-gui mode<a class="headerlink" href="#no-cancellation-for-in-gui-mode" title="Link to this heading">#</a></h3>
+<p>background subprocess has kill support via ProcessManager, but the in-gui ThreadPoolExecutor
+has no cancel button. <code class="docutils literal notranslate"><span class="pre">self._active_executor</span></code> is stored but never used for on-demand shutdown.
+<code class="docutils literal notranslate"><span class="pre">executor.shutdown(wait=False,</span> <span class="pre">cancel_futures=True)</span></code> (python 3.9+) would enable this.</p>
+</section>
+<section id="no-progress-reporting-for-in-gui-parallel-mode">
+<h3>no progress reporting for in-gui parallel mode<a class="headerlink" href="#no-progress-reporting-for-in-gui-parallel-mode" title="Link to this heading">#</a></h3>
+<p>background mode reports granular progress through sidecar files. in-gui parallel mode only
+logs completion messages with no progress bar or per-plane status visible during execution.</p>
+</section>
+<section id="threadpoolexecutor-vs-processpoolexecutor">
+<h3>ThreadPoolExecutor vs ProcessPoolExecutor<a class="headerlink" href="#threadpoolexecutor-vs-processpoolexecutor" title="Link to this heading">#</a></h3>
+<p>suite2p is cpu-heavy. python’s GIL means threads can’t achieve true cpu parallelism for
+python-bound work. numpy/C extensions release the GIL so threads do help for the heavy
+compute, but binary extraction and python orchestration serialize. ProcessPoolExecutor
+would give true parallelism but requires picklable arguments (arr and logger are not).</p>
+</section>
+<section id="executor-shutdown-wait-false-in-finally-block">
+<h3>executor.shutdown(wait=False) in finally block<a class="headerlink" href="#executor-shutdown-wait-false-in-finally-block" title="Link to this heading">#</a></h3>
+<p>at <code class="docutils literal notranslate"><span class="pre">settings.py:1987</span></code>, <code class="docutils literal notranslate"><span class="pre">shutdown(wait=False)</span></code> is called after <code class="docutils literal notranslate"><span class="pre">as_completed()</span></code>. in the
+happy path all futures are done. but if an exception interrupts the <code class="docutils literal notranslate"><span class="pre">as_completed()</span></code> loop,
+some futures may still be running. <code class="docutils literal notranslate"><span class="pre">wait=True</span></code> would be safer since we’re already in a
+daemon thread.</p>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#execution-modes">execution modes</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mode-a-background-subprocess-default">mode A: background subprocess (default)</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mode-b-in-gui-daemon-threads">mode B: in-gui daemon threads</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#key-files">key files</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#worker-function">worker function</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#data-flow">data flow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#open-bugs">open bugs</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#lbm-suite2p-python-80-is-volumetric-unboundlocalerror">lbm-suite2p-python#80 - <code class="docutils literal notranslate"><span class="pre">is_volumetric</span></code> UnboundLocalError</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#shared-arr-metadata-mutated-across-threads">#158 - shared <code class="docutils literal notranslate"><span class="pre">arr.metadata</span></code> mutated across threads</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#parallel-checkbox-hidden-for-5d-data">#159 - parallel checkbox hidden for 5D data</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#log-directory-path-mismatch">#160 - log directory path mismatch</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#file-handle-leak-double-save">#161 - file handle leak + double <code class="docutils literal notranslate"><span class="pre">_save()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#potential-improvements">potential improvements</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-per-plane-parallelism-in-background-mode">no per-plane parallelism in background mode</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-cancellation-for-in-gui-mode">no cancellation for in-gui mode</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#no-progress-reporting-for-in-gui-parallel-mode">no progress reporting for in-gui parallel mode</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#threadpoolexecutor-vs-processpoolexecutor">ThreadPoolExecutor vs ProcessPoolExecutor</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#executor-shutdown-wait-false-in-finally-block">executor.shutdown(wait=False) in finally block</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
