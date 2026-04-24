@@ -1836,7 +1836,7 @@ wheels = [
 
 [[package]]
 name = "mbo-utilities"
-version = "2.7.7"
+version = "3.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
@@ -1854,6 +1854,9 @@ dependencies = [
     { name = "matplotlib" },
     { name = "mbo-fastplotlib" },
     { name = "mkl-fft" },
+    { name = "napari" },
+    { name = "napari-animation" },
+    { name = "napari-ome-zarr" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "pandas" },
@@ -1926,11 +1929,6 @@ docs = [
 isoview = [
     { name = "pyklb" },
 ]
-napari = [
-    { name = "napari" },
-    { name = "napari-animation" },
-    { name = "napari-ome-zarr" },
-]
 processing = [
     { name = "lbm-suite2p-python" },
     { name = "numba" },
@@ -1991,9 +1989,9 @@ requires-dist = [
     { name = "mbo-utilities", extras = ["suite2p", "rastermap", "torch"], marker = "extra == 'processing'" },
     { name = "mkl-fft", specifier = ">=2.0.0" },
     { name = "myst-nb", marker = "extra == 'docs'" },
-    { name = "napari", marker = "extra == 'napari'" },
-    { name = "napari-animation", marker = "extra == 'napari'" },
-    { name = "napari-ome-zarr", marker = "extra == 'napari'" },
+    { name = "napari" },
+    { name = "napari-animation" },
+    { name = "napari-ome-zarr" },
     { name = "nbsphinx", marker = "extra == 'docs'" },
     { name = "numba", marker = "extra == 'suite2p'", specifier = ">=0.60.0" },
     { name = "numpy", specifier = ">=2.2.5,<2.4" },
@@ -2035,7 +2033,7 @@ requires-dist = [
     { name = "wgpu", specifier = ">=0.28.1,<0.29" },
     { name = "zarr", specifier = ">=3.1.3" },
 ]
-provides-extras = ["suite2p", "rastermap", "napari", "isoview", "torch", "processing", "docs", "all"]
+provides-extras = ["suite2p", "rastermap", "isoview", "torch", "processing", "docs", "all"]
 
 [package.metadata.requires-dev]
 dev = [

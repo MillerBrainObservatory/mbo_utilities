@@ -57,10 +57,7 @@ uv pip install mbo_utilities
 # suite2p pipeline
 uv pip install "mbo_utilities[suite2p]"
 
-# suite3d volumetric pipeline
-uv pip install "mbo_utilities[suite3d]"
-
-# suite2p and suite3d
+# everything (suite2p + rastermap + torch)
 uv pip install "mbo_utilities[all]"
 ```
 
@@ -76,7 +73,7 @@ Suite2p requires pytorch. Installation depends on your cuda version. See the pyt
 uv pip uninstall torch torchvision  
 uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 
-# cupy (required for suite3d GPU)
+# cupy (optional, enables GPU for axial registration)
 nvidia-smi # check your cuda version first
 uv pip install cupy-cuda12x  # for CUDA 12.x
 uv pip install cupy-cuda11x  # for CUDA 11.x
