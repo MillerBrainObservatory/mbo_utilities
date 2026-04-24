@@ -8,10 +8,7 @@ import tifffile
 data_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw")
 files = list(data_path.glob("*.tif*"))
 
-# job_path = align_zplanes(data_path)
-# full_job_path = Path(r"D:\W2_DATA\kbarber\07_27_2025\mk355\raw_suite3d_plane_alignment\s3d-v2_1-init-file_500-init-frames_gpu\summary\summary.npy")
-# summary = np.load(job_path.joinpath("summary/summary.npy"), allow_pickle=True).item()
-# tvecs = summary["tvecs"]
+# axial shift path (new): tvecs live in arr.metadata['plane_shifts']
 
 x = mbo.imread(files)
 x.phasecorr_method = None

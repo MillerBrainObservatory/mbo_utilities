@@ -252,7 +252,7 @@ An output preview shows the filename, estimated size, and output shape before sa
 | Overwrite | replace existing output files |
 | Fix Scan Phase | apply phase correction on write |
 | Subpixel Correction | FFT-based phase correction on write |
-| Register Z-Planes | suite3d axial registration (requires suite3d) |
+| Register Z-Planes | axial (plane-to-plane) phase-correlation registration |
 | Chunk Size (MB) | memory chunk size for writing |
 
 ### Zarr-Specific Options

@@ -2,8 +2,8 @@
 
 exercises save -> load -> suite2p on all supported filetypes from a real
 multi-file raw LBM recording (D:/demo/raw). raw-scanimage path also runs
-axial registration via suite3d. every other frame + every other plane
-keeps the volume small enough to finish in ~30 min on a single GPU.
+axial registration via compute_axial_shifts. every other frame + every
+other plane keeps the volume small enough to finish in ~30 min.
 
 each step is benched and caught independently so one failure doesn't
 block the remaining tests. final report is a table of pass/fail with
@@ -19,8 +19,8 @@ from pathlib import Path
 
 from mbo_utilities import imread, imwrite
 from mbo_utilities.arrays._registration import (
-    register_zplanes_s3d,
-    validate_s3d_registration,
+    compute_axial_shifts,
+    validate_axial_shifts,
 )
 from lbm_suite2p_python import pipeline
 
@@ -93,16 +93,12 @@ def do_suite2p(
     if register_z:
         src_arr = imread(input_path)
         n_planes = src_arr.nz
-        s3d_dir = save_path / "s3d-preprocessed"
-        if not validate_s3d_registration(s3d_dir, n_planes):
-            s3d_dir = register_zplanes_s3d(
-                filenames=src_arr.filenames,
-                metadata=dict(src_arr.metadata),
-                outpath=save_path,
-            )
-            if not (s3d_dir and validate_s3d_registration(s3d_dir, n_planes)):
-                raise RuntimeError(f"suite3d failed: {s3d_dir}")
-        ops = {"apply_shift": True, "s3d-job": str(s3d_dir)}
+        reg_meta: dict = dict(src_arr.metadata or {})
+        if not validate_axial_shifts(reg_meta, n_planes):
+            compute_axial_shifts(src_arr, metadata=reg_meta)
+            if not validate_axial_shifts(reg_meta, n_planes):
+                raise RuntimeError("axial registration produced no valid plane_shifts")
+        ops = {"apply_shift": True, "plane_shifts": reg_meta["plane_shifts"]}
 
     pipeline(
         str(input_path),
@@ -150,12 +146,12 @@ def main() -> None:
         if not r.ok:
             saved.pop(key)
 
-    # phase 3: suite2p on raw (with suite3d axial reg)
-    s2p_raw = OUT / "s2p_raw_with_s3d"
+    # phase 3: suite2p on raw (with axial reg)
+    s2p_raw = OUT / "s2p_raw_with_axial"
     s2p_raw.mkdir(parents=True, exist_ok=True)
     results.append(
         bench(
-            "suite2p raw + s3d",
+            "suite2p raw + axial",
             do_suite2p,
             INPUT,
             s2p_raw,
