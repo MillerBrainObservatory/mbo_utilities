@@ -409,18 +409,17 @@ show_optional_dependencies() {
     echo ""
 
     echo -e "  ${CYAN}[1] Suite2p${NC}   - 2D cell extraction (PyTorch + CUDA)"
-    echo -e "  ${CYAN}[2] Suite3D${NC}   - 3D volumetric registration (CuPy + CUDA)"
-    echo -e "  ${CYAN}[3] Rastermap${NC} - Dimensionality reduction"
-    echo -e "  ${CYAN}[4] All${NC}       - Install all processing pipelines"
-    echo -e "  ${CYAN}[5] None${NC}      - Base installation only (fastest)"
+    echo -e "  ${CYAN}[2] Rastermap${NC} - Dimensionality reduction"
+    echo -e "  ${CYAN}[3] All${NC}       - Install all processing pipelines"
+    echo -e "  ${CYAN}[4] None${NC}      - Base installation only (fastest)"
     echo ""
 
     while true; do
-        read -p "Select option (1-5, or comma-separated like 1,3): " choice
-        if [[ "$choice" =~ ^[1-5](,[1-5])*$ ]]; then
+        read -p "Select option (1-4, or comma-separated like 1,2): " choice
+        if [[ "$choice" =~ ^[1-4](,[1-4])*$ ]]; then
             break
         fi
-        warn "Invalid selection. Enter 1-5 or comma-separated."
+        warn "Invalid selection. Enter 1-4 or comma-separated."
     done
 
     EXTRAS=()
@@ -430,10 +429,9 @@ show_optional_dependencies() {
         c=$(echo "$c" | tr -d ' ')
         case $c in
             1) EXTRAS+=("suite2p") ;;
-            2) EXTRAS+=("suite3d") ;;
-            3) EXTRAS+=("rastermap") ;;
-            4) EXTRAS=("all"); break ;;
-            5) EXTRAS=(); break ;;
+            2) EXTRAS+=("rastermap") ;;
+            3) EXTRAS=("all"); break ;;
+            4) EXTRAS=(); break ;;
         esac
     done
 
@@ -441,7 +439,7 @@ show_optional_dependencies() {
     if [[ ${#EXTRAS[@]} -gt 0 ]]; then
         local has_gpu_package=false
         for e in "${EXTRAS[@]}"; do
-            if [[ "$e" == "suite2p" || "$e" == "suite3d" || "$e" == "all" ]]; then
+            if [[ "$e" == "suite2p" || "$e" == "all" ]]; then
                 has_gpu_package=true
                 break
             fi

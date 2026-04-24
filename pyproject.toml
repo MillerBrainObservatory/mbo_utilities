@@ -65,11 +65,6 @@ suite2p = [
     "suite2p_mbo>=2.0.1",
     "setuptools",
 ]
-# Suite3D - requires CuPy (installed separately by installer based on CUDA version)
-suite3d = [
-    "mbo-suite3d>=0.0.9",
-    "cupy-cuda12x>=13,<14",
-]
 # Rastermap for activity sorting
 rastermap = [
     "rastermap",
@@ -91,7 +86,7 @@ torch = [
 ]
 # All processing pipelines
 processing = [
-    "mbo_utilities[suite2p,suite3d,rastermap,torch]",
+    "mbo_utilities[suite2p,rastermap,torch]",
 ]
 # Documentation build
 docs = [

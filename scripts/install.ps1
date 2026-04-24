@@ -474,16 +474,15 @@ function Show-OptionalDependencies {
     Write-Host ""
 
     Write-Host "  [1] Suite2p   - 2D cell extraction (PyTorch + CUDA)" -ForegroundColor Cyan
-    Write-Host "  [2] Suite3D   - 3D volumetric registration (CuPy + CUDA)" -ForegroundColor Cyan
-    Write-Host "  [3] Rastermap - Dimensionality reduction" -ForegroundColor Cyan
-    Write-Host "  [4] All       - Install all processing pipelines" -ForegroundColor Cyan
-    Write-Host "  [5] None      - Base installation only (fastest)" -ForegroundColor Cyan
+    Write-Host "  [2] Rastermap - Dimensionality reduction" -ForegroundColor Cyan
+    Write-Host "  [3] All       - Install all processing pipelines" -ForegroundColor Cyan
+    Write-Host "  [4] None      - Base installation only (fastest)" -ForegroundColor Cyan
     Write-Host ""
 
     do {
-        $choice = Read-Host "Select option (1-5, or comma-separated like 1,3)"
-        $valid = $choice -match '^[1-5](,[1-5])*$'
-        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-5 or comma-separated." }
+        $choice = Read-Host "Select option (1-4, or comma-separated like 1,2)"
+        $valid = $choice -match '^[1-4](,[1-4])*$'
+        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-4 or comma-separated." }
     } while (-not $valid)
 
     $extras = @()
@@ -492,26 +491,22 @@ function Show-OptionalDependencies {
     :parseLoop foreach ($c in $choices) {
         switch ($c) {
             "1" { $extras += "suite2p" }
-            "2" { $extras += "suite3d" }
-            "3" { $extras += "rastermap" }
-            "4" { $extras = @("all"); break parseLoop }
-            "5" { $extras = @(); break parseLoop }
+            "2" { $extras += "rastermap" }
+            "3" { $extras = @("all"); break parseLoop }
+            "4" { $extras = @(); break parseLoop }
         }
     }
 
     # warn if GPU packages selected without toolkit
     if ($extras.Count -gt 0) {
-        $gpuPackages = @("suite2p", "suite3d", "all")
+        $gpuPackages = @("suite2p", "all")
         $hasGpuPackage = ($extras | Where-Object { $gpuPackages -contains $_ }).Count -gt 0
-        $needsCupy = ($extras | Where-Object { @("suite3d", "all") -contains $_ }).Count -gt 0
+        $needsCupy = $false  # cupy is now a pure-optional accelerator, not tied to an extra
 
         if ($hasGpuPackage -and $GpuInfo.Available -and -not $GpuInfo.ToolkitInstalled) {
             Write-Host ""
             Write-Warn "CUDA Toolkit not installed. GPU packages will use CPU (slower)."
             Write-Warn "Install CUDA Toolkit for GPU acceleration."
-            if ($needsCupy) {
-                Write-Warn "Suite3D requires CuPy + CUDA Toolkit. CuPy will NOT be installed."
-            }
         }
         elseif ($hasGpuPackage -and -not $GpuInfo.Available) {
             Write-Host ""
@@ -570,11 +565,11 @@ function Install-MboTool {
         $fullSpec = $Spec
     }
 
-    # add cupy + NVRTC helpers as --with if suite3d is selected. the
-    # nvrtc/runtime wheels isolate cupy from the user's system CUDA
-    # toolkit so a driver > toolkit version skew can't break kernel
-    # compilation (fixes the "__nv_fp8_e8m0 incomplete type" class of
-    # bug). mirrors the dev-env install so both paths behave the same.
+    # add cupy + NVRTC helpers as --with when the caller asks for gpu
+    # acceleration. the nvrtc/runtime wheels isolate cupy from the user's
+    # system CUDA toolkit so a driver > toolkit version skew can't break
+    # kernel compilation (fixes the "__nv_fp8_e8m0 incomplete type" class
+    # of bug). mirrors the dev-env install so both paths behave the same.
     $withArgs = @()
     if ($CupyPackage) {
         $withArgs += @("--with", $CupyPackage,
@@ -628,7 +623,7 @@ function Install-MboTool {
             }
         }
 
-        # install tool (with cupy if needed for suite3d)
+        # install tool (with cupy if gpu acceleration is wanted)
         # --reinstall forces uv to re-fetch and rebuild even if the same
         # branch name is already cached. without it, pushing fixes to a
         # branch and re-running the script would silently keep the stale
@@ -1048,18 +1043,17 @@ function Install-DevEnvironment {
             throw "uv pip install failed"
         }
 
-        # install cupy separately if suite3d was selected and CUDA is
-        # available. --reinstall here too so an existing cupy-cuda12x
-        # install doesn't mask the version we want. also pull in the
-        # NVRTC/runtime wheels so cupy uses pip-managed CUDA headers
-        # instead of whatever system toolkit is on PATH — this is what
-        # fixes the "cuda_fp8.h missing __nv_fp8_e8m0" class of bug on
+        # install cupy separately when gpu acceleration is wanted. --reinstall
+        # here too so an existing cupy-cuda12x install doesn't mask the version
+        # we want. also pull in the NVRTC/runtime wheels so cupy uses
+        # pip-managed CUDA headers instead of whatever system toolkit is on PATH
+        # — fixes the "cuda_fp8.h missing __nv_fp8_e8m0" class of bug on
         # machines where driver > toolkit.
         if ($CupyPackage) {
-            Write-Info "Installing $CupyPackage + bundled NVRTC for Suite3D..."
+            Write-Info "Installing $CupyPackage + bundled NVRTC (enables GPU axial registration)..."
             uv pip install --python $pythonPath --reinstall $CupyPackage nvidia-cuda-nvrtc-cu12 nvidia-cuda-runtime-cu12 2>&1 | ForEach-Object { Write-Host $_ }
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "CuPy installation failed. Suite3D will not have GPU acceleration."
+                Write-Warn "CuPy installation failed. Axial registration will fall back to CPU."
             }
             else {
                 Write-Success "CuPy + NVRTC installed: $CupyPackage"
@@ -1289,8 +1283,10 @@ function Main {
     # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4.5: determine cupy package for suite3d based on CUDA version
-    $needsCupy = ($extras | Where-Object { @("suite3d", "all", "processing") -contains $_ }).Count -gt 0
+    # step 4.5: cupy is no longer tied to a specific extra — it's a pure
+    # optional accelerator for axial registration. user can install it
+    # manually if they want GPU; the installer doesn't pull it in.
+    $needsCupy = $false
     $cupyPackage = $null
     if ($needsCupy) {
         $cupyPackage = Get-CupyPackage -GpuInfo $gpuInfo
