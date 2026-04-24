@@ -401,27 +401,15 @@ class FileDialog:
                 [("PyTorch", "PyTorch")]
             )
 
-            # suite3d group
-            self._draw_dependency_group(
-                "Suite3D",
-                "Suite3D",
-                [("CuPy", "CuPy")]
-            )
-
-            # cupy install hint when suite3d/cupy is unhealthy. the most common
+            # cupy install hint when cupy is unhealthy. the most common
             # cause is the wrong cupy wheel for the installed cuda driver, so
             # show the recommended `uv pip install cupy-cudaXXx` command.
             cupy_feat = self._get_feature("CuPy")
-            suite3d_feat = self._get_feature("Suite3D")
             cupy_unhealthy = (
                 cupy_feat is None
                 or cupy_feat.status in (Status.MISSING, Status.ERROR)
             )
-            suite3d_unhealthy = (
-                suite3d_feat is not None
-                and suite3d_feat.status in (Status.MISSING, Status.ERROR)
-            )
-            if cupy_unhealthy or suite3d_unhealthy:
+            if cupy_unhealthy:
                 driver_cuda = None
                 if self._install_status is not None:
                     driver_cuda = self._install_status.cuda_info.driver_version

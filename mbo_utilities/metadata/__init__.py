@@ -56,6 +56,9 @@ from .io import (
     query_tiff_pages,
     clean_scanimage_metadata,
     default_ops,
+    default_db,
+    default_settings,
+    settings_db_to_ops,
     _build_ome_metadata,
 )
 

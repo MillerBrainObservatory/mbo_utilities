@@ -58,8 +58,14 @@ class Suite2pPipelineWidget(PipelineWidget):
         super().__init__(parent)
 
         # import settings from settings module
-        from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
+        from mbo_utilities.gui.widgets.pipelines.settings import (
+            Suite2pSettings,
+            Suite2pDB,
+            MboSuite2pExtras,
+        )
         self.settings = Suite2pSettings()
+        self.db = Suite2pDB()
+        self.extras = MboSuite2pExtras()
 
         # config state
         self._saveas_outdir = ""  # for save_as dialog

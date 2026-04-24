@@ -870,6 +870,55 @@ def default_ops():
     }
 
 
+def default_db():
+    """Upstream suite2p's default_db() — flat input/output/plane config dict.
+
+    Lazy passthrough so mbo stays in lockstep with whichever suite2p is
+    installed. Raises ImportError with an actionable message if upstream
+    suite2p is missing.
+    """
+    try:
+        from suite2p import default_db as _default_db
+    except ImportError as exc:
+        raise ImportError(
+            "suite2p is required for default_db(); install via "
+            "`uv pip install mbo_utilities[suite2p]`"
+        ) from exc
+    return _default_db()
+
+
+def default_settings():
+    """Upstream suite2p's default_settings() — nested processing config dict.
+
+    Keys are organized under `run`, `io`, `registration`, `detection`
+    (with `sparsery_settings` / `sourcery_settings` / `cellpose_settings`
+    sub-sections), `classification`, `extraction`, `dcnv_preprocess`.
+    Top-level has `torch_device`, `tau`, `fs`, `diameter`.
+    """
+    try:
+        from suite2p import default_settings as _default_settings
+    except ImportError as exc:
+        raise ImportError(
+            "suite2p is required for default_settings(); install via "
+            "`uv pip install mbo_utilities[suite2p]`"
+        ) from exc
+    return _default_settings()
+
+
+def settings_db_to_ops(db: dict | None, settings: dict | None) -> dict:
+    """Flatten upstream-shaped (db, settings) dicts to a legacy flat ops
+    dict. Convenience wrapper around lbm_suite2p_python's helper so
+    callsites in mbo_utilities don't need to import from that package."""
+    try:
+        from lbm_suite2p_python.db_settings import db_settings_to_ops
+    except ImportError as exc:
+        raise ImportError(
+            "lbm_suite2p_python is required for settings_db_to_ops(); "
+            "install via `uv pip install mbo_utilities[suite2p]`"
+        ) from exc
+    return db_settings_to_ops(db, settings)
+
+
 def _build_ome_metadata(
     shape: tuple,
     dtype,

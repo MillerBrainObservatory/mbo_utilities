@@ -15,12 +15,11 @@ from pathlib import Path
 
 from mbo_utilities import log
 from mbo_utilities._writers import _try_generic_writers, add_processing_step
-from mbo_utilities.arrays import (
-    register_zplanes_s3d,
-    validate_s3d_registration,
+from mbo_utilities.arrays._registration import (
+    compute_axial_shifts,
+    validate_axial_shifts,
 )
 from mbo_utilities.metadata import RoiMode, get_param
-from mbo_utilities.file_io import load_npy
 from typing import TYPE_CHECKING
 import contextlib
 
@@ -49,7 +48,6 @@ def imwrite(
     progress_callback: Callable | None = None,
     debug: bool = False,
     show_progress: bool = True,
-    shift_vectors: np.ndarray | None = None,
     output_name: str | None = None,
     output_suffix: str | None = None,
     dataset_name: str | None = None,
@@ -117,16 +115,12 @@ def imwrite(
         Number of frames to export. If None (default), exports all frames.
 
     register_z : bool, default=False
-        Perform z-plane registration using Suite3D before writing. Resource
-        knobs for the Suite3D init pass can be tuned via the kwargs
-        ``s3d_n_proc_corr`` (default 4), ``s3d_init_n_frames`` (default 500),
-        ``s3d_n_init_files`` (default 1), or by passing a single
-        ``s3d_params={...}`` dict. Lower ``s3d_n_proc_corr`` if you hit
-        Windows ``WinError 1455`` (commitment limit) — each worker reserves
-        a tile-sized shared-memory block.
-
-    shift_vectors : np.ndarray, optional
-        Pre-computed z-shift vectors with shape (n_planes, 2) for [dy, dx] shifts.
+        Compute per-plane rigid shifts via phase correlation and apply
+        them on write. Shifts are cached in ``metadata["plane_shifts"]``.
+        Optional tunables via kwargs: ``max_frames`` (subsample count,
+        default 200), ``chunk_frames`` (streaming batch, default 10),
+        ``max_reg_xy`` (search radius in pixels, default 150). GPU is
+        used automatically when cupy + CUDA are available.
 
     metadata : dict, optional
         Additional metadata to merge into output file headers/attributes.
@@ -275,93 +269,42 @@ def imwrite(
         with contextlib.suppress(AttributeError):
             lazy_array.metadata = file_metadata
 
-    # collect explicit suite3d resource overrides from kwargs. callers can
-    # pass either a single `s3d_params` dict, or individual `s3d_<key>` args
-    # (e.g. from the gui save-as dialog) — both styles are merged here.
-    s3d_params: dict = dict(kwargs.pop("s3d_params", {}) or {})
-    for _k in ("n_proc_corr", "init_n_frames", "n_init_files",
-               "max_rigid_shift_pix"):
-        _v = kwargs.pop(f"s3d_{_k}", None)
-        if _v is not None:
-            s3d_params[_k] = _v
+    # axial registration knobs (all optional). defaults match compute_axial_shifts.
+    axial_max_frames = int(kwargs.pop("max_frames", 200))
+    axial_chunk_frames = int(kwargs.pop("chunk_frames", 10))
+    axial_max_reg_xy = int(kwargs.pop("max_reg_xy", 150))
 
-    s3d_job_dir = None
     if register_z:
-        file_metadata["apply_shift"] = True
         num_planes = get_param(file_metadata, "nplanes")
 
-        if shift_vectors is not None:
-            file_metadata["shift_vectors"] = shift_vectors
-            logger.info("Using provided shift_vectors for registration.")
+        # if caller already provided valid shifts in metadata, reuse them.
+        if validate_axial_shifts(file_metadata, num_planes):
+            logger.info("using plane_shifts already present in metadata.")
+            file_metadata["apply_shift"] = True
+            if progress_callback:
+                progress_callback(1.0, "Using cached plane shifts")
         else:
-            existing_s3d_dir = None
-
-            if "s3d-job" in file_metadata:
-                candidate = Path(file_metadata["s3d-job"])
-                if validate_s3d_registration(candidate, num_planes):
-                    logger.info(f"Found valid s3d-job in metadata: {candidate}")
-                    existing_s3d_dir = candidate
-                else:
-                    logger.warning(
-                        "s3d-job in metadata exists but registration is invalid"
-                    )
-
-            if not existing_s3d_dir:
-                job_id = file_metadata.get("job_id", "s3d-preprocessed")
-                candidate = outpath / job_id
-                if validate_s3d_registration(candidate, num_planes):
-                    logger.info(f"Found valid existing s3d-job: {candidate}")
-                    existing_s3d_dir = candidate
-
-            if existing_s3d_dir:
-                s3d_job_dir = existing_s3d_dir
-                # notify callback that we're using cached registration
-                if progress_callback:
-                    progress_callback(1.0, "Using cached registration")
-
-                if s3d_job_dir.joinpath("dirs.npy").is_file():
-                    dirs = load_npy(s3d_job_dir / "dirs.npy").item()
-                    for k, v in dirs.items():
-                        if Path(v).is_dir():
-                            file_metadata[k] = v
-            else:
-                logger.info("No valid s3d-job found, running Suite3D registration.")
-                s3d_job_dir = register_zplanes_s3d(
-                    filenames=lazy_array.filenames,
-                    metadata=file_metadata,
-                    outpath=outpath,
-                    progress_callback=progress_callback,
-                    s3d_params=s3d_params or None,
+            logger.info("computing axial plane shifts...")
+            compute_axial_shifts(
+                lazy_array,
+                metadata=file_metadata,
+                max_frames=axial_max_frames,
+                chunk_frames=axial_chunk_frames,
+                max_reg_xy=axial_max_reg_xy,
+                progress_callback=progress_callback,
+            )
+            if not validate_axial_shifts(file_metadata, num_planes):
+                logger.error(
+                    "axial registration did not produce valid plane_shifts. "
+                    "proceeding without registration."
                 )
-
-                if s3d_job_dir:
-                    if validate_s3d_registration(s3d_job_dir, num_planes):
-                        logger.info(f"Z-plane registration succeeded: {s3d_job_dir}")
-                    else:
-                        logger.error(
-                            "Suite3D job completed but validation failed. "
-                            "Proceeding without registration."
-                        )
-                        s3d_job_dir = None
-                        file_metadata["apply_shift"] = False
-                else:
-                    logger.warning(
-                        "Z-plane registration failed. Proceeding without registration."
-                    )
-                    file_metadata["apply_shift"] = False
-
-        if s3d_job_dir:
-            logger.info(f"Storing s3d-job path {s3d_job_dir} in metadata.")
-            file_metadata["s3d-job"] = str(s3d_job_dir)
-
-        if hasattr(lazy_array, "metadata"):
-            with contextlib.suppress(AttributeError):
-                lazy_array.metadata = file_metadata
+                file_metadata["apply_shift"] = False
     else:
         file_metadata["apply_shift"] = False
-        if hasattr(lazy_array, "metadata"):
-            with contextlib.suppress(AttributeError):
-                lazy_array.metadata = file_metadata
+
+    if hasattr(lazy_array, "metadata"):
+        with contextlib.suppress(AttributeError):
+            lazy_array.metadata = file_metadata
 
     # Collect input files for processing history
     input_files = getattr(lazy_array, "filenames", None)
@@ -438,11 +381,11 @@ def imwrite(
     if register_z:
         processing_extra["z_registration"] = {
             "enabled": True,
-            "s3d_job_dir": str(s3d_job_dir) if s3d_job_dir else None,
             "apply_shift": file_metadata.get("apply_shift", False),
+            "n_planes": len(file_metadata.get("plane_shifts", []))
+            if "plane_shifts" in file_metadata else 0,
+            "params": file_metadata.get("plane_shifts_params"),
         }
-        if shift_vectors is not None:
-            processing_extra["z_registration"]["shift_vectors_provided"] = True
 
     # Add ROI info if specified
     if roi is not None:

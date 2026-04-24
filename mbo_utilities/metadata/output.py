@@ -504,11 +504,11 @@ class OutputMetadata:
         result["shape"] = self.output_shape
 
         # fill spatial dimensions only when the source doesn't already
-        # carry them. upstream writers (e.g. suite3d axial-shift bin
-        # writes) pre-compute padded Ly/Lx and put them in the source
-        # dict before calling us — clobbering those with the raw
-        # output_shape derivation was corrupting ops.npy, making suite2p
-        # miscount frames in the padded binary.
+        # carry them. upstream writers (e.g. axial-shift bin writes)
+        # pre-compute padded Ly/Lx and put them in the source dict
+        # before calling us — clobbering those with the raw output_shape
+        # derivation was corrupting ops.npy, making suite2p miscount
+        # frames in the padded binary.
         result.setdefault("Lx", self.Lx)
         result.setdefault("Ly", self.Ly)
 

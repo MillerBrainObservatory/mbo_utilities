@@ -116,12 +116,17 @@ def draw_suite2p_settings_panel(
     imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "Registration:")
     imgui.dummy(imgui.ImVec2(0, 4))
 
+    # do_registration is int 0/1/2 (skip/run/force) in upstream
+    _reg_labels = ["Skip", "Run", "Force"]
     if readonly:
-        imgui.text(f"  [{'x' if settings.do_registration else ' '}] do_registration")
+        _reg_label = _reg_labels[settings.do_registration] if 0 <= settings.do_registration <= 2 else "?"
+        imgui.text(f"  do_registration = {_reg_label}")
     else:
-        _, settings.do_registration = imgui.checkbox(
-            "do_registration##panel", settings.do_registration
-        )
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        _reg_idx = settings.do_registration if 0 <= settings.do_registration <= 2 else 1
+        _changed, _new_idx = imgui.combo("do_registration##panel", _reg_idx, _reg_labels)
+        if _changed:
+            settings.do_registration = _new_idx
     imgui.same_line(hello_imgui.em_size(20))
     imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run motion correction")
 
@@ -153,9 +158,9 @@ def draw_suite2p_settings_panel(
     imgui.dummy(imgui.ImVec2(0, 4))
 
     if readonly:
-        imgui.text(f"  [{'x' if settings.roidetect else ' '}] roidetect")
+        imgui.text(f"  [{'x' if settings.do_detection else ' '}] do_detection")
     else:
-        _, settings.roidetect = imgui.checkbox("roidetect##panel", settings.roidetect)
+        _, settings.do_detection = imgui.checkbox("do_detection##panel", settings.do_detection)
     imgui.same_line(hello_imgui.em_size(20))
     imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run cell detection")
 
@@ -172,11 +177,17 @@ def draw_suite2p_settings_panel(
     imgui.same_line(hello_imgui.em_size(14))
     imgui.set_next_item_width(hello_imgui.em_size(6))
     if readonly:
-        imgui.text(f"{settings.diameter}")
+        imgui.text(f"{settings.diameter_y:.1f}, {settings.diameter_x:.1f}")
     else:
-        _, settings.diameter = imgui.input_int("##diam_panel", settings.diameter)
+        _, settings.diameter_y = imgui.input_float(
+            "##diam_y_panel", settings.diameter_y, 0.5, 2.0, "%.1f"
+        )
+        imgui.same_line()
+        _, settings.diameter_x = imgui.input_float(
+            "##diam_x_panel", settings.diameter_x, 0.5, 2.0, "%.1f"
+        )
     imgui.same_line()
-    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Cell diameter (px)")
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Cell diameter (dy, dx) px")
 
     imgui.text("  threshold_scaling")
     imgui.same_line(hello_imgui.em_size(14))
@@ -207,23 +218,23 @@ def draw_suite2p_settings_panel(
     imgui.same_line(hello_imgui.em_size(20))
     imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Extract neuropil signal")
 
-    imgui.text("  neucoeff")
+    imgui.text("  neuropil_coefficient")
     imgui.same_line(hello_imgui.em_size(14))
     imgui.set_next_item_width(hello_imgui.em_size(6))
     if readonly:
-        imgui.text(f"{settings.neucoeff:.2f}")
+        imgui.text(f"{settings.neuropil_coefficient:.2f}")
     else:
-        _, settings.neucoeff = imgui.input_float(
-            "##neuc_panel", settings.neucoeff, 0.05, 0.1, "%.2f"
+        _, settings.neuropil_coefficient = imgui.input_float(
+            "##neuc_panel", settings.neuropil_coefficient, 0.05, 0.1, "%.2f"
         )
     imgui.same_line()
     imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Neuropil coefficient")
 
     if readonly:
-        imgui.text(f"  [{'x' if settings.spikedetect else ' '}] spikedetect")
+        imgui.text(f"  [{'x' if settings.do_deconvolution else ' '}] do_deconvolution")
     else:
-        _, settings.spikedetect = imgui.checkbox(
-            "spikedetect##panel", settings.spikedetect
+        _, settings.do_deconvolution = imgui.checkbox(
+            "do_deconvolution##panel", settings.do_deconvolution
         )
     imgui.same_line(hello_imgui.em_size(20))
     imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run spike deconvolution")
@@ -246,126 +257,331 @@ def draw_suite2p_settings_panel(
 @dataclass
 class Suite2pSettings:
     """
-    Suite2p pipeline configuration settings.
-    Organized by functional sections matching Suite2p documentation.
-    Defaults are optimized for LBM datasets based on LBM-Suite2p-Python.
+    Suite2p pipeline processing settings — mirrors upstream
+    `suite2p.default_settings()`.
+
+    Attribute names match upstream canonical names. The dataclass is kept
+    flat for GUI ergonomics; `to_dict()` produces the upstream-shaped
+    nested dict (run / io / registration / detection / ... ).
+
+    Paths, plane counts, and I/O config live on `Suite2pDB`. Fork/mbo-only
+    fields (keep_raw, dff_*, 1P registration, etc.) live on
+    `MboSuite2pExtras`.
     """
 
-    # main settings
-    tau: float = 1.3  # Timescale of sensor (LBM default for GCaMP6m-like)
-    frames_include: int = -1
-    target_timepoints: int = -1
+    # top-level
+    torch_device: str = "cuda"  # passed through; _assign_torch_device falls back to cpu on allocation failure
+    tau: float = 1.0  # upstream default
+    fs: float = 10.0  # upstream default
+    diameter_y: float = 12.0  # upstream default [12., 12.]
+    diameter_x: float = 12.0
 
-    # processing control
-    keep_raw: bool = False  # keep raw binary (data_raw.bin) after processing
-    keep_reg: bool = True  # Keep registered binary (data.bin) after processing
-    force_reg: bool = False  # Force re-registration even if already done
-    force_detect: bool = False  # Force ROI detection even if stat.npy exists
-    dff_window_size: int = 300  # Frames for rolling percentile baseline in ΔF/F
-    dff_percentile: int = 20  # Percentile for baseline F₀ estimation
-    dff_smooth_window: int = 0  # Smooth ΔF/F trace (0 = disabled)
+    # run section
+    do_registration: int = 1  # 0=skip, 1=run, 2=force
+    do_regmetrics: bool = True
+    do_detection: bool = True  # was fork's "roidetect"
+    do_deconvolution: bool = True  # was fork's "spikedetect"
+    multiplane_parallel: bool = False
 
-    # output settings
-    preclassify: float = 0.0  # apply classifier before extraction (0.0 = keep all)
-    save_nwb: bool = False
-    save_mat: bool = False  # Save results in Fall.mat
-    combined: bool = True  # Combine results across planes
-    aspect: float = 1.0  # Ratio of um/pixels X to Y (for GUI only)
-    report_time: bool = True  # Return timing dictionary
+    # io section
+    combined: bool = True
+    save_mat: bool = False
+    save_NWB: bool = False  # upstream naming
+    save_ops_orig: bool = True  # drives whether ops.npy is written per plane
+    delete_bin: bool = False
+    move_bin: bool = False
 
-    # registration settings
-    do_registration: bool = True  # whether to run registration
-    align_by_chan: int = 1  # Channel to use for alignment (1-based)
-    nimg_init: int = 300  # Frames to compute reference image
-    batch_size: int = 500  # Frames to register simultaneously
-    maxregshift: float = 0.1  # Max shift as fraction of frame size
-    smooth_sigma: float = 1.15  # Gaussian stddev for phase correlation (>4 for 1P)
-    smooth_sigma_time: float = 0.0  # Gaussian stddev in time frames
-    keep_movie_raw: bool = False  # Keep non-registered binary
-    two_step_registration: bool = False  # Run registration twice (low SNR)
-    reg_tif: bool = False  # Write registered binary to tiff
-    reg_tif_chan2: bool = False  # Write registered chan2 to tiff
-    subpixel: int = 10  # Precision of subpixel registration (1/subpixel steps)
-    th_badframes: float = 1.0  # Threshold for excluding frames
-    norm_frames: bool = True  # Normalize frames when detecting shifts
-    force_refImg: bool = False  # Use refImg stored in ops
-    pad_fft: bool = False  # Pad image during FFT registration
+    # registration section
+    align_by_chan: int = 1  # user-facing 1/2; serialized as bool align_by_chan2
+    nimg_init: int = 400  # upstream default (fork was 300)
+    maxregshift: float = 0.1
+    do_bidiphase: bool = False
+    bidiphase: float = 0.0
+    reg_batch_size: int = 100  # upstream registration.batch_size (fork conflated with extraction)
+    nonrigid: bool = True
+    maxregshiftNR: int = 5
+    block_size_y: int = 128
+    block_size_x: int = 128
+    smooth_sigma_time: float = 0.0
+    smooth_sigma: float = 1.15
+    spatial_taper: float = 3.45  # upstream default; 1P override lives on MboSuite2pExtras
+    th_badframes: float = 1.0
+    norm_frames: bool = True
+    snr_thresh: float = 1.2
+    subpixel: int = 10
+    two_step_registration: bool = False
+    reg_tif: bool = False
+    reg_tif_chan2: bool = False
 
-    # 1P registration
-    do_1Preg: bool = False  # perform 1P-specific registration
-    spatial_hp_reg: int = 42  # Window for spatial high-pass filtering (1P)
-    pre_smooth: float = 0.0  # Gaussian smoothing before high-pass (1P)
-    spatial_taper: float = 40.0  # Pixels to ignore on edges (1P)
+    # detection section (algorithm is derived from sparse_mode + anatomical_only at serialize time)
+    sparse_mode: bool = True  # user-visible per spec
+    anatomical_only: int = 0  # user-visible per spec; 0..4; non-zero => cellpose
+    denoise: bool = False
+    det_block_size_y: int = 64
+    det_block_size_x: int = 64
+    nbins: int = 5000  # was fork's "nbinned"
+    highpass_time: int = 100  # was fork's "high_pass"
+    threshold_scaling: float = 1.0
+    max_overlap: float = 0.75
+    soma_crop: bool = True
+    chan2_threshold: float = 0.25  # was fork's "chan2_thres" (default differs)
+    cellpose_chan2: bool = False
 
-    # non-rigid registration
-    nonrigid: bool = True  # perform non-rigid registration
-    block_size: list = (
-        None  # Block size for non-rigid (default [128, 128], power of 2/3)
-    )
-    snr_thresh: float = 1.2  # Phase correlation peak threshold (1.5 for 1P)
-    maxregshiftNR: float = 5.0  # Max block shift relative to rigid shift
+    # detection.sparsery_settings
+    highpass_neuropil: int = 25
+    max_ROIs: int = 5000
+    spatial_scale: int = 0  # upstream default 0=auto
+    active_percentile: float = 0.0
 
-    # roi detection settings (functional)
-    functional_chan: int = 1  # channel for functional ROI extraction (1-based)
-    roidetect: bool = True  # run ROI detection and extraction
-    sparse_mode: bool = True  # Use sparse_mode cell detection
-    spatial_scale: int = 1  # Optimal recording scale (1=6-pixel cells, LBM default)
-    connected: bool = True  # Require ROIs to be fully connected
-    threshold_scaling: float = 1.0  # Detection threshold (higher=fewer ROIs)
-    spatial_hp_detect: int = 25  # High-pass window for neuropil subtraction
-    max_overlap: float = 0.75  # Max overlap fraction before discarding ROI
-    high_pass: int = 100  # Running mean subtraction window (<10 for 1P)
-    smooth_masks: bool = True  # Smooth masks in final detection pass
-    max_iterations: int = 20  # Max iterations for cell extraction
-    nbinned: int = 5000  # Max binned frames for ROI detection
-    denoise: bool = False  # Denoise binned movie (requires sparse_mode)
+    # detection.sourcery_settings
+    connected: bool = True
+    max_iterations: int = 20
+    smooth_masks: bool = False  # upstream default False (fork was True)
+    spatial_hp_detect: int = 25  # fork-only (fork puts this under detection) — kept here for GUI parity
 
-    # cellpose detection settings (lbm-optimized defaults)
-    anatomical_only: int = 3  # use enhanced mean image (lbm default)
-    diameter: int = 4  # Expected cell diameter in pixels (LBM datasets)
-    cellprob_threshold: float = -6.0  # More permissive detection threshold
-    flow_threshold: float = 0.0  # Standard Cellpose flow threshold
-    spatial_hp_cp: float = 0  # High-pass filtering strength for Cellpose
+    # detection.cellpose_settings
+    cellpose_model: str = "cpsam"
+    cellpose_img: str = "max_proj / meanImg"
+    highpass_spatial: float = 0.0  # was fork's "spatial_hp_cp"
+    flow_threshold: float = 0.4  # upstream default (fork was 0)
+    cellprob_threshold: float = 0.0  # upstream default (fork was -6)
 
-    # signal extraction settings
-    neuropil_extract: bool = True  # extract neuropil signal
-    allow_overlap: bool = False  # Extract from overlapping pixels
-    min_neuropil_pixels: int = 350  # Min pixels for neuropil computation
-    inner_neuropil_radius: int = 2  # Pixels between ROI and neuropil
-    lam_percentile: int = 50  # Lambda percentile for neuropil exclusion
+    # classification section
+    classifier_path: str = ""
+    use_builtin_classifier: bool = False
+    preclassify: float = 0.0
+    skip_classification: bool = False
+    accept_all_cells: bool = False
 
-    # spike deconvolution settings
-    spikedetect: bool = True  # run spike deconvolution
-    neucoeff: float = 0.7  # Neuropil coefficient for all ROIs
-    baseline: str = "maximin"  # Baseline method (maximin/constant/constant_percentile)
-    win_baseline: float = 60.0  # Window for maximin filter (seconds)
-    sig_baseline: float = 10.0  # Gaussian filter width (seconds)
-    prctile_baseline: float = 8.0  # Percentile for constant_percentile baseline
+    # extraction section
+    snr_threshold: float = 0.0
+    extract_batch_size: int = 500
+    neuropil_extract: bool = True
+    neuropil_coefficient: float = 0.7  # was fork's "neucoeff"
+    inner_neuropil_radius: int = 2
+    min_neuropil_pixels: int = 350
+    lam_percentile: int = 50
+    allow_overlap: bool = False
+    circular_neuropil: bool = False
 
-    # classification settings
-    soma_crop: bool = True  # crop dendrites for classification stats
-    use_builtin_classifier: bool = False  # Use built-in classifier
-    classifier_path: str = ""  # Path to custom classifier
+    # dcnv_preprocess section
+    baseline: str = "maximin"  # "maximin" | "prctile" | "constant" (upstream spellings)
+    win_baseline: float = 60.0
+    sig_baseline: float = 10.0
+    prctile_baseline: float = 8.0
 
-    # channel 2 settings
-    chan2_file: str = ""  # path to channel 2 data file
-    chan2_thres: float = 0.65  # Threshold for ROI detection on channel 2
+    def _derived_algorithm(self) -> str:
+        if self.anatomical_only and int(self.anatomical_only) > 0:
+            return "cellpose"
+        return "sparsery" if self.sparse_mode else "sourcery"
 
-    def __post_init__(self):
-        """Initialize mutable default values."""
-        if self.block_size is None:
-            self.block_size = [128, 128]
-
-    def to_dict(self):
+    def to_dict(self) -> dict:
+        """Return the upstream-shaped nested settings dict."""
         return {
-            field.name: getattr(self, field.name)
-            for field in self.__dataclass_fields__.values()  # type: ignore # noqa
+            "torch_device": self.torch_device,
+            "tau": self.tau,
+            "fs": self.fs,
+            "diameter": [float(self.diameter_y), float(self.diameter_x)],
+            "run": {
+                "do_registration": int(self.do_registration),
+                "do_regmetrics": self.do_regmetrics,
+                "do_detection": self.do_detection,
+                "do_deconvolution": self.do_deconvolution,
+                "multiplane_parallel": self.multiplane_parallel,
+            },
+            "io": {
+                "combined": self.combined,
+                "save_mat": self.save_mat,
+                "save_NWB": self.save_NWB,
+                "save_ops_orig": self.save_ops_orig,
+                "delete_bin": self.delete_bin,
+                "move_bin": self.move_bin,
+            },
+            "registration": {
+                "align_by_chan2": bool(self.align_by_chan == 2),
+                "nimg_init": self.nimg_init,
+                "maxregshift": self.maxregshift,
+                "do_bidiphase": self.do_bidiphase,
+                "bidiphase": self.bidiphase,
+                "batch_size": self.reg_batch_size,
+                "nonrigid": self.nonrigid,
+                "maxregshiftNR": self.maxregshiftNR,
+                "block_size": (int(self.block_size_y), int(self.block_size_x)),
+                "smooth_sigma_time": self.smooth_sigma_time,
+                "smooth_sigma": self.smooth_sigma,
+                "spatial_taper": self.spatial_taper,
+                "th_badframes": self.th_badframes,
+                "norm_frames": self.norm_frames,
+                "snr_thresh": self.snr_thresh,
+                "subpixel": self.subpixel,
+                "two_step_registration": self.two_step_registration,
+                "reg_tif": self.reg_tif,
+                "reg_tif_chan2": self.reg_tif_chan2,
+            },
+            "detection": {
+                "algorithm": self._derived_algorithm(),
+                "denoise": self.denoise,
+                "block_size": (int(self.det_block_size_y), int(self.det_block_size_x)),
+                "nbins": self.nbins,
+                "highpass_time": self.highpass_time,
+                "threshold_scaling": self.threshold_scaling,
+                "max_overlap": self.max_overlap,
+                "soma_crop": self.soma_crop,
+                "chan2_threshold": self.chan2_threshold,
+                "cellpose_chan2": self.cellpose_chan2,
+                "sparsery_settings": {
+                    "highpass_neuropil": self.highpass_neuropil,
+                    "max_ROIs": self.max_ROIs,
+                    "spatial_scale": self.spatial_scale,
+                    "active_percentile": self.active_percentile,
+                },
+                "sourcery_settings": {
+                    "connected": self.connected,
+                    "max_iterations": self.max_iterations,
+                    "smooth_masks": self.smooth_masks,
+                },
+                "cellpose_settings": {
+                    "cellpose_model": self.cellpose_model,
+                    "img": self.cellpose_img,
+                    "highpass_spatial": self.highpass_spatial,
+                    "flow_threshold": self.flow_threshold,
+                    "cellprob_threshold": self.cellprob_threshold,
+                },
+            },
+            "classification": {
+                "classifier_path": self.classifier_path,
+                "use_builtin_classifier": self.use_builtin_classifier,
+                "preclassify": self.preclassify,
+                "skip_classification": self.skip_classification,
+                "accept_all_cells": self.accept_all_cells,
+            },
+            "extraction": {
+                "snr_threshold": self.snr_threshold,
+                "batch_size": self.extract_batch_size,
+                "neuropil_extract": self.neuropil_extract,
+                "neuropil_coefficient": self.neuropil_coefficient,
+                "inner_neuropil_radius": self.inner_neuropil_radius,
+                "min_neuropil_pixels": self.min_neuropil_pixels,
+                "lam_percentile": self.lam_percentile,
+                "allow_overlap": self.allow_overlap,
+                "circular_neuropil": self.circular_neuropil,
+            },
+            "dcnv_preprocess": {
+                "baseline": self.baseline,
+                "win_baseline": self.win_baseline,
+                "sig_baseline": self.sig_baseline,
+                "prctile_baseline": self.prctile_baseline,
+            },
         }
 
     def to_file(self, filepath):
-        """Save settings to a .npy file."""
-        # Convert Path objects to strings for cross-platform compatibility
+        """Save settings to settings.npy (upstream-shaped nested dict)."""
         np.save(filepath, _convert_paths_to_strings(self.to_dict()), allow_pickle=True)
+
+
+@dataclass
+class Suite2pDB:
+    """
+    Suite2p input/output database — mirrors upstream `suite2p.default_db()`.
+    These are paths, plane counts, and I/O flags that identify *what* to
+    process (not *how*).
+    """
+
+    data_path: list | None = None  # list of directories containing input files
+    look_one_level_down: bool = False
+    input_format: str = "tif"  # "tif" | "h5" | "nwb" | "bruker" | "movie" | "dcimg"
+    keep_movie_raw: bool = False
+    nplanes: int = 1
+    nrois: int = 1
+    nchannels: int = 1
+    swap_order: bool = False
+    functional_chan: int = 1  # moved here from settings
+    subfolders: list | None = None
+    save_path0: str = ""
+    fast_disk: str = ""
+    save_folder: str = "suite2p"
+    h5py_key: str = "data"
+    nwb_driver: str = ""
+    nwb_series: str = ""
+    force_sktiff: bool = False
+    bruker_bidirectional: bool = False
+
+    def __post_init__(self):
+        if self.data_path is None:
+            self.data_path = []
+        if self.subfolders is None:
+            self.subfolders = []
+
+    def to_dict(self) -> dict:
+        return {
+            "data_path": list(self.data_path or []),
+            "look_one_level_down": self.look_one_level_down,
+            "input_format": self.input_format,
+            "keep_movie_raw": self.keep_movie_raw,
+            "nplanes": self.nplanes,
+            "nrois": self.nrois,
+            "nchannels": self.nchannels,
+            "swap_order": self.swap_order,
+            "functional_chan": self.functional_chan,
+            "subfolders": list(self.subfolders or []),
+            "save_path0": self.save_path0,
+            "fast_disk": self.fast_disk,
+            "save_folder": self.save_folder,
+            "h5py_key": self.h5py_key,
+            "nwb_driver": self.nwb_driver,
+            "nwb_series": self.nwb_series,
+            "force_sktiff": self.force_sktiff,
+            "bruker_bidirectional": self.bruker_bidirectional,
+        }
+
+    def to_file(self, filepath):
+        """Save db to db.npy (upstream-shaped flat dict)."""
+        np.save(filepath, _convert_paths_to_strings(self.to_dict()), allow_pickle=True)
+
+
+@dataclass
+class MboSuite2pExtras:
+    """
+    Fork/mbo-specific fields that have no upstream home. Kept on a
+    dedicated object so `Suite2pSettings` can stay in lockstep with
+    upstream's schema.
+
+    These are consumed by `lbm_suite2p_python.run_plane`'s own kwargs or
+    by mbo's pre/post-processing (dF/F, target_timepoints clipping).
+    """
+
+    # lbm_suite2p_python.run_plane kwargs
+    keep_raw: bool = False
+    keep_reg: bool = True
+    force_reg: bool = False
+    force_detect: bool = False
+    dff_window_size: int = 300
+    dff_percentile: int = 20
+    dff_smooth_window: int = 0
+
+    # mbo-side timepoint / plane selection
+    target_timepoints: int = -1
+    frames_include: int = -1
+
+    # gui-only display
+    aspect: float = 1.0
+    report_time: bool = True
+
+    # fork-only registration flags (no upstream equivalent)
+    force_refImg: bool = False
+    pad_fft: bool = False
+    chan2_file: str = ""
+
+    # 1P-specific (fork-only)
+    do_1Preg: bool = False
+    spatial_hp_reg: int = 42
+    pre_smooth: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            field.name: getattr(self, field.name)
+            for field in self.__dataclass_fields__.values()  # type: ignore
+        }
 
 
 def draw_tab_process(self):
@@ -601,7 +817,7 @@ def _draw_s2p_selection_popup(self):
 
         # update s2p.target_timepoints from selection
         if tp_parsed:
-            self.s2p.target_timepoints = tp_parsed.count
+            self.s2p_extras.target_timepoints = tp_parsed.count
 
         imgui.spacing()
         imgui.spacing()
@@ -613,7 +829,6 @@ def _draw_s2p_selection_popup(self):
 
 def _draw_data_options_content(self):
     """Draw data options content showing settings that affect Suite2p processing."""
-    from mbo_utilities.gui._availability import HAS_SUITE3D
 
     INPUT_WIDTH = 100
     has_phase_support = getattr(self, "has_raster_scan_support", False)
@@ -626,7 +841,7 @@ def _draw_data_options_content(self):
         already_registered = arrays[0].metadata.get("apply_shift", False)
 
     is_raw = getattr(self, "is_mbo_scan", False)
-    has_z_reg = HAS_SUITE3D and nz > 1 and is_raw and not already_registered
+    has_z_reg = nz > 1 and is_raw and not already_registered
 
     has_any_options = has_phase_support or has_z_reg
 
@@ -680,82 +895,63 @@ def _draw_data_options_content(self):
         for i, ofs in enumerate(self.current_offset):
             imgui.text(f"  Array {i + 1}: {ofs:.3f} px")
 
-    # z-registration section (suite3d) - only for raw scanimage data
+    # axial z-registration - only for raw scanimage data
     if nz > 1 and is_raw and not already_registered:
         if has_phase_support:
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
 
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Z-Registration (Suite3D)")
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Axial Registration")
         imgui.spacing()
 
         if has_z_reg:
             reg_z_val = getattr(self, "_register_z", False)
             reg_changed, reg_value = imgui.checkbox("Register Z-Planes Axially", reg_z_val)
             set_tooltip(
-                "Use Suite3D to register z-planes axially before processing.\n"
-                "This corrects for z-drift between planes."
+                "Compute per-plane rigid shifts via phase correlation and\n"
+                "apply them on write. Corrects z-drift between adjacent planes.\n"
+                "Uses GPU (cupy) if available, otherwise CPU."
             )
             if reg_changed:
                 self._register_z = reg_value
 
-            # suite3d resource knobs — only relevant when z-registration is on.
-            # mirrors the sub-controls in the save-as dialog so the run tab
-            # exposes the same tuning. n_proc_corr is the big one on windows:
-            # each worker mmaps a tile-sized block that counts against the
-            # pagefile commit limit, so lower it to avoid WinError 1455.
             if self._register_z:
-                if not hasattr(self, "_s3d_n_proc_corr"):
-                    self._s3d_n_proc_corr = 4
-                if not hasattr(self, "_s3d_init_n_frames"):
-                    self._s3d_init_n_frames = 500
-                if not hasattr(self, "_s3d_n_init_files"):
-                    self._s3d_n_init_files = 1
+                if not hasattr(self, "_axial_max_frames"):
+                    self._axial_max_frames = 200
+                if not hasattr(self, "_axial_max_reg_xy"):
+                    self._axial_max_reg_xy = 150
 
                 imgui.indent(16)
-                imgui.text_colored(
-                    imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Suite3D resources"
-                )
                 imgui.set_next_item_width(80)
                 _changed, _val = imgui.input_int(
-                    "Workers (n_proc_corr)", self._s3d_n_proc_corr, 1, 4
+                    "Max frames", self._axial_max_frames, 50, 100
                 )
                 if _changed:
-                    self._s3d_n_proc_corr = max(1, _val)
+                    self._axial_max_frames = max(10, _val)
                 set_tooltip(
-                    "Multiprocessing workers for the TIFF load+stitch pass.\n"
-                    "Each worker reserves a tile-sized shared-memory block.\n"
-                    "Lower this if you hit WinError 1455 (commitment limit) "
-                    "or run out of RAM. Default 4."
+                    "Frames subsampled (evenly spaced) for the time-mean used\n"
+                    "to compute plane shifts. 200 is usually plenty."
                 )
 
                 imgui.set_next_item_width(80)
                 _changed, _val = imgui.input_int(
-                    "Init frames", self._s3d_init_n_frames, 50, 500
+                    "Max shift (px)", self._axial_max_reg_xy, 10, 50
                 )
                 if _changed:
-                    self._s3d_init_n_frames = max(50, _val)
+                    self._axial_max_reg_xy = max(1, _val)
                 set_tooltip(
-                    "Frames pulled into the Suite3D init pass. Lower = less RAM."
-                )
-
-                imgui.set_next_item_width(80)
-                _changed, _val = imgui.input_int(
-                    "Init files", self._s3d_n_init_files, 1, 1
-                )
-                if _changed:
-                    self._s3d_n_init_files = max(1, _val)
-                set_tooltip(
-                    "Number of TIFFs read in parallel during init. Default 1."
+                    "Max shift search radius in pixels. Default 150."
                 )
                 imgui.unindent(16)
         else:
-            # show disabled option with install hint
             imgui.begin_disabled()
             imgui.checkbox("Register Z-Planes Axially", False)
             imgui.end_disabled()
-            imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Install suite3d to enable")
+            imgui.text_colored(
+                imgui.ImVec4(0.6, 0.6, 0.6, 1.0),
+                "Requires multi-plane raw data",
+            )
 
     if not has_any_options:
         imgui.text_disabled("No available options for this data type.")
@@ -778,6 +974,22 @@ def _draw_section_suite2p_content(self):
     """inner content for suite2p section (called within style context)."""
     INPUT_WIDTH = 120
 
+    # self.s2p is a lazy property: returns None when HAS_SUITE2P is False
+    # or when the lazy import failed. bail early so the later rows
+    # (`self.s2p.do_registration`, etc.) don't raise AttributeError
+    # mid-table and leave imgui's table scope open.
+    if self.s2p is None:
+        imgui.text_colored(
+            imgui.ImVec4(1.0, 0.7, 0.2, 1.0),
+            "Suite2p is not installed."
+        )
+        imgui.text("Install with:")
+        imgui.text_colored(
+            imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
+            "uv pip install mbo_utilities[suite2p]"
+        )
+        return
+
     # initialize selection state (timepoints, z-planes, channels)
     max_frames, num_planes, num_channels = _init_s2p_selection_state(self)
 
@@ -796,6 +1008,51 @@ def _draw_section_suite2p_content(self):
         self._saveas_popup_open = True
         self._saveas_select_metadata_tab = True
     set_tooltip("Edit dataset metadata prior to processing")
+
+    # --- Device badge (torch_device from Main settings) ---------------------
+    # show the current torch device + its real-world availability so users
+    # see at a glance whether the run will actually use GPU. cached per
+    # frame to avoid re-probing torch.cuda every frame.
+    imgui.same_line()
+    if not hasattr(self, "_device_probe_cache"):
+        self._device_probe_cache = {}
+    device_setting = getattr(self.s2p, "torch_device", "cuda")
+    probe_key = device_setting
+    if probe_key not in self._device_probe_cache:
+        actual = device_setting
+        reason = ""
+        try:
+            import torch
+            if device_setting == "cuda":
+                if not torch.cuda.is_available():
+                    actual = "cpu"
+                    reason = "CUDA unavailable at runtime; will fall back to CPU"
+            elif device_setting == "mps":
+                mps_ok = getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+                if not mps_ok:
+                    actual = "cpu"
+                    reason = "MPS unavailable at runtime; will fall back to CPU"
+        except ImportError:
+            actual = "cpu"
+            reason = "torch not installed"
+        self._device_probe_cache[probe_key] = (actual, reason)
+    actual_device, probe_reason = self._device_probe_cache[probe_key]
+
+    gpu_like = actual_device in ("cuda", "mps")
+    if actual_device == device_setting:
+        label = f"[{device_setting.upper()}]"
+        color = imgui.ImVec4(0.3, 0.85, 0.3, 1.0) if gpu_like else imgui.ImVec4(0.75, 0.75, 0.75, 1.0)
+        tip = (
+            f"Compute device: {device_setting} (GPU accelerated)"
+            if gpu_like else
+            "Compute device: cpu (no GPU acceleration)"
+        ) + "\nChange via Run → Main → Settings → Torch Device"
+    else:
+        label = f"[{device_setting.upper()}→{actual_device.upper()}]"
+        color = imgui.ImVec4(1.0, 0.8, 0.2, 1.0)
+        tip = f"{probe_reason}\nChange via Run → Main → Settings → Torch Device"
+    imgui.text_colored(color, label)
+    set_tooltip(tip)
 
     # draw the selection popup
     _draw_s2p_selection_popup(self)
@@ -870,13 +1127,42 @@ def _draw_section_suite2p_content(self):
     # alongside Registration / ROI Detection / etc., so it follows the
     # same begin_popup_modal lifecycle as every other settings panel) ---
     def draw_main_settings():
-        # Tau / denoise
+        # --- Torch device (top-level upstream setting) ----------------------
+        device_options = ["cuda", "cpu", "mps"]
+        current_device_idx = (
+            device_options.index(self.s2p.torch_device)
+            if self.s2p.torch_device in device_options
+            else 0
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        device_changed, selected_device_idx = imgui.combo(
+            "Torch Device", current_device_idx, device_options
+        )
+        if device_changed:
+            self.s2p.torch_device = device_options[selected_device_idx]
+            # badge probes torch.cuda once and caches; drop that cache so
+            # the badge reflects the new setting on the next frame
+            if hasattr(self, "_device_probe_cache"):
+                self._device_probe_cache.clear()
+        set_tooltip(
+            "GPU device for registration / detection / extraction / dcnv.\n"
+            "'cuda' falls back to 'cpu' at runtime if allocation fails."
+        )
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        # Tau / fs / denoise
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
         set_tooltip(
             "Calcium indicator decay timescale in seconds.\n"
             "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
         )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.fs = imgui.input_float("Sampling Rate (Hz)", self.s2p.fs)
+        set_tooltip("Per-plane sampling rate in Hz; drives baseline window sizing.")
         _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
         set_tooltip("Denoise binned movie before cell detection.")
 
@@ -885,13 +1171,13 @@ def _draw_section_suite2p_content(self):
         imgui.spacing()
 
         # processing control options
-        _, self.s2p.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p.keep_raw)
+        _, self.s2p_extras.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p_extras.keep_raw)
         set_tooltip("Keep data_raw.bin after processing (uses disk space)")
-        _, self.s2p.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p.keep_reg)
+        _, self.s2p_extras.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p_extras.keep_reg)
         set_tooltip("Keep data.bin after processing (useful for QC)")
-        _, self.s2p.force_reg = imgui.checkbox("Force Re-registration", self.s2p.force_reg)
+        _, self.s2p_extras.force_reg = imgui.checkbox("Force Re-registration", self.s2p_extras.force_reg)
         set_tooltip("Force re-registration even if already processed")
-        _, self.s2p.force_detect = imgui.checkbox("Force Re-detection", self.s2p.force_detect)
+        _, self.s2p_extras.force_detect = imgui.checkbox("Force Re-detection", self.s2p_extras.force_detect)
         set_tooltip("Force ROI detection even if stat.npy exists")
 
         imgui.spacing()
@@ -901,13 +1187,13 @@ def _draw_section_suite2p_content(self):
         # dF/F settings
         imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "\u0394F/F")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_window_size = imgui.input_int("Window", self.s2p.dff_window_size)
+        _, self.s2p_extras.dff_window_size = imgui.input_int("Window", self.s2p_extras.dff_window_size)
         set_tooltip("Frames for rolling percentile baseline (default: 300)")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_percentile = imgui.input_int("Percentile", self.s2p.dff_percentile)
+        _, self.s2p_extras.dff_percentile = imgui.input_int("Percentile", self.s2p_extras.dff_percentile)
         set_tooltip("Percentile for baseline F\u2080 estimation (default: 20)")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.dff_smooth_window = imgui.input_int("Smooth", self.s2p.dff_smooth_window)
+        _, self.s2p_extras.dff_smooth_window = imgui.input_int("Smooth", self.s2p_extras.dff_smooth_window)
         set_tooltip("Smooth \u0394F/F trace with rolling window (0 = disabled)")
 
         imgui.spacing()
@@ -956,16 +1242,37 @@ def _draw_section_suite2p_content(self):
 
     # --- Registration ---
     def draw_registration_settings():
+        # do_registration is int 0/1/2 in upstream: 0=skip, 1=run, 2=force re-run.
+        # Exposed as three radio buttons on the same row.
+        imgui.text("Run Registration:")
+        imgui.same_line()
+        if imgui.radio_button("Skip##do_reg", self.s2p.do_registration == 0):
+            self.s2p.do_registration = 0
+        imgui.same_line()
+        if imgui.radio_button("Run##do_reg", self.s2p.do_registration == 1):
+            self.s2p.do_registration = 1
+        imgui.same_line()
+        if imgui.radio_button("Force##do_reg", self.s2p.do_registration == 2):
+            self.s2p.do_registration = 2
+        set_tooltip(
+            "0=skip registration entirely\n"
+            "1=run if not already done (default)\n"
+            "2=force re-run even if ops.npy reports registration done"
+        )
+
+        imgui.begin_disabled(self.s2p.do_registration == 0)
+
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.align_by_chan = imgui.input_int(
             "Align by Channel", self.s2p.align_by_chan
         )
-        set_tooltip("Channel index used for alignment (1-based).")
+        set_tooltip("Channel index used for alignment (1-based). "
+                    "Serialized to settings['registration']['align_by_chan2'] = (align_by_chan == 2).")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.nimg_init = imgui.input_int("Initial Frames", self.s2p.nimg_init)
         set_tooltip("Number of frames used to build the reference image.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.batch_size = imgui.input_int("Batch Size", self.s2p.batch_size)
+        _, self.s2p.reg_batch_size = imgui.input_int("Batch Size", self.s2p.reg_batch_size)
         set_tooltip("Number of frames processed per registration batch.")
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.maxregshift = imgui.input_float(
@@ -982,8 +1289,8 @@ def _draw_section_suite2p_content(self):
             "Smooth Sigma Time", self.s2p.smooth_sigma_time
         )
         set_tooltip("Temporal smoothing sigma (frames) before registration.")
-        _, self.s2p.keep_movie_raw = imgui.checkbox(
-            "Keep Raw Movie", self.s2p.keep_movie_raw
+        _, self.s2p_db.keep_movie_raw = imgui.checkbox(
+            "Keep Raw Movie", self.s2p_db.keep_movie_raw
         )
         set_tooltip("Keep unregistered binary movie after processing.")
         _, self.s2p.two_step_registration = imgui.checkbox(
@@ -1008,41 +1315,41 @@ def _draw_section_suite2p_content(self):
             "Normalize Frames", self.s2p.norm_frames
         )
         set_tooltip("Normalize frames during registration.")
-        _, self.s2p.force_refImg = imgui.checkbox("Force refImg", self.s2p.force_refImg)
+        _, self.s2p_extras.force_refImg = imgui.checkbox("Force refImg", self.s2p_extras.force_refImg)
         set_tooltip("Use stored reference image instead of recomputing.")
-        _, self.s2p.pad_fft = imgui.checkbox("Pad FFT", self.s2p.pad_fft)
+        _, self.s2p_extras.pad_fft = imgui.checkbox("Pad FFT", self.s2p_extras.pad_fft)
         set_tooltip("Pad image for FFT registration to reduce edge artifacts.")
 
         imgui.spacing()
         imgui.text("Channel 2 File:")
         imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-        imgui.text(self.s2p.chan2_file if self.s2p.chan2_file else "(none)")
+        imgui.text(self.s2p_extras.chan2_file if self.s2p_extras.chan2_file else "(none)")
         imgui.pop_text_wrap_pos()
         if imgui.button("Browse##chan2"):
             default_dir = str(get_last_dir("suite2p_chan2") or pathlib.Path().home())
             res = pfd.open_file("Select channel 2 file", default_dir)
             if res and res.result():
-                self.s2p.chan2_file = res.result()[0]
+                self.s2p_extras.chan2_file = res.result()[0]
                 set_last_dir("suite2p_chan2", res.result()[0])
         set_tooltip("Path to channel 2 binary file for cross-channel registration.")
 
         if imgui.tree_node("1-Photon Registration"):
-            _, self.s2p.do_1Preg = imgui.checkbox(
-                "Enable 1P Registration", self.s2p.do_1Preg
+            _, self.s2p_extras.do_1Preg = imgui.checkbox(
+                "Enable 1P Registration", self.s2p_extras.do_1Preg
             )
             set_tooltip("Apply high-pass filtering and tapering for 1-photon data.")
 
-            imgui.begin_disabled(not self.s2p.do_1Preg)
+            imgui.begin_disabled(not self.s2p_extras.do_1Preg)
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.spatial_hp_reg = imgui.input_int(
-                "Spatial HP Window", self.s2p.spatial_hp_reg
+            _, self.s2p_extras.spatial_hp_reg = imgui.input_int(
+                "Spatial HP Window", self.s2p_extras.spatial_hp_reg
             )
             set_tooltip(
                 "Window size for spatial high-pass filtering before registration."
             )
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.pre_smooth = imgui.input_float(
-                "Pre-smooth Sigma", self.s2p.pre_smooth
+            _, self.s2p_extras.pre_smooth = imgui.input_float(
+                "Pre-smooth Sigma", self.s2p_extras.pre_smooth
             )
             set_tooltip(
                 "Gaussian smoothing stddev before high-pass filtering (0=disabled)."
@@ -1065,24 +1372,20 @@ def _draw_section_suite2p_content(self):
 
             imgui.begin_disabled(not self.s2p.nonrigid)
 
-            if self.s2p.block_size is None:
-                self.s2p.block_size = [128, 128]
             imgui.set_next_item_width(INPUT_WIDTH)
-            block_y_changed, block_y = imgui.input_int(
-                "Block Height", self.s2p.block_size[0]
+            _, self.s2p.block_size_y = imgui.input_int(
+                "Block Height", self.s2p.block_size_y
             )
             set_tooltip(
                 "Block height for non-rigid registration (power of 2/3 recommended)."
             )
             imgui.set_next_item_width(INPUT_WIDTH)
-            block_x_changed, block_x = imgui.input_int(
-                "Block Width", self.s2p.block_size[1]
+            _, self.s2p.block_size_x = imgui.input_int(
+                "Block Width", self.s2p.block_size_x
             )
             set_tooltip(
                 "Block width for non-rigid registration (power of 2/3 recommended)."
             )
-            if block_y_changed or block_x_changed:
-                self.s2p.block_size = [block_y, block_x]
 
             imgui.set_next_item_width(INPUT_WIDTH)
             _, self.s2p.snr_thresh = imgui.input_float(
@@ -1097,6 +1400,8 @@ def _draw_section_suite2p_content(self):
 
             imgui.end_disabled()
             imgui.tree_pop()
+
+        imgui.end_disabled()  # closes do_registration == 0 gate
 
     # --- ROI Detection ---
     def draw_roi_detection_settings():
@@ -1124,11 +1429,34 @@ def _draw_section_suite2p_content(self):
                 "(Enable anatomical_only to use Cellpose)",
             )
 
+        # Diameter is a 2-float list [dy, dx] upstream. Show as two scalars with
+        # a lock that keeps them synced on edit.
+        if not hasattr(self, "_s2p_diameter_lock"):
+            self._s2p_diameter_lock = True
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.diameter = imgui.input_int("Cell Diameter", self.s2p.diameter)
+        dy_changed, dy = imgui.input_float("Diameter Y (px)", self.s2p.diameter_y)
         set_tooltip(
-            "Expected cell diameter in pixels (6 = LBM default for ~6μm cells). Passed to Cellpose."
+            "Expected cell diameter (Y axis) in pixels. Passed to Cellpose.\n"
+            "Upstream default: 12."
         )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        dx_changed, dx = imgui.input_float("Diameter X (px)", self.s2p.diameter_x)
+        set_tooltip(
+            "Expected cell diameter (X axis) in pixels. Passed to Cellpose.\n"
+            "Upstream default: 12."
+        )
+        _, self._s2p_diameter_lock = imgui.checkbox(
+            "Lock Y/X", self._s2p_diameter_lock
+        )
+        set_tooltip("Keep diameter_y and diameter_x in sync when editing either.")
+        if dy_changed:
+            self.s2p.diameter_y = dy
+            if self._s2p_diameter_lock:
+                self.s2p.diameter_x = dy
+        if dx_changed:
+            self.s2p.diameter_x = dx
+            if self._s2p_diameter_lock:
+                self.s2p.diameter_y = dx
         imgui.set_next_item_width(INPUT_WIDTH)
         _, self.s2p.cellprob_threshold = imgui.input_float(
             "CellProb Threshold", self.s2p.cellprob_threshold
@@ -1157,8 +1485,8 @@ def _draw_section_suite2p_content(self):
             "LBM default: 0 (flow checking disabled)"
         )
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.spatial_hp_cp = imgui.input_float(
-            "Spatial HP (Cellpose)", self.s2p.spatial_hp_cp
+        _, self.s2p.highpass_spatial = imgui.input_float(
+            "Spatial HP (Cellpose)", self.s2p.highpass_spatial
         )
         set_tooltip(
             "Spatial high-pass filtering before Cellpose, as a multiple of diameter.\n"
@@ -1177,8 +1505,8 @@ def _draw_section_suite2p_content(self):
                 )
 
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.functional_chan = imgui.input_int(
-                "Functional Channel", self.s2p.functional_chan
+            _, self.s2p_db.functional_chan = imgui.input_int(
+                "Functional Channel", self.s2p_db.functional_chan
             )
             set_tooltip("Channel used for functional ROI extraction (1-based).")
             _, self.s2p.sparse_mode = imgui.checkbox(
@@ -1219,12 +1547,12 @@ def _draw_section_suite2p_content(self):
         _, self.s2p.max_overlap = imgui.input_float("Max Overlap", self.s2p.max_overlap)
         set_tooltip("Maximum allowed fraction of overlapping ROI pixels.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.high_pass = imgui.input_int("High-Pass Window", self.s2p.high_pass)
+        _, self.s2p.highpass_time = imgui.input_int("High-Pass Window", self.s2p.highpass_time)
         set_tooltip("Running mean subtraction window for temporal high-pass filtering.")
         _, self.s2p.smooth_masks = imgui.checkbox("Smooth Masks", self.s2p.smooth_masks)
         set_tooltip("Smooth masks in the final ROI detection pass.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.nbinned = imgui.input_int("Max Binned Frames", self.s2p.nbinned)
+        _, self.s2p.nbins = imgui.input_int("Max Binned Frames", self.s2p.nbins)
         set_tooltip("Maximum number of binned frames for ROI detection.")
 
     # --- Signal Extraction ---
@@ -1281,15 +1609,25 @@ def _draw_section_suite2p_content(self):
     # --- Spike Deconvolution ---
     def draw_spike_deconv_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.neucoeff = imgui.input_float(
-            "Neuropil Coefficient", self.s2p.neucoeff
+        _, self.s2p.neuropil_coefficient = imgui.input_float(
+            "Neuropil Coefficient", self.s2p.neuropil_coefficient
         )
         set_tooltip(
             "Neuropil coefficient for all ROIs (F_corrected = F - coeff * F_neu)."
         )
 
-        # Baseline method as combo box
-        baseline_options = ["maximin", "constant", "constant_percentile"]
+        # Baseline method as combo box. Upstream spelling is "prctile"
+        # (not "constant_percentile"); the lbm_suite2p_python db_settings
+        # helper round-trips it to the fork's "constant_prctile" literal
+        # at pipeline entry so the fork's dcnv.preprocess still branches.
+        baseline_options = ["maximin", "constant", "prctile"]
+        # accept legacy values silently; normalize to upstream spelling
+        _legacy_map = {
+            "constant_percentile": "prctile",
+            "constant_prctile": "prctile",
+        }
+        if self.s2p.baseline in _legacy_map:
+            self.s2p.baseline = _legacy_map[self.s2p.baseline]
         current_baseline_idx = (
             baseline_options.index(self.s2p.baseline)
             if self.s2p.baseline in baseline_options
@@ -1302,9 +1640,9 @@ def _draw_section_suite2p_content(self):
         if baseline_changed:
             self.s2p.baseline = baseline_options[selected_baseline_idx]
         set_tooltip(
-            "maximin: moving baseline with min/max filters. "
-            "constant: minimum of Gaussian-filtered trace. "
-            "constant_percentile: percentile of trace."
+            "maximin: moving baseline with min/max filters.\n"
+            "constant: minimum of Gaussian-filtered trace.\n"
+            "prctile: percentile of trace (controlled by 'Baseline Percentile')."
         )
 
         imgui.set_next_item_width(INPUT_WIDTH)
@@ -1321,7 +1659,7 @@ def _draw_section_suite2p_content(self):
         _, self.s2p.prctile_baseline = imgui.input_float(
             "Baseline Percentile", self.s2p.prctile_baseline
         )
-        set_tooltip("Percentile of trace for constant_percentile baseline method.")
+        set_tooltip("Percentile of trace for 'prctile' baseline method.")
 
     # --- Output Settings ---
     def draw_output_settings():
@@ -1330,7 +1668,7 @@ def _draw_section_suite2p_content(self):
             "Preclassify Threshold", self.s2p.preclassify
         )
         set_tooltip("Probability threshold to apply classifier before extraction.")
-        _, self.s2p.save_nwb = imgui.checkbox("Save NWB", self.s2p.save_nwb)
+        _, self.s2p.save_NWB = imgui.checkbox("Save NWB", self.s2p.save_NWB)
         _, self.s2p.save_mat = imgui.checkbox("Save MATLAB File", self.s2p.save_mat)
         set_tooltip("Export results to Fall.mat for MATLAB analysis.")
         _, self.s2p.combined = imgui.checkbox(
@@ -1338,9 +1676,9 @@ def _draw_section_suite2p_content(self):
         )
         set_tooltip("Combine per-plane results into one GUI-loadable folder.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.aspect = imgui.input_float("Aspect Ratio", self.s2p.aspect)
+        _, self.s2p_extras.aspect = imgui.input_float("Aspect Ratio", self.s2p_extras.aspect)
         set_tooltip("um/pixel ratio X/Y for correct GUI aspect display.")
-        _, self.s2p.report_time = imgui.checkbox("Report Timing", self.s2p.report_time)
+        _, self.s2p_extras.report_time = imgui.checkbox("Report Timing", self.s2p_extras.report_time)
         set_tooltip("Return timing dictionary for each processing stage.")
 
         # Channel 2 settings
@@ -1348,299 +1686,314 @@ def _draw_section_suite2p_content(self):
         imgui.separator()
         imgui.text("Channel 2:")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.chan2_thres = imgui.input_float(
-            "Chan2 Detection Threshold", self.s2p.chan2_thres
+        _, self.s2p.chan2_threshold = imgui.input_float(
+            "Chan2 Detection Threshold", self.s2p.chan2_threshold
         )
         set_tooltip("Threshold for calling ROI detected on channel 2.")
 
     # === PIPELINE SETTINGS TABLE ===
     # tabular layout: [checkbox/empty] | [label] | [settings button]
+    # wrapped in try/finally: draw_run_tab catches exceptions from
+    # pipeline.draw(), so any attribute error in a row (e.g. self.s2p
+    # returning None) would otherwise leave end_table uncalled and
+    # surface as "Missing EndTable()" on the outer imgui.end().
     table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
     if imgui.begin_table("pipeline_settings_table", 3, table_flags):
-        imgui.table_setup_column("checkbox", imgui.TableColumnFlags_.width_fixed, 24)
-        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, 100)
-        imgui.table_setup_column("button", imgui.TableColumnFlags_.width_stretch)
+        try:
+            imgui.table_setup_column("checkbox", imgui.TableColumnFlags_.width_fixed, 24)
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, 100)
+            imgui.table_setup_column("button", imgui.TableColumnFlags_.width_stretch)
 
-        # --- Main settings row (no checkbox) ---
-        imgui.table_next_row()
-        imgui.table_next_column()  # empty checkbox column
-        imgui.table_next_column()
-        imgui.text("Main")
-        imgui.table_next_column()
-        if imgui.button("Settings##main"):
-            _popup_states["main_settings"] = True
-            imgui.open_popup("Main##main_settings")
-        set_tooltip("Main Suite2p parameters (Tau, denoise, dF/F, etc.)")
+            # --- Main settings row (no checkbox) ---
+            imgui.table_next_row()
+            imgui.table_next_column()  # empty checkbox column
+            imgui.table_next_column()
+            imgui.text("Main")
+            imgui.table_next_column()
+            if imgui.button("Settings##main"):
+                _popup_states["main_settings"] = True
+                imgui.open_popup("Main##main_settings")
+            set_tooltip("Main Suite2p parameters (Tau, denoise, dF/F, etc.)")
 
-        # --- Data Options row (no checkbox) - shows available data-specific widgets ---
-        imgui.table_next_row()
-        imgui.table_next_column()  # empty checkbox column
-        imgui.table_next_column()
-        imgui.text("Data Options")
-        imgui.table_next_column()
-        if imgui.button("Settings##data_opts"):
-            _popup_states["data_options"] = True
-            imgui.open_popup("Data Options##data_options")
-        set_tooltip("Data-specific options (scan-phase correction, frame averaging, etc.)")
+            # --- Data Options row (no checkbox) - shows available data-specific widgets ---
+            imgui.table_next_row()
+            imgui.table_next_column()  # empty checkbox column
+            imgui.table_next_column()
+            imgui.text("Data Options")
+            imgui.table_next_column()
+            if imgui.button("Settings##data_opts"):
+                _popup_states["data_options"] = True
+                imgui.open_popup("Data Options##data_options")
+            set_tooltip("Data-specific options (scan-phase correction, frame averaging, etc.)")
 
-        # --- Registration row (with checkbox) ---
-        imgui.table_next_row()
-        imgui.table_next_column()
-        _, self.s2p.do_registration = imgui.checkbox("##reg_cb", self.s2p.do_registration)
-        set_tooltip("Enable/disable motion registration")
-        imgui.table_next_column()
-        imgui.text("Registration")
-        imgui.table_next_column()
-        if imgui.button("Settings##reg"):
-            _popup_states["reg_settings"] = True
-            imgui.open_popup("Registration##reg_settings")
-        set_tooltip("Configure motion correction and registration parameters")
+            # --- Registration row (with checkbox) ---
+            # do_registration is an int 0/1/2 upstream; the table-level control
+            # is a simple on/off toggle that flips between 0 and 1 (user can
+            # pick 2=Force inside the Registration popup).
+            imgui.table_next_row()
+            imgui.table_next_column()
+            _reg_on = self.s2p.do_registration != 0
+            _reg_changed, _reg_on = imgui.checkbox("##reg_cb", _reg_on)
+            if _reg_changed:
+                self.s2p.do_registration = 1 if _reg_on else 0
+            set_tooltip("Enable/disable motion registration (open popup for Skip/Run/Force)")
+            imgui.table_next_column()
+            imgui.text("Registration")
+            imgui.table_next_column()
+            if imgui.button("Settings##reg"):
+                _popup_states["reg_settings"] = True
+                imgui.open_popup("Registration##reg_settings")
+            set_tooltip("Configure motion correction and registration parameters")
 
-        # --- ROI Detection row (with checkbox) ---
-        imgui.table_next_row()
-        imgui.table_next_column()
-        _, self.s2p.roidetect = imgui.checkbox("##roi_cb", self.s2p.roidetect)
-        set_tooltip("Enable/disable ROI detection")
-        imgui.table_next_column()
-        imgui.text("ROI Detection")
-        imgui.table_next_column()
-        if imgui.button("Settings##roi"):
-            _popup_states["roi_settings"] = True
-            imgui.open_popup("ROI Detection##roi_settings")
-        set_tooltip("Configure cell detection parameters")
+            # --- ROI Detection row (with checkbox) ---
+            imgui.table_next_row()
+            imgui.table_next_column()
+            _, self.s2p.do_detection = imgui.checkbox("##roi_cb", self.s2p.do_detection)
+            set_tooltip("Enable/disable ROI detection")
+            imgui.table_next_column()
+            imgui.text("ROI Detection")
+            imgui.table_next_column()
+            if imgui.button("Settings##roi"):
+                _popup_states["roi_settings"] = True
+                imgui.open_popup("ROI Detection##roi_settings")
+            set_tooltip("Configure cell detection parameters")
 
-        # --- Signal Extraction row (with checkbox) ---
-        imgui.table_next_row()
-        imgui.table_next_column()
-        _, self.s2p.neuropil_extract = imgui.checkbox("##extract_cb", self.s2p.neuropil_extract)
-        set_tooltip("Enable/disable signal extraction")
-        imgui.table_next_column()
-        imgui.text("Signal Extraction")
-        imgui.table_next_column()
-        if imgui.button("Settings##extract"):
-            _popup_states["extract_settings"] = True
-            imgui.open_popup("Signal Extraction##extract_settings")
-        set_tooltip("Configure signal extraction parameters")
+            # --- Signal Extraction row (with checkbox) ---
+            imgui.table_next_row()
+            imgui.table_next_column()
+            _, self.s2p.neuropil_extract = imgui.checkbox("##extract_cb", self.s2p.neuropil_extract)
+            set_tooltip("Enable/disable signal extraction")
+            imgui.table_next_column()
+            imgui.text("Signal Extraction")
+            imgui.table_next_column()
+            if imgui.button("Settings##extract"):
+                _popup_states["extract_settings"] = True
+                imgui.open_popup("Signal Extraction##extract_settings")
+            set_tooltip("Configure signal extraction parameters")
 
-        # --- Classification row ---
-        imgui.table_next_row()
-        imgui.table_next_column()
-        _, self.s2p.use_builtin_classifier = imgui.checkbox("##classify_cb", self.s2p.use_builtin_classifier)
-        set_tooltip("Enable/disable ROI classification")
-        imgui.table_next_column()
-        imgui.text("Classification")
-        imgui.table_next_column()
-        if imgui.button("Settings##classify"):
-            _popup_states["classify_settings"] = True
-            imgui.open_popup("Classification##classify_settings")
-        set_tooltip("Configure ROI classification settings")
+            # --- Classification row ---
+            imgui.table_next_row()
+            imgui.table_next_column()
+            _, self.s2p.use_builtin_classifier = imgui.checkbox("##classify_cb", self.s2p.use_builtin_classifier)
+            set_tooltip("Enable/disable ROI classification")
+            imgui.table_next_column()
+            imgui.text("Classification")
+            imgui.table_next_column()
+            if imgui.button("Settings##classify"):
+                _popup_states["classify_settings"] = True
+                imgui.open_popup("Classification##classify_settings")
+            set_tooltip("Configure ROI classification settings")
 
-        # --- Spike Deconvolution row (with checkbox) ---
-        imgui.table_next_row()
-        imgui.table_next_column()
-        _, self.s2p.spikedetect = imgui.checkbox("##spike_cb", self.s2p.spikedetect)
-        set_tooltip("Enable/disable spike deconvolution")
-        imgui.table_next_column()
-        imgui.text("Spike Deconv")
-        imgui.table_next_column()
-        if imgui.button("Settings##spike"):
-            _popup_states["spike_settings"] = True
-            imgui.open_popup("Spike Deconv##spike_settings")
-        set_tooltip("Configure spike deconvolution parameters")
+            # --- Spike Deconvolution row (with checkbox) ---
+            imgui.table_next_row()
+            imgui.table_next_column()
+            _, self.s2p.do_deconvolution = imgui.checkbox("##spike_cb", self.s2p.do_deconvolution)
+            set_tooltip("Enable/disable spike deconvolution")
+            imgui.table_next_column()
+            imgui.text("Spike Deconv")
+            imgui.table_next_column()
+            if imgui.button("Settings##spike"):
+                _popup_states["spike_settings"] = True
+                imgui.open_popup("Spike Deconv##spike_settings")
+            set_tooltip("Configure spike deconvolution parameters")
 
-        # --- Output row (no checkbox) ---
-        imgui.table_next_row()
-        imgui.table_next_column()  # empty checkbox column
-        imgui.table_next_column()
-        imgui.text("Output")
-        imgui.table_next_column()
-        if imgui.button("Settings##output"):
-            _popup_states["output_settings"] = True
-            imgui.open_popup("Output##output_settings")
-        set_tooltip("Configure output options")
+            # --- Output row (no checkbox) ---
+            imgui.table_next_row()
+            imgui.table_next_column()  # empty checkbox column
+            imgui.table_next_column()
+            imgui.text("Output")
+            imgui.table_next_column()
+            if imgui.button("Settings##output"):
+                _popup_states["output_settings"] = True
+                imgui.open_popup("Output##output_settings")
+            set_tooltip("Configure output options")
 
-        # --- Draw all popups (inside table context) ---
+            # --- Draw all popups INSIDE the table/if-block ---
+            # imgui's open_popup → begin_popup_modal chain only fires when
+            # both live under the same parent scope. Moving the popup
+            # begins outside `if imgui.begin_table(...)` makes the open_popup
+            # calls (which happen inside the if) unreachable from the popup
+            # begins (which happen outside), and the modals silently never
+            # appear. Keep them in-scope; imgui handles popup windows as
+            # their own layer regardless of the surrounding table.
 
-        # Main settings popup — same modal lifecycle as the rest of the
-        # rows below. Previously this was a free-floating non-modal popup
-        # owned by `_draw_s2p_settings_popup`, which rendered as a
-        # separate window outside the table context.
-        imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Main##main_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["main_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_main_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##main", imgui.ImVec2(80, 0)):
+            # Main settings popup
+            imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "Main##main_settings",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["main_settings"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
+                    else:
+                        draw_main_settings()
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##main", imgui.ImVec2(80, 0)):
+                            _popup_states["main_settings"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
 
-        # Registration popup
-        imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Registration##reg_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["reg_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_registration_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##reg", imgui.ImVec2(80, 0)):
+            # Registration popup
+            imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "Registration##reg_settings",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["reg_settings"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
+                    else:
+                        draw_registration_settings()
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##reg", imgui.ImVec2(80, 0)):
+                            _popup_states["reg_settings"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
 
-        # ROI Detection popup
-        imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "ROI Detection##roi_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["roi_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_roi_detection_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##roi", imgui.ImVec2(80, 0)):
+            # ROI Detection popup
+            imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "ROI Detection##roi_settings",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["roi_settings"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
+                    else:
+                        draw_roi_detection_settings()
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##roi", imgui.ImVec2(80, 0)):
+                            _popup_states["roi_settings"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
 
-        # Signal Extraction popup
-        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Signal Extraction##extract_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["extract_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_signal_extraction_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##extract", imgui.ImVec2(80, 0)):
+            # Signal Extraction popup
+            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "Signal Extraction##extract_settings",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["extract_settings"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
+                    else:
+                        draw_signal_extraction_settings()
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##extract", imgui.ImVec2(80, 0)):
+                            _popup_states["extract_settings"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
 
-        # Classification popup
-        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Classification##classify_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["classify_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_classification_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##classify", imgui.ImVec2(80, 0)):
+            # Classification popup
+            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "Classification##classify_settings",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["classify_settings"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
+                    else:
+                        draw_classification_settings()
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##classify", imgui.ImVec2(80, 0)):
+                            _popup_states["classify_settings"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
 
-        # Spike Deconv popup
-        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Spike Deconv##spike_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["spike_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_spike_deconv_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##spike", imgui.ImVec2(80, 0)):
+            # Spike Deconv popup
+            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "Spike Deconv##spike_settings",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["spike_settings"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
+                    else:
+                        draw_spike_deconv_settings()
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##spike", imgui.ImVec2(80, 0)):
+                            _popup_states["spike_settings"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
 
-        # Output popup
-        imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Output##output_settings",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["output_settings"] = False
-                    imgui.close_current_popup()
-                else:
-                    draw_output_settings()
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##output", imgui.ImVec2(80, 0)):
+            # Output popup
+            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "Output##output_settings",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["output_settings"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
+                    else:
+                        draw_output_settings()
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##output", imgui.ImVec2(80, 0)):
+                            _popup_states["output_settings"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
 
-        # Data Options popup - shows data settings that affect Suite2p processing
-        imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
-        opened, visible = imgui.begin_popup_modal(
-            "Data Options##data_options",
-            p_open=True,
-            flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-        )
-        if opened:
-            try:
-                if not visible:
-                    _popup_states["data_options"] = False
-                    imgui.close_current_popup()
-                else:
-                    _draw_data_options_content(self)
-                    imgui.spacing()
-                    imgui.separator()
-                    if imgui.button("Close##data_opts", imgui.ImVec2(80, 0)):
+            # Data Options popup - shows data settings that affect Suite2p processing
+            imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
+            opened, visible = imgui.begin_popup_modal(
+                "Data Options##data_options",
+                p_open=True,
+                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+            )
+            if opened:
+                try:
+                    if not visible:
                         _popup_states["data_options"] = False
                         imgui.close_current_popup()
-            finally:
-                imgui.end_popup()
-
-        imgui.end_table()
+                    else:
+                        _draw_data_options_content(self)
+                        imgui.spacing()
+                        imgui.separator()
+                        if imgui.button("Close##data_opts", imgui.ImVec2(80, 0)):
+                            _popup_states["data_options"] = False
+                            imgui.close_current_popup()
+                finally:
+                    imgui.end_popup()
+        finally:
+            imgui.end_table()
 
 
 def _build_channel_dirname(self, channel: int) -> str:
@@ -1745,8 +2098,13 @@ def run_process(self):
                     "output_dir": output_dir,
                     "planes": sorted(selected_planes),
                     "roi": roi,
-                    "num_timepoints": self.s2p.target_timepoints,
-                    "ops": self.s2p.to_dict(),
+                    "num_timepoints": self.s2p_extras.target_timepoints,
+                    # upstream-shaped pair; the subprocess entry point flattens
+                    # these into ops via lbm_suite2p_python.db_settings. `ops`
+                    # is intentionally omitted — settings+db is the canonical
+                    # config path going forward.
+                    "settings": self.s2p.to_dict(),
+                    "db": self.s2p_db.to_dict(),
                     "fix_phase": self._s2p_fix_phase,
                     "use_fft": self._s2p_use_fft,
                     "channel": channel if (multi_channel or has_channels) else None,
@@ -1767,20 +2125,18 @@ def run_process(self):
                     # FULL list of selected planes (0-based) — for
                     # reactive dz scaling via OutputMetadata.
                     "selected_planes_0based": [p - 1 for p in sorted(selected_planes)],
-                    # axial z-registration via suite3d
+                    # axial registration
                     "register_z": getattr(self, "_register_z", False),
-                    # suite3d resource knobs (mirror of save-as dialog)
-                    "s3d_n_proc_corr": getattr(self, "_s3d_n_proc_corr", 4),
-                    "s3d_init_n_frames": getattr(self, "_s3d_init_n_frames", 500),
-                    "s3d_n_init_files": getattr(self, "_s3d_n_init_files", 1),
+                    "max_frames": getattr(self, "_axial_max_frames", 200),
+                    "max_reg_xy": getattr(self, "_axial_max_reg_xy", 150),
                     "s2p_settings": {
-                        "keep_raw": self.s2p.keep_raw,
-                        "keep_reg": self.s2p.keep_reg,
-                        "force_reg": self.s2p.force_reg,
-                        "force_detect": self.s2p.force_detect,
-                        "dff_window_size": self.s2p.dff_window_size,
-                        "dff_percentile": self.s2p.dff_percentile,
-                        "dff_smooth_window": self.s2p.dff_smooth_window,
+                        "keep_raw": self.s2p_extras.keep_raw,
+                        "keep_reg": self.s2p_extras.keep_reg,
+                        "force_reg": self.s2p_extras.force_reg,
+                        "force_detect": self.s2p_extras.force_detect,
+                        "dff_window_size": self.s2p_extras.dff_window_size,
+                        "dff_percentile": self.s2p_extras.dff_percentile,
+                        "dff_smooth_window": self.s2p_extras.dff_smooth_window,
                     },
                 }
 
@@ -1815,16 +2171,17 @@ def run_process(self):
                 self, "_saveas_outdir", ""
             )
 
-            # Pre-extract shared state
-            s2p_dict = self.s2p.to_dict()
-            target_timepoints = self.s2p.target_timepoints
-            keep_raw = self.s2p.keep_raw
-            keep_reg = self.s2p.keep_reg
-            force_reg = self.s2p.force_reg
-            force_detect = self.s2p.force_detect
-            dff_window_size = self.s2p.dff_window_size
-            dff_percentile = self.s2p.dff_percentile
-            dff_smooth_window = self.s2p.dff_smooth_window
+            # Pre-extract shared state (upstream-shaped dicts for settings/db)
+            s2p_settings_dict = self.s2p.to_dict()
+            s2p_db_dict = self.s2p_db.to_dict()
+            target_timepoints = self.s2p_extras.target_timepoints
+            keep_raw = self.s2p_extras.keep_raw
+            keep_reg = self.s2p_extras.keep_reg
+            force_reg = self.s2p_extras.force_reg
+            force_detect = self.s2p_extras.force_detect
+            dff_window_size = self.s2p_extras.dff_window_size
+            dff_percentile = self.s2p_extras.dff_percentile
+            dff_smooth_window = self.s2p_extras.dff_smooth_window
             fix_phase = getattr(self, "_s2p_fix_phase", False)
             use_fft = getattr(self, "_s2p_use_fft", False)
 
@@ -1872,6 +2229,7 @@ def run_process(self):
                             plane_dir = base_out / f"plane{z_plane:02d}_stitched"
                             roi = None
 
+                        import copy as _copy
                         config = {
                             "arr": _arr,
                             "arr_idx": i,
@@ -1881,7 +2239,8 @@ def run_process(self):
                             "base_out": base_out,
                             "plane_dir": plane_dir,
                             "roi": roi,
-                            "s2p_dict": s2p_dict.copy(),
+                            "s2p_settings_dict": _copy.deepcopy(s2p_settings_dict),
+                            "s2p_db_dict": _copy.deepcopy(s2p_db_dict),
                             "target_timepoints": target_timepoints,
                             "fpath": fpath_str,
                             "keep_raw": keep_raw,
@@ -1915,7 +2274,12 @@ def run_process(self):
 
                         # Fix Issue 2: restrict Suite2p to single internal process if using ThreadPoolExecutor
                         if use_parallel:
-                            config["s2p_dict"]["num_workers"] = 0
+                            # num_workers isn't part of upstream's schema but the
+                            # fork reads it off the flat ops dict; inject into
+                            # settings via an extra key that survives the
+                            # flatten (db_settings_to_ops preserves unknown
+                            # top-level keys).
+                            config["num_workers_override"] = 0
 
                         jobs.append(config)
 
@@ -2091,16 +2455,45 @@ def _run_plane_worker_thread(config):
         f"z-stride from {len(selected_planes_0based) if selected_planes_0based else 0} planes)"
     )
 
-    from lbm_suite2p_python import default_ops
+    # Build upstream-shaped (settings, db) dicts from the GUI dataclasses.
+    # settings is nested; db is flat. The lbm_suite2p_python patch flattens
+    # these to a legacy ops dict at run_plane entry and writes db.npy /
+    # settings.npy siblings for every ops.npy write.
+    settings_dict = config["s2p_settings_dict"]
+    db_dict = config["s2p_db_dict"]
 
-    ops = config["s2p_dict"].copy()
-    defaults = default_ops()
-    defaults.update(ops)
-    defaults.update(md)
+    # Merge reactive metadata (fs/dz/dx/dy plus per-plane bookkeeping)
+    # into the right halves. Keys that map to upstream go into the
+    # appropriate dict; anything unknown falls through via extra_ops.
+    extra_ops: dict = {}
+    _settings_top = {"fs", "tau", "diameter"}
+    _db_keys = {
+        "nplanes", "nchannels", "data_path", "save_path0", "fast_disk",
+        "save_folder", "h5py_key", "functional_chan", "nrois",
+    }
+    for key, value in md.items():
+        if key == "fs":
+            settings_dict["fs"] = value
+        elif key in _settings_top:
+            settings_dict[key] = value
+        elif key in _db_keys:
+            db_dict[key] = value
+        else:
+            # voxel size (dx/dy/dz), timepoint aliases, bookkeeping
+            # (process_timestamp, original_file, roi_index, Ly, Lx,
+            # ops_path, save_path, raw_file) — upstream schema has no
+            # home so park on the flat ops dict via lbm's merge helper.
+            extra_ops[key] = value
 
     if channel is not None:
-        defaults["functional_chan"] = 1
-        defaults["align_by_chan"] = 1
+        db_dict["functional_chan"] = 1
+        # align_by_chan2 False (we're aligning by channel 1)
+        settings_dict.setdefault("registration", {})["align_by_chan2"] = False
+
+    # num_workers override (set when parallel plane processing is on) —
+    # upstream doesn't have this key, but the fork reads it off ops.
+    if "num_workers_override" in config:
+        extra_ops["num_workers"] = config["num_workers_override"]
 
     from mbo_utilities.writer import imwrite
 
@@ -2115,6 +2508,15 @@ def _run_plane_worker_thread(config):
     else:
         frames_arg = None
 
+    # imwrite still expects a flat metadata dict. Flatten our (db, settings)
+    # pair so the bin-writer's ops header stays consistent.
+    try:
+        from lbm_suite2p_python.db_settings import db_settings_to_ops
+        metadata_flat = db_settings_to_ops(db_dict, settings_dict)
+    except ImportError:
+        metadata_flat = {**db_dict, **extra_ops}
+    metadata_flat.update(extra_ops)
+
     imwrite(
         arr,
         plane_dir,
@@ -2125,7 +2527,7 @@ def _run_plane_worker_thread(config):
         channels=[channel] if channel is not None else None,
         output_name="data_raw.bin",
         roi=roi,
-        metadata=defaults,
+        metadata=metadata_flat,
         frames=frames_arg,
         num_frames=config["target_timepoints"] if frames_arg is None else None,
         fix_phase=config["fix_phase"],
@@ -2136,18 +2538,32 @@ def _run_plane_worker_thread(config):
 
     raw_file = plane_dir / "data_raw.bin"
 
+    # Write db.npy / settings.npy up-front (the lbm patch also writes them
+    # on every ops.npy save, but producing them BEFORE run_plane starts
+    # gives the user something to inspect even if the pipeline crashes).
+    try:
+        import numpy as _np
+        _np.save(plane_dir / "db.npy", db_dict, allow_pickle=True)
+        _np.save(plane_dir / "settings.npy", settings_dict, allow_pickle=True)
+    except Exception as _e:
+        config["logger"].warning(f"Could not pre-write db.npy/settings.npy: {_e}")
+
     config["logger"].info(
-        f"Suite2p settings - roidetect: {defaults.get('roidetect')}, force_detect: {config['force_detect']}"
+        f"Suite2p run — do_detection: {settings_dict.get('run', {}).get('do_detection')}, "
+        f"force_detect: {config['force_detect']}"
     )
     config["logger"].info(
-        f"Detection params - diameter: {defaults.get('diameter')}, sparse_mode: {defaults.get('sparse_mode')}"
+        f"Detection params — algorithm: {settings_dict.get('detection', {}).get('algorithm')}, "
+        f"diameter: {settings_dict.get('diameter')}"
     )
 
     try:
         run_plane(
             input_path=raw_file,
             save_path=plane_dir,
-            ops=defaults,
+            db=db_dict,
+            settings=settings_dict,
+            ops=extra_ops if extra_ops else None,
             keep_raw=config["keep_raw"],
             keep_reg=config["keep_reg"],
             force_reg=config["force_reg"],

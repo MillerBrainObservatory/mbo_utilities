@@ -285,7 +285,7 @@ def draw_save_options_feature(state=None, **kwargs):
         "Register Z-Planes Axially", state["register_z"]
     )
     imgui.same_line(hello_imgui.em_size(22))
-    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Align z-planes (suite3d)")
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Align z-planes")
 
     _, state["fix_phase"] = imgui.checkbox("Fix Scan Phase", state["fix_phase"])
     imgui.same_line(hello_imgui.em_size(22))

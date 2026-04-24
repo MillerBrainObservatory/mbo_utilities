@@ -107,7 +107,7 @@ def get_env_fingerprint() -> str:
         from importlib.metadata import version, PackageNotFoundError
         # check specific packages directly (faster than iterating all)
         key_packages = [
-            "mbo-utilities", "torch", "suite3d", "lbm-suite2p-python",
+            "mbo-utilities", "torch", "lbm-suite2p-python",
             "rastermap", "imgui-bundle", "fastplotlib", "pyqt6", "napari",
         ]
         installed = []
@@ -339,7 +339,6 @@ def _check_all_packages() -> dict:
     # package definitions: (cache_key, module_to_check, package_name_for_version)
     checks = [
         ("suite2p", "lbm_suite2p_python", "lbm-suite2p-python"),
-        ("suite3d", "suite3d", "suite3d"),
         ("cupy", "cupy", None),  # variant dist names handled below
         ("torch", "torch", "torch"),
         ("rastermap", "rastermap", "rastermap"),
