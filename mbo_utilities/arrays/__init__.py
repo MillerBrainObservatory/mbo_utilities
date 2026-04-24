@@ -81,8 +81,8 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
 
 if TYPE_CHECKING:
     from mbo_utilities.arrays._registration import (
-        register_zplanes_s3d as register_zplanes_s3d,
-        validate_s3d_registration as validate_s3d_registration,
+        compute_axial_shifts as compute_axial_shifts,
+        validate_axial_shifts as validate_axial_shifts,
     )
     from mbo_utilities.arrays.bin import BinArray as BinArray
     from mbo_utilities.arrays.h5 import H5Array as H5Array
@@ -134,8 +134,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ClusterPTArray": (".isoview", "ClusterPTArray"),
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
-    "validate_s3d_registration": ("._registration", "validate_s3d_registration"),
-    "register_zplanes_s3d": ("._registration", "register_zplanes_s3d"),
+    "compute_axial_shifts": ("._registration", "compute_axial_shifts"),
+    "validate_axial_shifts": ("._registration", "validate_axial_shifts"),
     # features subpackage
     "features": (".features", None),
     # ROI mixin
@@ -220,9 +220,9 @@ __all__ = [
     "open_scanimage",
     # Pipeline registration
     "register_all_pipelines",
-    "register_zplanes_s3d",
     # Helpers
     "supports_roi",
     # Registration
-    "validate_s3d_registration",
+    "compute_axial_shifts",
+    "validate_axial_shifts",
 ]
