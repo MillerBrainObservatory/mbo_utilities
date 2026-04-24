@@ -19,8 +19,6 @@ from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_timepoint_selection, TimeSelection
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
-from mbo_utilities.gui._availability import HAS_SUITE3D
-from mbo_utilities.install import cupy_install_hint
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.gui._metadata_editor import _check_missing_metadata, draw_metadata_editor_content
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
@@ -44,7 +42,7 @@ def _get_array_features(widget: Any) -> dict[str, bool]:
     phase_correction : bool
         Array supports bidirectional scan phase correction (ScanImageArray).
     z_registration : bool
-        Z-plane registration available (suite3d installed + multi-plane data).
+        Z-plane registration available (multi-plane raw scanimage data).
     multi_roi : bool
         Array has multiple ROIs that can be saved separately.
     frame_averaging : bool
@@ -63,8 +61,8 @@ def _get_array_features(widget: Any) -> dict[str, bool]:
     return {
         # Phase correction: presence of phase_correction attribute
         "phase_correction": hasattr(data, "phase_correction"),
-        # Z-registration: requires suite3d, multi-plane raw scanimage data
-        "z_registration": HAS_SUITE3D and nz > 1 and getattr(widget, "is_mbo_scan", False),
+        # Z-registration: multi-plane raw scanimage data
+        "z_registration": nz > 1 and getattr(widget, "is_mbo_scan", False),
         # Multi-ROI: data has multiple ROIs
         "multi_roi": getattr(data, "num_rois", 1) > 1,
         # Frame averaging: piezo arrays with multiple frames per slice
@@ -348,71 +346,39 @@ def _draw_options_popup(parent: Any):
         if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
             imgui.begin_tooltip()
             imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
-            if not HAS_SUITE3D:
-                # most common cause: cupy missing or built for the wrong cuda
-                # major. surface the recommended uv pip install line so the
-                # user can fix it without leaving the gui.
-                imgui.text_unformatted(
-                    "Suite3D registration unavailable. The most common cause "
-                    "is that CuPy is not installed or doesn't match your CUDA "
-                    "driver. Try:"
-                )
-                imgui.text_unformatted(f"  {cupy_install_hint()}")
-                imgui.text_unformatted(
-                    "Then restart the GUI. See dependencies popup on the "
-                    "start screen for details."
-                )
-            elif parent.nz <= 1:
+            if parent.nz <= 1:
                 imgui.text_unformatted("Requires multi-plane (4D) data with more than one z-plane.")
             else:
-                imgui.text_unformatted("Register adjacent z-planes to each other using Suite3D.")
+                imgui.text_unformatted(
+                    "Compute per-plane rigid shifts via phase correlation and "
+                    "apply them on write. GPU (cupy) is used automatically if "
+                    "available, otherwise CPU."
+                )
             imgui.pop_text_wrap_pos()
             imgui.end_tooltip()
         if not features.get("z_registration", False):
             imgui.end_disabled()
 
-        # suite3d resource knobs — only relevant when z-registration is on.
-        # n_proc_corr is the big one: each worker reserves a tile-sized
-        # shared-memory block, and on windows that always counts against the
-        # pagefile commit limit even when ram is free. dialing this down
-        # avoids WinError 1455 on machines with modest pagefiles.
         if features.get("z_registration", False) and parent._register_z:
             imgui.indent(16)
-            imgui.text_colored(
-                imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Suite3D resources"
-            )
             imgui.set_next_item_width(80)
             _changed, _val = imgui.input_int(
-                "Workers (n_proc_corr)", parent._s3d_n_proc_corr, 1, 4
+                "Max frames", parent._axial_max_frames, 50, 100
             )
             if _changed:
-                parent._s3d_n_proc_corr = max(1, _val)
+                parent._axial_max_frames = max(10, _val)
             set_tooltip(
-                "Multiprocessing workers for the TIFF load+stitch pass.\n"
-                "Each worker reserves a tile-sized shared-memory block.\n"
-                "Lower this if you hit WinError 1455 (commitment limit) "
-                "or run out of RAM. Default 4."
+                "Frames subsampled (evenly spaced) for the time-mean used to\n"
+                "compute plane shifts. 200 is usually plenty."
             )
 
             imgui.set_next_item_width(80)
             _changed, _val = imgui.input_int(
-                "Init frames", parent._s3d_init_n_frames, 50, 500
+                "Max shift (px)", parent._axial_max_reg_xy, 10, 50
             )
             if _changed:
-                parent._s3d_init_n_frames = max(50, _val)
-            set_tooltip(
-                "Frames pulled into the Suite3D init pass. Lower = less RAM."
-            )
-
-            imgui.set_next_item_width(80)
-            _changed, _val = imgui.input_int(
-                "Init files", parent._s3d_n_init_files, 1, 1
-            )
-            if _changed:
-                parent._s3d_n_init_files = max(1, _val)
-            set_tooltip(
-                "Number of TIFFs read in parallel during init. Default 1."
-            )
+                parent._axial_max_reg_xy = max(1, _val)
+            set_tooltip("Max shift search radius in pixels. Default 150.")
             imgui.unindent(16)
 
         # Phase correction: only show if data supports it
@@ -978,10 +944,8 @@ def _draw_save_button(parent: Any):
                     "phase_upsample": parent.phase_upsample,
                     "border": parent.border,
                     "register_z": parent._register_z,
-                    # suite3d resource knobs — only meaningful when register_z=True
-                    "s3d_n_proc_corr": parent._s3d_n_proc_corr,
-                    "s3d_init_n_frames": parent._s3d_init_n_frames,
-                    "s3d_n_init_files": parent._s3d_n_init_files,
+                    "max_frames": parent._axial_max_frames,
+                    "max_reg_xy": parent._axial_max_reg_xy,
                     "mean_subtraction": parent.mean_subtraction,
                     "progress_callback": lambda frac,
                     current_plane: parent.gui_progress_callback(frac, current_plane),
@@ -1037,10 +1001,8 @@ def _draw_save_button(parent: Any):
                         "fix_phase": parent._saveas_fix_phase,
                         "use_fft": parent._saveas_use_fft,
                         "register_z": parent._register_z,
-                        # suite3d resource knobs picked up by task_save_as
-                        "s3d_n_proc_corr": parent._s3d_n_proc_corr,
-                        "s3d_init_n_frames": parent._s3d_init_n_frames,
-                        "s3d_n_init_files": parent._s3d_n_init_files,
+                        "max_frames": parent._axial_max_frames,
+                        "max_reg_xy": parent._axial_max_reg_xy,
                         "metadata": metadata_overrides if metadata_overrides else {},
                         "kwargs": {
                             "sharded": parent._zarr_sharded if parent._ext == ".zarr" else False,

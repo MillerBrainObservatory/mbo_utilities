@@ -95,10 +95,30 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
         tmp_file = sidecar.with_suffix(".tmp")
         with open(tmp_file, "w") as f:
             json.dump(data, f)
-        tmp_file.replace(sidecar)
+        _atomic_replace(tmp_file, sidecar)
 
     except Exception as e:
         print(f"Failed to update status sidecar: {e}", file=sys.stderr)
+
+
+def _atomic_replace(src: Path, dst: Path, attempts: int = 10, delay: float = 0.05):
+    """Path.replace with retry for windows sharing-violation races.
+
+    the gui opens the sidecar for read with default share flags, which on
+    windows denies rename until the handle closes. a short retry loop
+    clears the contention without blocking the worker meaningfully.
+    """
+    last_err: Exception | None = None
+    for _ in range(attempts):
+        try:
+            src.replace(dst)
+            return
+        except PermissionError as e:
+            last_err = e
+            time.sleep(delay)
+    # final attempt raises so caller can log/surface the real failure
+    if last_err is not None:
+        raise last_err
 
 
 def _start_watchdog(uuid: str | None, logger: logging.Logger):

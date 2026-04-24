@@ -400,7 +400,6 @@ Quick boolean checks for optional dependencies (no import overhead):
 ```python
 from mbo_utilities._installation import (
     HAS_SUITE2P,
-    HAS_SUITE3D,
     HAS_CUPY,
     HAS_TORCH,
     HAS_RASTERMAP,

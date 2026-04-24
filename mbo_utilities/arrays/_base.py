@@ -414,7 +414,8 @@ def _imwrite_base(
     if debug:
         from mbo_utilities import log
         _logger = log.get("writers")
-        _logger.info(f"_imwrite_base: apply_shift={md.get('apply_shift')}, s3d-job={md.get('s3d-job')}")
+        _n_shifts = len(md.get("plane_shifts", [])) if "plane_shifts" in md else 0
+        _logger.info(f"_imwrite_base: apply_shift={md.get('apply_shift')}, plane_shifts={_n_shifts} planes")
 
     if "metadata_overrides" in kwargs:
         overrides = kwargs.pop("metadata_overrides", None)

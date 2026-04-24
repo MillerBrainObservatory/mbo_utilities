@@ -211,16 +211,28 @@ def draw_process_status_indicator(parent: Any):
 
 
 def draw_keybinds_popup(parent: Any):
-    """Draw the keybinds cheatsheet popup."""
+    """Draw the keybinds cheatsheet popup.
+
+    `_show_keybinds_popup` is the desired state: True = should be open,
+    False = should be closed. The 'k' shortcut flips it.
+    """
     if not hasattr(parent, "_show_keybinds_popup"):
         parent._show_keybinds_popup = False
+    if not hasattr(parent, "_keybinds_popup_actually_open"):
+        parent._keybinds_popup_actually_open = False
 
-    if parent._show_keybinds_popup:
+    # sync imgui's popup state with desired state
+    if parent._show_keybinds_popup and not parent._keybinds_popup_actually_open:
         imgui.open_popup("Keybinds")
-        parent._show_keybinds_popup = False
+        parent._keybinds_popup_actually_open = True
 
     imgui.set_next_window_size(imgui.ImVec2(320, 380), imgui.Cond_.first_use_ever)
-    if imgui.begin_popup_modal("Keybinds", flags=imgui.WindowFlags_.no_saved_settings)[0]:
+    popup_open = imgui.begin_popup_modal("Keybinds", flags=imgui.WindowFlags_.no_saved_settings)[0]
+    if popup_open:
+        # if user flipped the flag off (e.g. pressed k again), close the popup
+        if not parent._show_keybinds_popup:
+            imgui.close_current_popup()
+            parent._keybinds_popup_actually_open = False
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Keyboard Shortcuts")
         imgui.separator()
         imgui.dummy(imgui.ImVec2(0, 5))
@@ -240,13 +252,16 @@ def draw_keybinds_popup(parent: Any):
             ("", ""),
             ("View", None),
             ("m", "Toggle metadata viewer"),
-            ("p", "Toggle side panel"),
-            ("v / Enter", "Reset vmin/vmax"),
-            ("c", "Toggle auto-contrast on Z"),
+            ("p / Enter", "Toggle side panel"),
+            ("Space", "Play / pause"),
+            ("v", "Reset vmin/vmax"),
+            ("Shift + V", "Toggle auto-contrast on Z"),
+            ("c", "Toggle fix scan-phase"),
+            ("Shift + C", "Toggle sub-pixel scan-phase"),
             ("", ""),
             ("Help", None),
             ("h / F1", "Open help"),
-            ("k", "Toggle keybinds popup"),
+            ("k", "Open/close this popup"),
         ]
 
         table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
@@ -279,5 +294,11 @@ def draw_keybinds_popup(parent: Any):
         imgui.dummy(imgui.ImVec2(0, 10))
         if imgui.button("Close", imgui.ImVec2(80, 0)):
             imgui.close_current_popup()
+            parent._show_keybinds_popup = False
+            parent._keybinds_popup_actually_open = False
 
         imgui.end_popup()
+    else:
+        # imgui reports popup is not being drawn (e.g. user pressed escape)
+        parent._keybinds_popup_actually_open = False
+        parent._show_keybinds_popup = False

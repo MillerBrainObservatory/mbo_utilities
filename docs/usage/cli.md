@@ -56,7 +56,7 @@ mbo convert input.tiff output/ -n 1000            # first 1000 frames
 |--------|-------------|
 | `--output-suffix` | Custom filename suffix (default: `_stitched` for multi-roi) |
 | `--phasecorr-method` | `mean`, `median`, or `max` |
-| `--register-z` | Z-plane registration via suite3d |
+| `--register-z` | Axial (plane-to-plane) phase-correlation registration |
 | `--ome/--no-ome` | OME-zarr metadata (zarr only) |
 | `--chunk-mb` | Streaming chunk size (default: 100) |
 | `--debug` | Verbose logging |

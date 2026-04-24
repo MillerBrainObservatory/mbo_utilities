@@ -119,7 +119,7 @@ All ScanImage arrays support:
 - **ROI handling**: `arr.roi = None` (stitch all), `arr.roi = 1` (specific ROI), `arr.roi = [1,2]` (multiple)
 - **Phase correction**: `arr.fix_phase = True/False`
 - **Metadata**: `arr.metadata["si"]` contains raw ScanImage headers
-- **Axial Registration**: `suite3d`-based z-plane registration
+- **Axial Registration**: phase-correlation z-plane registration (see `compute_axial_shifts`)
 
 (lbmarray)=
 #### LBMArray

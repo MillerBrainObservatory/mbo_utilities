@@ -189,12 +189,18 @@ _settings_cache = {}
 
 def __getattr__(name: str):
     """Lazy load settings module exports on first access."""
-    if name in ("Suite2pSettings", "draw_suite2p_settings_panel", "draw_section_suite2p"):
+    lazy_names = (
+        "Suite2pSettings",
+        "Suite2pDB",
+        "MboSuite2pExtras",
+        "draw_suite2p_settings_panel",
+        "draw_section_suite2p",
+    )
+    if name in lazy_names:
         if name not in _settings_cache:
             from mbo_utilities.gui.widgets.pipelines import settings
-            _settings_cache["Suite2pSettings"] = settings.Suite2pSettings
-            _settings_cache["draw_suite2p_settings_panel"] = settings.draw_suite2p_settings_panel
-            _settings_cache["draw_section_suite2p"] = settings.draw_section_suite2p
+            for attr in lazy_names:
+                _settings_cache[attr] = getattr(settings, attr)
         return _settings_cache[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -202,6 +208,8 @@ def __getattr__(name: str):
 __all__ = [
     "PipelineWidget",
     "Suite2pSettings",
+    "Suite2pDB",
+    "MboSuite2pExtras",
     "any_pipeline_available",
     "cleanup_pipelines",
     "draw_run_tab",

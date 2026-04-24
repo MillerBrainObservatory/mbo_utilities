@@ -2,7 +2,6 @@
 
 from mbo_utilities.install import (
     HAS_SUITE2P,
-    HAS_SUITE3D,
     HAS_CUPY,
     HAS_TORCH,
     HAS_RASTERMAP,
@@ -18,6 +17,5 @@ __all__ = [
     "HAS_PYQT6",
     "HAS_RASTERMAP",
     "HAS_SUITE2P",
-    "HAS_SUITE3D",
     "HAS_TORCH",
 ]

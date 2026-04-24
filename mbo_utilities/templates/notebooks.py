@@ -143,7 +143,7 @@ IMWRITE_SIGNATURE = '''mbo.imwrite(
     planes=None,  # list | tuple | int | None - z-planes to export (1-based)
     frames=None,  # list | tuple | int | None - timepoints to export (1-based)
     num_frames=None,  # int | None - number of frames to export
-    register_z=False,  # bool - perform z-plane registration via Suite3D
+    register_z=False,  # bool - compute + apply axial plane-to-plane shifts
     roi_mode="concat_y",  # "concat_y" | "separate" - multi-ROI handling
     roi=None,  # int | Sequence[int] | None - specific ROI(s) when separate
     metadata=None,  # dict | None - additional metadata to merge
@@ -153,7 +153,6 @@ IMWRITE_SIGNATURE = '''mbo.imwrite(
     progress_callback=None,  # Callable | None - callback(progress, current_plane)
     debug=False,  # bool - verbose logging
     show_progress=True,  # bool - show tqdm progress bar
-    shift_vectors=None,  # ndarray | None - pre-computed z-shift vectors
     output_name=None,  # str | None - filename for binary output
     output_suffix=None,  # str | None - custom suffix for output filenames
 )'''

@@ -1,7 +1,7 @@
 """installation status checker for mbo_utilities optional dependencies.
 
-checks for proper GPU configuration of suite2p (pytorch), suite3d (cupy),
-and rastermap. provides structured data for CLI and GUI display.
+checks for proper GPU configuration of suite2p (pytorch), cupy, and
+rastermap. provides structured data for CLI and GUI display.
 
 also provides HAS_* flags for quick import checks without actually importing.
 uses environment cache for faster repeated checks.
@@ -33,45 +33,10 @@ def _get_cached_flag(key: str, fallback_check: callable) -> bool:
     return fallback_check()
 
 
-def _has_working_suite3d_from_cache() -> bool | None:
-    """Check cached install_status for a *working* suite3d (cupy GPU OK).
-
-    Returns True/False when the cache is valid, None when the cache is missing
-    so the caller can fall back to a cheap import probe.
-    """
-    try:
-        from mbo_utilities.env_cache import get_cached_install_status
-        status = get_cached_install_status()
-        if status is None:
-            return None
-        suite3d_feat = next((f for f in status.features if f.name == "Suite3D"), None)
-        if suite3d_feat is None:
-            return None
-        return suite3d_feat.status == Status.OK
-    except Exception:
-        return None
-
-
 # HAS_* flags - use cache when available, fallback to direct check
 HAS_SUITE2P: bool = _get_cached_flag(
     "suite2p", lambda: _check_import("lbm_suite2p_python") and _check_import("suite2p")
 )
-def _resolve_has_suite3d() -> bool:
-    """Resolve HAS_SUITE3D.
-
-    Prefer the cached install_status (which knows whether cupy actually
-    initializes the GPU and matches the driver). Fall back to a cheap
-    importability check that requires both `suite3d` and `cupy` to be
-    importable. Note: the cheap fallback can be optimistic — it does not
-    detect a cupy that imports but fails on first GPU call.
-    """
-    cached = _has_working_suite3d_from_cache()
-    if cached is not None:
-        return cached
-    return _check_import("suite3d") and _check_import("cupy")
-
-
-HAS_SUITE3D: bool = _resolve_has_suite3d()
 HAS_CUPY: bool = _get_cached_flag(
     "cupy", lambda: _check_import("cupy")
 )
@@ -310,7 +275,7 @@ def _check_cupy(driver_cuda: str | None = None) -> tuple[FeatureStatus, str | No
                 except (ValueError, IndexError):
                     pass
 
-            # test nvrtc (required for suite3d)
+            # test nvrtc (required for cupy's jit-compiled kernels)
             try:
                 kernel = cp.ElementwiseKernel(
                     "float32 x", "float32 y", "y = x * 2", "test_kernel"
@@ -369,46 +334,6 @@ def _check_suite2p() -> FeatureStatus:
             status=Status.MISSING,
             message="not installed"
         )
-
-
-def _check_suite3d(cupy_status: FeatureStatus | None = None, driver_cuda: str | None = None) -> FeatureStatus:
-    """Check suite3d installation.
-
-    Suite3D requires a working CuPy install. If `cupy_status` indicates CuPy
-    is missing or broken, this returns MISSING with the cupy install hint —
-    importing suite3d alone is not enough to make it usable.
-    """
-    try:
-        import suite3d
-        version = getattr(suite3d, "__version__", "installed")
-    except ImportError:
-        return FeatureStatus(
-            name="Suite3D",
-            status=Status.MISSING,
-            message="not installed",
-        )
-
-    # cupy is mandatory for suite3d preprocessing — if it's missing or broken
-    # the user effectively does not have a working suite3d install.
-    if cupy_status is None or cupy_status.status in (Status.MISSING, Status.ERROR):
-        hint = cupy_install_hint(driver_cuda)
-        if cupy_status is None or cupy_status.status == Status.MISSING:
-            why = "CuPy not installed"
-        else:
-            why = f"CuPy broken: {cupy_status.message}"
-        return FeatureStatus(
-            name="Suite3D",
-            status=Status.MISSING,
-            version=version,
-            message=f"unavailable - {why}. Try: {hint}",
-        )
-
-    return FeatureStatus(
-        name="Suite3D",
-        status=Status.OK,
-        version=version,
-        message="ready",
-    )
 
 
 def _check_rastermap() -> FeatureStatus:
@@ -521,7 +446,7 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
     status.cuda_info.pytorch_cuda = pytorch_cuda
     status.features.append(pytorch_status)
 
-    # check cupy (needed for suite3d)
+    # check cupy (gpu backend for axial registration, optional)
     _update(0.5, "Checking CuPy...")
     cupy_status, cupy_cuda = _check_cupy(driver_cuda=status.cuda_info.driver_version)
     status.cuda_info.cupy_cuda = cupy_cuda
@@ -552,15 +477,6 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
     elif suite2p_status.status == Status.OK:
         suite2p_status.gpu_ok = pytorch_status.gpu_ok
     status.features.append(suite2p_status)
-
-    _update(0.8, "Checking Suite3D...")
-    suite3d_status = _check_suite3d(
-        cupy_status=cupy_status,
-        driver_cuda=status.cuda_info.driver_version,
-    )
-    if suite3d_status.status == Status.OK:
-        suite3d_status.gpu_ok = cupy_status.gpu_ok
-    status.features.append(suite3d_status)
 
     _update(0.85, "Checking Rastermap...")
     status.features.append(_check_rastermap())

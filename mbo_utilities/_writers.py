@@ -261,58 +261,50 @@ def compute_pad_from_shifts(plane_shifts):
 
 
 def load_registration_shifts(metadata: dict | None, debug: bool = False):
-    """
-    load z-registration shifts from suite3d job directory.
+    """read z-registration shifts directly from the metadata dict.
 
     parameters
     ----------
     metadata : dict or None
-        metadata dict containing 'apply_shift' flag and 's3d-job' path.
+        metadata dict with keys 'apply_shift' (bool) and 'plane_shifts'
+        (list of [dy, dx] per plane, shape (nz, 2)).
     debug : bool
         verbose logging.
 
     returns
     -------
-    tuple
-        (apply_shift, plane_shifts, padding) where:
-        - apply_shift: bool, whether shifts should be applied
-        - plane_shifts: ndarray or None, per-plane [dy, dx] shifts
-        - padding: tuple (pt, pb, pl, pr) or (0, 0, 0, 0)
+    (apply_shift, plane_shifts, padding)
+        - apply_shift: bool
+        - plane_shifts: ndarray (nz, 2) or None
+        - padding: (pt, pb, pl, pr)
     """
-    apply_shift = metadata.get("apply_shift", False) if metadata else False
-    plane_shifts = None
     padding = (0, 0, 0, 0)
 
-    if not apply_shift:
+    if not metadata or not metadata.get("apply_shift", False):
         return False, None, padding
 
-    # load plane shifts from s3d-job
-    s3d_job_dir = metadata.get("s3d-job", "")
-    summary_path = (
-        Path(s3d_job_dir).joinpath("summary/summary.npy") if s3d_job_dir else None
-    )
+    shifts = metadata.get("plane_shifts")
+    if shifts is None:
+        logger.warning("apply_shift=True but metadata['plane_shifts'] is missing.")
+        return False, None, padding
 
-    if summary_path and summary_path.is_file():
-        try:
-            summary = load_npy(summary_path).item()
-            if isinstance(summary, dict) and "plane_shifts" in summary:
-                plane_shifts = np.asarray(summary["plane_shifts"])
-                padding = compute_pad_from_shifts(plane_shifts)
-                if debug:
-                    pt, pb, pl, pr = padding
-                    logger.info(
-                        f"Loaded z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}"
-                    )
-                return True, plane_shifts, padding
-        except Exception as e:
-            logger.warning(
-                f"Failed to load plane shifts: {e}. Proceeding without registration."
-            )
+    try:
+        plane_shifts = np.asarray(shifts, dtype=int)
+    except Exception as e:
+        logger.warning(f"plane_shifts could not be coerced to ndarray: {e}")
+        return False, None, padding
 
-    logger.warning(
-        f"apply_shift=True but no valid s3d-job summary found. Proceeding without registration."
-    )
-    return False, None, padding
+    if plane_shifts.ndim != 2 or plane_shifts.shape[1] != 2:
+        logger.warning(f"plane_shifts has bad shape {plane_shifts.shape}, expected (nz, 2).")
+        return False, None, padding
+
+    padding = compute_pad_from_shifts(plane_shifts)
+    if debug:
+        pt, pb, pl, pr = padding
+        logger.info(
+            f"loaded z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}"
+        )
+    return True, plane_shifts, padding
 
 
 def apply_shifts_to_chunk(chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out):
@@ -442,11 +434,9 @@ def _write_plane(
     shift_applied = False
 
     apply_shift = metadata.get("apply_shift", False)
-    summary = metadata.get("summary", "")
-    s3d_job_dir = metadata.get("s3d-job", "")
 
     if fname.name == "data_raw.bin":
-        # if saving suite2p intermediate
+        # suite2p intermediate; shifts will be applied downstream
         apply_shift = False
 
     if shift_vector is not None:
@@ -456,16 +446,8 @@ def _write_plane(
         apply_shift = True
         if plane_index is not None:
             iy, ix = map(int, shift_vector)
-            # CRITICAL: padding must be global across every plane in the
-            # volume, not computed from the single plane's shift. Using
-            # only `[shift_vector]` gives each plane a different H_out /
-            # W_out, which means each .bin has a different row stride.
-            # Suite2p then reads later planes at the wrong byte offsets
-            # (the classic "angled rows" artifact). lsp.run_plane passes
-            # the full shifts table via `all_plane_shifts` for exactly
-            # this reason — consume it here if present, and only fall
-            # back to the single-plane list when the caller genuinely
-            # has nothing else (single-plane writes).
+            # padding is computed over all planes so every per-plane output
+            # has the same canvas, not just this plane's shift.
             all_plane_shifts = kwargs.get("all_plane_shifts")
             if all_plane_shifts is not None:
                 pt, pb, pl, pr = compute_pad_from_shifts(all_plane_shifts)
@@ -478,12 +460,6 @@ def _write_plane(
             out_shape = (ntime, H_out, W_out)
             shift_applied = True
             metadata[f"plane{plane_index}_shift"] = (iy, ix)
-            # valid region: intersection of every plane's shifted footprint
-            # within the padded canvas. lsp.run_plane reads these as
-            # `_pad_yrange`/`_pad_xrange` and uses them to clip cellpose
-            # detection to the area where ALL planes have real data —
-            # without them, cellpose segments spurious "cells" in the
-            # zero-padding regions above/below the valid image.
             if all_plane_shifts is not None:
                 _ps = np.asarray(all_plane_shifts, dtype=int)
                 metadata["_pad_yrange"] = [
@@ -498,52 +474,17 @@ def _write_plane(
             raise ValueError("plane_index must be provided when using shift_vector")
 
     if apply_shift and not shift_applied:
-        if summary:
-            summary_path = Path(summary).joinpath("summary.npy")
-        else:
-            summary_path = Path(s3d_job_dir).joinpath("summary/summary.npy")
-
-        if not summary_path.is_file():
-            raise FileNotFoundError(
-                f"Summary file not found in s3d-job directory.\n"
-                f"Expected: {summary_path}\n"
-                f"s3d_job_dir: {s3d_job_dir}\n"
-                f"This usually means Suite3D registration failed or is incomplete."
-            )
-
-        try:
-            summary = load_npy(summary_path).item()
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to load summary file: {summary_path}\nError: {e}"
-            )
-
-        if not isinstance(summary, dict):
-            raise ValueError(
-                f"Summary file is not a dict: {type(summary)}\nPath: {summary_path}"
-            )
-
-        if "plane_shifts" not in summary:
+        shifts_raw = metadata.get("plane_shifts")
+        if shifts_raw is None:
             raise KeyError(
-                f"Summary file is missing 'plane_shifts' key.\n"
-                f"Available keys: {list(summary.keys())}\n"
-                f"Path: {summary_path}"
+                "apply_shift=True but metadata['plane_shifts'] is missing. "
+                "call compute_axial_shifts on the source array first."
             )
 
-        plane_shifts = summary["plane_shifts"]
-
-        if not isinstance(plane_shifts, (list, np.ndarray)):
-            raise TypeError(
-                f"plane_shifts has invalid type: {type(plane_shifts)}\n"
-                f"Expected list or ndarray"
-            )
-
-        plane_shifts = np.asarray(plane_shifts)
-
+        plane_shifts = np.asarray(shifts_raw)
         if plane_shifts.ndim != 2 or plane_shifts.shape[1] != 2:
             raise ValueError(
-                f"plane_shifts has invalid shape: {plane_shifts.shape}\n"
-                f"Expected (n_planes, 2)"
+                f"metadata['plane_shifts'] has invalid shape {plane_shifts.shape}, expected (nz, 2)"
             )
 
         if plane_index is None:
@@ -565,9 +506,6 @@ def _write_plane(
         out_shape = (ntime, H_out, W_out)
         shift_applied = True
         metadata[f"plane{plane_index}_shift"] = (iy, ix)
-        # valid region — same calc as the shift_vector branch above. lsp
-        # consumes _pad_yrange/_pad_xrange to keep cellpose off the
-        # zero-padded borders.
         metadata["_pad_yrange"] = [
             int((pt + plane_shifts[:, 0]).max()),
             int((pt + plane_shifts[:, 0] + H0).min()),
@@ -1139,7 +1077,8 @@ def _write_volumetric_tiff(
     # check for z-registration shift application (shared logic)
     if debug:
         logger.info(
-            f"  TIFF metadata: apply_shift={metadata.get('apply_shift')}, s3d-job={metadata.get('s3d-job')}"
+            f"  TIFF metadata: apply_shift={metadata.get('apply_shift')}, "
+            f"plane_shifts={len(metadata.get('plane_shifts', [])) if 'plane_shifts' in metadata else 0} planes"
         )
     apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
     pt, pb, pl, pr = padding
@@ -1205,7 +1144,8 @@ def _write_volumetric_tiff(
         ]
     # shifts baked into pixels — mark consumed (same as zarr/h5 writers)
     md["apply_shift"] = False
-    md.pop("s3d-job", None)
+    md.pop("plane_shifts", None)
+    md.pop("plane_shifts_params", None)
 
     # build imagej metadata with adjusted dz and finterval
     ij_meta, resolution = out_meta.to_imagej(target_shape)
@@ -1501,7 +1441,8 @@ def _write_volumetric_h5(
         md["original_shape"] = (Ly, Lx)
     # shifts baked into pixels — mark consumed (same as zarr/tiff writers)
     md["apply_shift"] = False
-    md.pop("s3d-job", None)
+    md.pop("plane_shifts", None)
+    md.pop("plane_shifts_params", None)
 
     if debug:
         logger.info(f"Writing volumetric h5: {filename}")
@@ -1827,7 +1768,8 @@ def _write_volumetric_zarr(
     # caused double-padding, wrong frame counts, and the "boolean index
     # did not match" crash when loading saved zarrs on a different machine.
     md["apply_shift"] = False
-    md.pop("s3d-job", None)
+    md.pop("plane_shifts", None)
+    md.pop("plane_shifts_params", None)
 
     if debug:
         logger.info(f"Writing volumetric zarr: {filename}")

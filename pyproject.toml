@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "2.7.7"
+version = "3.0.0"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -44,6 +44,9 @@ dependencies = [
 	"pyqtgraph",
 	"qtpy",
 	"wgpu>=0.28.1,<0.29",
+	"napari",
+	"napari-ome-zarr",
+	"napari-animation",
 ]
 
 [project.scripts]
@@ -61,26 +64,13 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 # Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python==2.5.7",
-    "suite2p_mbo>=2.0.1",
+    "lbm_suite2p_python>=3.0.0",
     "setuptools",
-]
-# Suite3D - requires CuPy (installed separately by installer based on CUDA version)
-suite3d = [
-    "mbo-suite3d>=0.0.9",
-    "cupy-cuda12x>=13,<14",
 ]
 # Rastermap for activity sorting
 rastermap = [
     "rastermap",
 ]
-# Napari interactive viewer with plugins
-napari = [
-    "napari",
-    "napari-ome-zarr",
-    "napari-animation",
-]
-# Isoview lightsheet support (clusterPT KLB files)
 isoview = [
     "pyklb",
 ]
@@ -91,7 +81,7 @@ torch = [
 ]
 # All processing pipelines
 processing = [
-    "mbo_utilities[suite2p,suite3d,rastermap,torch]",
+    "mbo_utilities[suite2p,rastermap,torch]",
 ]
 # Documentation build
 docs = [

@@ -57,7 +57,7 @@ from mbo_utilities import log
 from mbo_utilities.gui.widgets.menu_bar import draw_menu_bar, draw_keybinds_popup
 from mbo_utilities.gui._popups import draw_tools_popups, draw_process_console_popup
 from mbo_utilities.gui._save_as import draw_saveas_popup
-from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts
+from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts, rebind_space_to_playback
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
@@ -208,8 +208,11 @@ class PreviewDataWidget(EdgeWindow):
         from mbo_utilities.gui.widgets.pipelines import start_preload
         start_preload()
 
-        # defer Suite2pSettings creation until actually needed
-        self._s2p = None  # lazy init
+        # defer dataclass creation until actually needed. all three are
+        # lazy-initialized by matching properties below.
+        self._s2p = None
+        self._s2p_db = None
+        self._s2p_extras = None
         self._s2p_dir = ""
         self._s2p_savepath_flash_start = None
         self._s2p_savepath_flash_count = 0
@@ -218,7 +221,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def s2p(self):
-        """Get Suite2pSettings (lazy init)."""
+        """Suite2p processing settings (upstream schema)."""
         if self._s2p is None and HAS_SUITE2P:
             from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
             self._s2p = Suite2pSettings()
@@ -226,12 +229,39 @@ class PreviewDataWidget(EdgeWindow):
 
     @s2p.setter
     def s2p(self, value):
-        """Set Suite2pSettings."""
         self._s2p = value
+
+    @property
+    def s2p_db(self):
+        """Suite2p input/output db (paths, plane counts) — upstream schema."""
+        if self._s2p_db is None and HAS_SUITE2P:
+            from mbo_utilities.gui.widgets.pipelines.settings import Suite2pDB
+            self._s2p_db = Suite2pDB()
+        return self._s2p_db
+
+    @s2p_db.setter
+    def s2p_db(self, value):
+        self._s2p_db = value
+
+    @property
+    def s2p_extras(self):
+        """Fork/mbo-only suite2p fields (keep_raw, dff_*, 1P registration)."""
+        if self._s2p_extras is None and HAS_SUITE2P:
+            from mbo_utilities.gui.widgets.pipelines.settings import MboSuite2pExtras
+            self._s2p_extras = MboSuite2pExtras()
+        return self._s2p_extras
+
+    @s2p_extras.setter
+    def s2p_extras(self, value):
+        self._s2p_extras = value
 
     def _init_fonts(self):
         """Initialize ImGui fonts."""
         io = imgui.get_io()
+
+        # disable keyboard nav so Space/Enter don't activate whatever button
+        # currently holds nav focus (e.g. the EdgeWindow collapse caret)
+        io.config_flags &= ~imgui.ConfigFlags_.nav_enable_keyboard
 
         fd_settings_dir = (
             Path(get_mbo_dirs()["imgui"])
@@ -325,12 +355,9 @@ class PreviewDataWidget(EdgeWindow):
         self._register_z_done = False
         self._register_z_running = False
         self._register_z_current_msg = ""
-        # suite3d resource knobs (None = use library default). exposed in the
-        # save-as options popup so users hitting WinError 1455 / OOM can
-        # dial back parallelism without editing source.
-        self._s3d_n_proc_corr = 4
-        self._s3d_init_n_frames = 500
-        self._s3d_n_init_files = 1
+        # axial registration knobs; exposed in the save-as options popup.
+        self._axial_max_frames = 200
+        self._axial_max_reg_xy = 150
 
         # Selection state
         self._selected_pipelines = None
@@ -441,16 +468,17 @@ class PreviewDataWidget(EdgeWindow):
         self._viewer = viewer_cls(self.image_widget, self.fpath, parent=self)
         self.logger.info(f"Viewer: {self._viewer.name}")
         self.set_context_info()
-        # ensure window functions are set so slider dims are properly reduced
         self._update_window_funcs()
+        rebind_space_to_playback(self)
 
     def set_context_info(self):
         """Update app title with dataset name."""
         try:
             if self.fpath is None:
                 return
+            from mbo_utilities import __version__
             name = Path(self.fpath[0]).parent.name if isinstance(self.fpath, list) else Path(self.fpath).name
-            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"Miller Brain Suite - {name}"
+            hello_imgui.get_runner_params().app_shallow_settings.window_title = f"Miller Brain Studio v{__version__} - {name}"
         except (RuntimeError, TypeError):
             pass
 
