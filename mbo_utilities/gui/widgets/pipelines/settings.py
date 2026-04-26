@@ -157,10 +157,17 @@ def draw_suite2p_settings_panel(
     imgui.text_colored(imgui.ImVec4(1.0, 0.8, 0.4, 1.0), "ROI Detection:")
     imgui.dummy(imgui.ImVec2(0, 4))
 
+    # do_detection is int 0/1/2 (skip/run/force) — mirrors do_registration
+    _det_labels = ["Skip", "Run", "Force"]
     if readonly:
-        imgui.text(f"  [{'x' if settings.do_detection else ' '}] do_detection")
+        _det_label = _det_labels[settings.do_detection] if 0 <= settings.do_detection <= 2 else "?"
+        imgui.text(f"  do_detection = {_det_label}")
     else:
-        _, settings.do_detection = imgui.checkbox("do_detection##panel", settings.do_detection)
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        _det_idx = settings.do_detection if 0 <= settings.do_detection <= 2 else 1
+        _changed, _new_idx = imgui.combo("do_detection##panel", _det_idx, _det_labels)
+        if _changed:
+            settings.do_detection = _new_idx
     imgui.same_line(hello_imgui.em_size(20))
     imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run cell detection")
 
@@ -279,7 +286,7 @@ class Suite2pSettings:
     # run section
     do_registration: int = 1  # 0=skip, 1=run, 2=force
     do_regmetrics: bool = True
-    do_detection: bool = True  # was fork's "roidetect"
+    do_detection: int = 1  # 0=skip, 1=run, 2=force (was fork's "roidetect")
     do_deconvolution: bool = True  # was fork's "spikedetect"
     multiplane_parallel: bool = False
 
@@ -345,6 +352,9 @@ class Suite2pSettings:
     highpass_spatial: float = 0.0  # was fork's "spatial_hp_cp"
     flow_threshold: float = 0.0  # LBM default (flow-check disabled); upstream default is 0.4
     cellprob_threshold: float = 0.0  # LBM default (= upstream default)
+    # cellpose iterations (upstream forwards via `params` dict → model.eval(niter=...))
+    # 0 = let cellpose pick based on diameter (default). Bump for dense / small cells.
+    cellpose_niter: int = 0
 
     # classification section (upstream settings keys)
     classifier_path: str = ""
@@ -386,7 +396,10 @@ class Suite2pSettings:
             "run": {
                 "do_registration": int(self.do_registration),
                 "do_regmetrics": self.do_regmetrics,
-                "do_detection": self.do_detection,
+                # upstream's settings expects bool; the int 0/1/2 is collapsed
+                # to the 0-vs-nonzero distinction here. force-rerun (=2) is
+                # signaled via the force_detect kwarg derived at call time.
+                "do_detection": bool(self.do_detection),
                 "do_deconvolution": self.do_deconvolution,
                 "multiplane_parallel": self.multiplane_parallel,
             },
@@ -447,6 +460,15 @@ class Suite2pSettings:
                     "highpass_spatial": self.highpass_spatial,
                     "flow_threshold": self.flow_threshold,
                     "cellprob_threshold": self.cellprob_threshold,
+                    # `params` is unpacked into cellpose's model.eval() via
+                    # `**params`. only emit it when the user picked a niter
+                    # — passing an empty dict is fine, but we want None to
+                    # remain None so cellpose's own default kicks in.
+                    "params": (
+                        {"niter": int(self.cellpose_niter)}
+                        if self.cellpose_niter and self.cellpose_niter > 0
+                        else None
+                    ),
                 },
             },
             "classification": {
@@ -550,11 +572,13 @@ class MboSuite2pExtras:
     by mbo's pre/post-processing (dF/F, target_timepoints clipping).
     """
 
-    # lbm_suite2p_python.run_plane kwargs
+    # lbm_suite2p_python.run_plane kwargs.
+    # force_reg / force_detect are NOT stored here — they're derived at
+    # call time from `Suite2pSettings.do_registration == 2` and
+    # `Suite2pSettings.do_detection == 2` so the Skip/Run/Force radios
+    # remain the single source of truth.
     keep_raw: bool = False
     keep_reg: bool = True
-    force_reg: bool = False
-    force_detect: bool = False
     # when True, lbm's run_plane keeps every detected ROI after upstream
     # classification (mirrors the `accept_all_cells` kwarg in lsp.pipeline).
     accept_all_cells: bool = False
@@ -1148,14 +1172,12 @@ def _draw_section_suite2p_content(self):
         imgui.spacing()
 
         # processing control options
+        # force re-run is governed by the Skip/Run/Force radios inside the
+        # Registration and ROI Detection popups (set radio to Force).
         _, self.s2p_extras.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p_extras.keep_raw)
         set_tooltip("Keep data_raw.bin after processing (uses disk space)")
         _, self.s2p_extras.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p_extras.keep_reg)
         set_tooltip("Keep data.bin after processing (useful for QC)")
-        _, self.s2p_extras.force_reg = imgui.checkbox("Force Re-registration", self.s2p_extras.force_reg)
-        set_tooltip("Force re-registration even if already processed")
-        _, self.s2p_extras.force_detect = imgui.checkbox("Force Re-detection", self.s2p_extras.force_detect)
-        set_tooltip("Force ROI detection even if stat.npy exists")
 
         imgui.spacing()
         imgui.separator()
@@ -1228,7 +1250,9 @@ def _draw_section_suite2p_content(self):
     # --- Registration ---
     def draw_registration_settings():
         # do_registration is int 0/1/2 in upstream: 0=skip, 1=run, 2=force re-run.
-        # Exposed as three radio buttons on the same row.
+        # Sole governing control for skip/run/force-rerun of registration —
+        # the Force position drives the lbm wrapper's force_reg kwarg, which
+        # is derived at call time from `do_registration == 2`.
         imgui.text("Run Registration:")
         imgui.same_line()
         if imgui.radio_button("Skip##do_reg", self.s2p.do_registration == 0):
@@ -1240,9 +1264,10 @@ def _draw_section_suite2p_content(self):
         if imgui.radio_button("Force##do_reg", self.s2p.do_registration == 2):
             self.s2p.do_registration = 2
         set_tooltip(
-            "0=skip registration entirely\n"
-            "1=run if not already done (default)\n"
-            "2=force re-run even if ops.npy reports registration done"
+            "Skip = do not register (do_registration=0)\n"
+            "Run = register if not already done (do_registration=1)\n"
+            "Force = re-run registration even if ops.npy reports it done "
+            "(do_registration=2 → force_reg=True at run time)"
         )
 
         imgui.begin_disabled(self.s2p.do_registration == 0)
@@ -1390,6 +1415,34 @@ def _draw_section_suite2p_content(self):
 
     # --- ROI Detection ---
     def draw_roi_detection_settings():
+        # do_detection is int 0/1/2 (skip/run/force) — mirrors do_registration.
+        # Sole governing control for cell detection. The Force position
+        # drives the lbm wrapper's force_detect kwarg, which is derived at
+        # call time from `do_detection == 2`.
+        imgui.text("Run Detection:")
+        imgui.same_line()
+        if imgui.radio_button("Skip##do_det", self.s2p.do_detection == 0):
+            self.s2p.do_detection = 0
+        imgui.same_line()
+        if imgui.radio_button("Run##do_det", self.s2p.do_detection == 1):
+            self.s2p.do_detection = 1
+        imgui.same_line()
+        if imgui.radio_button("Force##do_det", self.s2p.do_detection == 2):
+            self.s2p.do_detection = 2
+        set_tooltip(
+            "Skip = do not detect ROIs (do_detection=0)\n"
+            "Run = detect if stat.npy is missing (do_detection=1)\n"
+            "Force = re-run cellpose even if stat.npy exists "
+            "(do_detection=2 → force_detect=True at run time) — required when "
+            "sweeping cellpose params on a reloaded Suite2p output"
+        )
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+        imgui.begin_disabled(self.s2p.do_detection == 0)
+
         # determine detection mode for greying out (re-check in popup context)
         use_anatomical_local = self.s2p.anatomical_only > 0
 
@@ -1477,6 +1530,16 @@ def _draw_section_suite2p_content(self):
             "Spatial high-pass filtering before Cellpose, as a multiple of diameter.\n"
             "0.5 = LBM default"
         )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _, self.s2p.cellpose_niter = imgui.input_int(
+            "Cellpose niter", self.s2p.cellpose_niter
+        )
+        set_tooltip(
+            "Cellpose iteration count (forwarded to model.eval(niter=...)).\n"
+            "0 = let Cellpose pick based on diameter (default).\n"
+            "Bump (e.g. 200) for dense or small cells where the default "
+            "doesn't converge fully."
+        )
 
         imgui.end_disabled()
 
@@ -1554,6 +1617,8 @@ def _draw_section_suite2p_content(self):
             "Chan2 Detection Threshold", self.s2p.chan2_threshold
         )
         set_tooltip("Threshold for calling an ROI detected on channel 2.")
+
+        imgui.end_disabled()  # closes do_detection==False gate
 
     # --- Signal Extraction ---
     def draw_signal_extraction_settings():
@@ -1741,9 +1806,9 @@ def _draw_section_suite2p_content(self):
             imgui.table_next_column()
 
             # --- Registration row (with checkbox) ---
-            # do_registration is an int 0/1/2 upstream; the table-level control
-            # is a simple on/off toggle that flips between 0 and 1 (user can
-            # pick 2=Force inside the Registration popup).
+            # do_registration is int 0/1/2; the table-level control is a
+            # simple on/off toggle that flips between 0 (skip) and 1 (run).
+            # Force re-run (=2) is only reachable through the popup radios.
             imgui.table_next_row()
             imgui.table_next_column()
             _reg_on = self.s2p.do_registration != 0
@@ -1760,10 +1825,16 @@ def _draw_section_suite2p_content(self):
             set_tooltip("Configure motion correction and registration parameters")
 
             # --- ROI Detection row (with checkbox) ---
+            # Mirrors the Registration row: this top-level toggle flips
+            # between 0 (skip) and 1 (run). Force re-run (=2) is only
+            # reachable through the popup radios.
             imgui.table_next_row()
             imgui.table_next_column()
-            _, self.s2p.do_detection = imgui.checkbox("##roi_cb", self.s2p.do_detection)
-            set_tooltip("Enable/disable ROI detection")
+            _det_on = self.s2p.do_detection != 0
+            _det_changed, _det_on = imgui.checkbox("##roi_cb", _det_on)
+            if _det_changed:
+                self.s2p.do_detection = 1 if _det_on else 0
+            set_tooltip("Enable/disable ROI detection (open popup for Skip/Run/Force)")
             imgui.table_next_column()
             imgui.text("ROI Detection")
             imgui.table_next_column()
@@ -2087,8 +2158,10 @@ def run_process(self):
                     "s2p_settings": {
                         "keep_raw": self.s2p_extras.keep_raw,
                         "keep_reg": self.s2p_extras.keep_reg,
-                        "force_reg": self.s2p_extras.force_reg,
-                        "force_detect": self.s2p_extras.force_detect,
+                        # force_reg / force_detect are derived from the
+                        # Skip/Run/Force radios — Force == 2.
+                        "force_reg": (self.s2p.do_registration == 2),
+                        "force_detect": (self.s2p.do_detection == 2),
                         "accept_all_cells": self.s2p_extras.accept_all_cells,
                         "dff_window_size": self.s2p_extras.dff_window_size,
                         "dff_percentile": self.s2p_extras.dff_percentile,
@@ -2133,8 +2206,10 @@ def run_process(self):
             target_timepoints = self.s2p_extras.target_timepoints
             keep_raw = self.s2p_extras.keep_raw
             keep_reg = self.s2p_extras.keep_reg
-            force_reg = self.s2p_extras.force_reg
-            force_detect = self.s2p_extras.force_detect
+            # force_reg / force_detect are derived from the Skip/Run/Force
+            # radios — Force == 2.
+            force_reg = (self.s2p.do_registration == 2)
+            force_detect = (self.s2p.do_detection == 2)
             accept_all_cells = self.s2p_extras.accept_all_cells
             dff_window_size = self.s2p_extras.dff_window_size
             dff_percentile = self.s2p_extras.dff_percentile
