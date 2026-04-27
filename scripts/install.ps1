@@ -14,71 +14,13 @@ $ErrorActionPreference = "Stop"
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
 $DEFAULT_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
 
-# System dependency URLs (informational only — all three are optional
-# on Windows: wheels cover nearly every Python dep mbo uses)
-$MSVC_BUILD_TOOLS_URL = "https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+# System dependency URLs (informational only)
 $FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/"
 
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
 function Write-Warn { Write-Host "[WARN] $args" -ForegroundColor Yellow }
 function Write-Err { Write-Host "[ERROR] $args" -ForegroundColor Red }
-
-function Test-MsvcBuildTools {
-    <#
-    .SYNOPSIS
-    Check if Microsoft Visual C++ Build Tools are installed.
-    Used only when pip has to compile a C extension from source because
-    no pre-built wheel exists for the target Python/platform. The GUI
-    and most dependencies (numpy, scipy, pyqt, fastplotlib, torch, cupy)
-    ship wheels and don't need this. Only specific extras without wheels
-    (occasionally: pyklb for isoview, source-install of cellpose) trigger
-    a source build.
-    #>
-
-    # Check via vswhere (most reliable)
-    $vswherePaths = @(
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
-        "${env:ProgramFiles}\Microsoft Visual Studio\Installer\vswhere.exe"
-    )
-
-    foreach ($vswhere in $vswherePaths) {
-        if (Test-Path $vswhere) {
-            try {
-                # Check for any VS installation with C++ build tools
-                $result = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-                if ($result) {
-                    return @{ Installed = $true; Path = $result }
-                }
-            }
-            catch {}
-        }
-    }
-
-    # Fallback: check for cl.exe in common paths
-    $clPaths = @(
-        "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe",
-        "${env:ProgramFiles}\Microsoft Visual Studio *\VC\bin\cl.exe",
-        "${env:ProgramFiles(x86)}\Microsoft Visual Studio *\VC\bin\cl.exe"
-    )
-
-    foreach ($pattern in $clPaths) {
-        $found = Get-Item $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            return @{ Installed = $true; Path = $found.DirectoryName }
-        }
-    }
-
-    # Check if cl.exe is in PATH
-    try {
-        $cl = Get-Command cl.exe -ErrorAction Stop
-        return @{ Installed = $true; Path = $cl.Source }
-    }
-    catch {}
-
-    return @{ Installed = $false; Path = $null }
-}
 
 function Test-Ffmpeg {
     <#
@@ -104,11 +46,9 @@ function Test-SystemDependencies {
     Check all required and optional system dependencies.
     Returns a hashtable with dependency status.
     #>
-    $msvc = Test-MsvcBuildTools
     $ffmpeg = Test-Ffmpeg
 
     return @{
-        Msvc = $msvc
         Ffmpeg = $ffmpeg
     }
 }
@@ -124,21 +64,6 @@ function Show-SystemDependencyCheck {
     Write-Host ""
     Write-Host "System Dependencies" -ForegroundColor White
     Write-Host ""
-
-    # MSVC Build Tools (optional — only needed for source builds of
-    # extras that ship no Windows wheel, e.g. pyklb for isoview)
-    if ($Deps.Msvc.Installed) {
-        Write-Host "  [" -NoNewline
-        Write-Host "OK" -ForegroundColor Green -NoNewline
-        Write-Host "] Microsoft C++ Build Tools" -NoNewline
-        Write-Host " (optional, for source builds)" -ForegroundColor Gray
-    }
-    else {
-        Write-Host "  [" -NoNewline
-        Write-Host "  " -NoNewline
-        Write-Host "] Microsoft C++ Build Tools" -NoNewline
-        Write-Host " (optional, for source builds)" -ForegroundColor Gray
-    }
 
     # ffmpeg (optional)
     if ($Deps.Ffmpeg.Installed) {
