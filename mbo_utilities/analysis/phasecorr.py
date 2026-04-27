@@ -1,6 +1,4 @@
 import numpy as np
-from scipy.ndimage import fourier_shift
-from skimage.registration import phase_cross_correlation
 
 from mbo_utilities import log
 
@@ -14,179 +12,116 @@ MBO_WINDOW_METHODS = {
     "mean-sub": lambda X: X[0] - np.mean(X, axis=0),
 }
 
-ALL_PHASECORR_METHODS = set(TWO_DIM_PHASECORR_METHODS) | set(
-    THREE_DIM_PHASECORR_METHODS
-)
+ALL_PHASECORR_METHODS = set(TWO_DIM_PHASECORR_METHODS) | set(THREE_DIM_PHASECORR_METHODS)
 
 logger = log.get("phasecorr")
 
 
-def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=False):
-    """
-    Estimate horizontal shift between even and odd rows of a 2D frame.
-
-    Parameters
-    ----------
-    frame : ndarray (H, W)
-        Input image.
-    upsample : int
-        Subpixel precision (only used if use_fft=True).
-    border : int or tuple
-        Number of pixels to crop from edges (t, b, l, r).
-    max_offset : int
-        Maximum shift allowed.
-    use_fft : bool
-        If True, use FFT-based 2D phase correlation (subpixel).
-        If False, use fast integer-only correlation.
-    """
+def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=True):
+    """Estimate horizontal shift between odd and even rows via 1D rFFT phase
+    correlation along x. Parabolic peak refinement gives ~0.05 px precision.
+    `use_fft=False` returns the integer-rounded result. `upsample` is ignored
+    (kept for API stability)."""
     if frame.ndim != 2:
         raise ValueError(f"Expected 2D frame, got shape {frame.shape}")
-
-    _h, w = frame.shape
 
     if isinstance(border, int):
         t = b = l = r = border
     else:
         t, b, l, r = border
 
-    pre = frame[::2]
+    # split into even/odd FIRST, then crop. cropping the full frame before
+    # splitting flips parity when t is odd (rows 3,5,7,... become "even").
+    h, w = frame.shape
+    pre  = frame[::2]
     post = frame[1::2]
     m = min(pre.shape[0], post.shape[0])
+    pre  = pre[t:m - b if b else m, l:w - r if r else w]
+    post = post[t:m - b if b else m, l:w - r if r else w]
+    even = pre.astype(np.float32, copy=False)
+    odd  = post.astype(np.float32, copy=False)
 
-    row_start = t
-    row_end = m - b if b else m
-    col_start = l
-    col_end = w - r if r else w
+    Lx = even.shape[-1]
+    fe = np.fft.rfft(even, axis=-1); fe /= np.abs(fe) + 1e-5
+    fo = np.fft.rfft(odd,  axis=-1); fo /= np.abs(fo) + 1e-5
+    cc = np.fft.fftshift(np.fft.irfft(fe * np.conj(fo), n=Lx, axis=-1).mean(axis=0))
 
-    a = pre[row_start:row_end, col_start:col_end]
-    b_ = post[row_start:row_end, col_start:col_end]
+    win = max_offset or Lx // 2
+    lo, hi = Lx // 2 - win, Lx // 2 + win + 1
+    int_shift = int(np.argmax(cc[lo:hi]) - win)
 
-    # both paths use 2D FFT cross-correlation; `use_fft` only controls
-    # whether subpixel refinement is applied. the old integer path
-    # projected rows to a 1D signal and picked argmax of a normalized
-    # correlation, which suffered from overlap-size bias and peak
-    # spreading — true shifts of ~1 px would routinely report ±2 or ±3.
-    # integer precision via `upsample_factor=1` is as accurate as the
-    # subpixel path rounded to nearest pixel, and only ~3× slower than
-    # the old 1D method.
-    _upsample = int(upsample) if use_fft else 1
-    _shift, *_ = phase_cross_correlation(a, b_, upsample_factor=_upsample)
-    dx = float(_shift[1])
-    logger.debug(
-        f"phase correlation shift (upsample={_upsample}): {dx:.2f}"
-    )
+    if not use_fft:
+        return float(int_shift)
 
-    if max_offset:
-        dx = np.sign(dx) * min(abs(dx), max_offset)
-        logger.debug(f"Clipped shift to max_offset={max_offset}: {dx:.2f}")
-    return dx
+    idx = Lx // 2 + int_shift
+    if 0 < idx < Lx - 1:
+        y0, y1, y2 = cc[idx - 1], cc[idx], cc[idx + 1]
+        denom = y0 - 2 * y1 + y2
+        sub = 0.5 * (y0 - y2) / denom if abs(denom) > 1e-12 else 0.0
+        return float(int_shift) + float(np.clip(sub, -0.5, 0.5))
+    return float(int_shift)
 
 
 def _apply_offset(img, offset, use_fft=False):
-    """
-    Apply horizontal shift to every odd row of an (..., Y, X) array.
-
-    Parameters
-    ----------
-    img : ndarray
-        Image array to shift
-    offset : float
-        Horizontal shift in pixels
-    use_fft : bool
-        If True, use 2D FFT for subpixel shifting
-    """
+    """Shift every odd row of `img` by `offset` pixels along x, in place.
+    Subpixel via 1D rFFT along x; otherwise integer np.roll."""
     if img.ndim < 2:
         return img
-
     rows = img[..., 1::2, :]
-
-    if use_fft:
-        f = np.fft.fftn(rows, axes=(-2, -1))
-        shift_vec = (0,) * (f.ndim - 1) + (offset,)
-        rows[:] = np.fft.ifftn(fourier_shift(f, shift_vec), axes=(-2, -1)).real
+    if use_fft and offset != round(offset):
+        n = rows.shape[-1]
+        f = np.fft.rfft(rows.astype(np.float32, copy=False), axis=-1)
+        k = np.fft.rfftfreq(n)
+        phase = np.exp(-2j * np.pi * k * offset).astype(np.complex64)
+        shifted = np.fft.irfft(f * phase, n=n, axis=-1)
+        img[..., 1::2, :] = shifted.astype(img.dtype, copy=False)
     else:
-        rows[:] = np.roll(rows, shift=round(offset), axis=-1)
+        rows[:] = np.roll(rows, shift=int(round(offset)), axis=-1)
     return img
 
 
 def bidir_phasecorr(
     arr, *, method="mean", use_fft=False, upsample=4, max_offset=10, border=4, offset=None
 ):
-    """
-    Correct for bi-directional scanning offsets in 2D or 3D array.
+    """Correct bidirectional scan offset on a 2D or 3D array.
 
-    Parameters
-    ----------
-    arr : ndarray
-        Input array, either 2D (H, W) or 3D (N, H, W).
-    method : str, optional
-        Method to compute reference image for 3D arrays.
-        Options: 'mean', 'max', 'std', 'mean-sub' or 'frame'.
-        For 2D arrays, only 'frame' or None is used.
-    use_fft : bool, optional
-        If True, use FFT-based 2D phase correlation (subpixel).
-    upsample : int, optional
-        Subpixel precision for phase correlation.
-    max_offset : int, optional
-        Maximum allowed offset in pixels.
-    border : int or tuple, optional
-        Number of pixels to crop from edges (t, b, l, r).
-    offset : float, optional
-        If provided, skip offset computation and apply this precomputed offset directly.
-        Useful for applying a consistent offset computed from a larger frame average.
+    Returns (corrected, offset_or_offsets). Pass `offset=` to skip estimation.
+    `method` controls the reduction for 3D inputs: 'mean'/'max'/'std'/'mean-sub'
+    estimate one offset from the reduced image; 'frame' estimates per-frame.
     """
-    logger.debug(f"bidir_phasecorr: arr={arr.shape}, method={method}, use_fft={use_fft}")
-
     if offset is not None:
-        _offsets = float(offset)
-        logger.debug(f"using precomputed offset: {_offsets}")
-        out = _apply_offset(arr.copy(), _offsets, use_fft)
-        return out, _offsets
+        off = float(offset)
+        return _apply_offset(arr.copy(), off, use_fft), off
 
     if arr.ndim == 2:
-        _offsets = _phase_corr_2d(arr, upsample, border, max_offset, use_fft)
+        offs = _phase_corr_2d(arr, upsample, border, max_offset, use_fft)
     else:
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
-
         if method == "frame":
-            logger.debug("Using individual frames for phase correlation")
-            _offsets = np.array(
-                [
-                    _phase_corr_2d(
-                        frame=f,
-                        upsample=upsample,
-                        border=border,
-                        max_offset=max_offset,
-                        use_fft=use_fft,
-                    )
-                    for f in flat
-                ]
+            offs = np.array([
+                _phase_corr_2d(f, upsample, border, max_offset, use_fft) for f in flat
+            ])
+        elif method in MBO_WINDOW_METHODS:
+            offs = _phase_corr_2d(
+                MBO_WINDOW_METHODS[method](flat), upsample, border, max_offset, use_fft
             )
         else:
-            if method not in MBO_WINDOW_METHODS:
-                raise ValueError(f"unknown method {method}")
-            logger.debug(f"Using '{method}' window for phase correlation")
-            _offsets = _phase_corr_2d(
-                frame=MBO_WINDOW_METHODS[method](flat),
-                upsample=upsample,
-                border=border,
-                max_offset=max_offset,
-                use_fft=use_fft,
-            )
+            raise ValueError(f"unknown method {method}")
 
-    if np.ndim(_offsets) == 0:
-        out = _apply_offset(arr.copy(), float(_offsets), use_fft)
+    if np.ndim(offs) == 0:
+        out = _apply_offset(arr.copy(), float(offs), use_fft)
     else:
-        out = np.stack(
-            [_apply_offset(f.copy(), float(s), use_fft) for f, s in zip(arr, _offsets, strict=False)]
-        )
-    return out, _offsets
+        out = np.stack([
+            _apply_offset(f.copy(), float(s), use_fft)
+            for f, s in zip(arr, offs, strict=False)
+        ])
+    return out, offs
 
 
 def apply_scan_phase_offsets(arr, offs):
     out = np.asarray(arr).copy()
     if np.isscalar(offs):
-        return _apply_offset(out, offs)
+        return _apply_offset(out, offs, use_fft=True)
     for k, off in enumerate(offs):
-        out[k] = _apply_offset(out[k], off)
+        out[k] = _apply_offset(out[k], off, use_fft=True)
     return out
