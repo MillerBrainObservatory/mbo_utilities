@@ -351,7 +351,7 @@ class Suite2pSettings:
     cellpose_img: str = "max_proj / meanImg"
     highpass_spatial: float = 0.0  # was fork's "spatial_hp_cp"
     flow_threshold: float = 0.0  # LBM default (flow-check disabled); upstream default is 0.4
-    cellprob_threshold: float = 0.0  # LBM default (= upstream default)
+    cellprob_threshold: float = -6.0  # permissive LBM default (upstream is 0.0)
     # cellpose iterations (upstream forwards via `params` dict → model.eval(niter=...))
     # 0 = let cellpose pick based on diameter (default). Bump for dense / small cells.
     cellpose_niter: int = 0
