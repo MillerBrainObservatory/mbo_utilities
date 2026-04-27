@@ -71,9 +71,6 @@ suite2p = [
 rastermap = [
     "rastermap",
 ]
-isoview = [
-    "pyklb",
-]
 # PyTorch for neural network operations
 torch = [
     "torch",
