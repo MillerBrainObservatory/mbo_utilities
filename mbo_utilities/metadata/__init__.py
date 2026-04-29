@@ -15,6 +15,8 @@ from .base import (
     ALIAS_MAP,
     get_canonical_name,
     IMAGING_METADATA_KEYS,
+    EXPORT_DENYLIST,
+    strip_for_export,
 )
 from mbo_utilities.arrays.features._roi import RoiMode
 
@@ -76,6 +78,9 @@ __all__ = [
     "ALIAS_MAP",
     # imaging metadata (core params for display/editing)
     "IMAGING_METADATA_KEYS",
+    # writer denylist + helper (suite2p-only fields stripped from non-suite2p output)
+    "EXPORT_DENYLIST",
+    "strip_for_export",
     "METADATA_PARAMS",
     # base types
     "MetadataParameter",
