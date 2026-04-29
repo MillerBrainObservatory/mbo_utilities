@@ -348,7 +348,9 @@ class Suite2pSettings:
 
     # detection.cellpose_settings
     cellpose_model: str = "cpsam"
-    cellpose_img: str = "max_proj / meanImg"
+    # cellpose_settings.img is derived from anatomical_only at serialize time
+    # (1→"max_proj / meanImg", 2→"meanImg", 3/4→"max_proj"). upstream removed
+    # enhanced_mean_img so 3 falls back to max_proj.
     highpass_spatial: float = 0.0  # was fork's "spatial_hp_cp"
     flow_threshold: float = 0.0  # LBM default (flow-check disabled); upstream default is 0.4
     cellprob_threshold: float = -6.0  # permissive LBM default (upstream is 0.0)
@@ -456,7 +458,9 @@ class Suite2pSettings:
                 },
                 "cellpose_settings": {
                     "cellpose_model": self.cellpose_model,
-                    "img": self.cellpose_img,
+                    "img": {1: "max_proj / meanImg", 2: "meanImg"}.get(
+                        int(self.anatomical_only), "max_proj"
+                    ),
                     "highpass_spatial": self.highpass_spatial,
                     "flow_threshold": self.flow_threshold,
                     "cellprob_threshold": self.cellprob_threshold,
