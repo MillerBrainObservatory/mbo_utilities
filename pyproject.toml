@@ -64,7 +64,7 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 # Suite2p alone will not include torch
 suite2p = [
     "numba>=0.60.0",
-    "lbm_suite2p_python>=3.0.0",
+    "lbm_suite2p_python>=3.0.1",
     "setuptools",
 ]
 # Rastermap for activity sorting
