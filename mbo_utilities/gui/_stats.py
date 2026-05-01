@@ -157,7 +157,13 @@ def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 200) -> np.ndarr
         # positional fallback: assume axis 0 is T for ndim >= 3
         n_t = int(shape[0]) if len(shape) >= 3 else 1
 
-    stride = max(1, n_t // max(1, max_samples))
+    # ceiling division so max_samples is a true upper bound. floor div had
+    # an off-by-one: for T in [max_samples+1, 2*max_samples-1], stride
+    # collapsed to 1 and we read every frame — a 399-frame array pulled
+    # 399 samples while a 4000-frame array pulled 200, so smaller data
+    # could be slower than larger. ceiling keeps the sample count
+    # monotone and bounded at max_samples for every T > 0.
+    stride = max(1, (n_t + max(1, max_samples) - 1) // max(1, max_samples))
 
     if has_dims:
         idx = []
@@ -192,6 +198,9 @@ def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 200) -> np.ndarr
 
 def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     """Compute slice-stats (z-plane or channel) for a single array."""
+    # phase correction is irrelevant for mean/std/SNR and expensive per
+    # chunk under the shared _tiff_lock — turn it off for all reads here.
+    arr.fix_phase = False
     # Check for pre-computed stats in zarr metadata (instant loading)
     # supports both 'stats' (new) and 'zstats' (legacy) properties
     pre_stats = None

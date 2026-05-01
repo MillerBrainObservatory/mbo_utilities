@@ -1,57 +1,46 @@
-# GUI Quick Start
+# Quick Start
 
-## Launch
+This tool was originally built for ScanImage TIFFs and has been extended to read any 2D-4D TIFF and OME-compatible TIFF / Zarr. Output goes through Fiji-readable TIFF/Zarr or directly into a Suite2p / Cellpose run.
 
-```bash
-mbo                    # opens file dialog
-mbo /path/to/data      # opens specific file
-mbo --metadata         # metadata only mode
+## Overview
+
+```
+raw file (TIFF / Zarr / .bin / .h5)
+    |
+    +-->  Save As           ->  Fiji-compatible TIFF / Zarr / .bin / .h5
+    |                           (preview, share, re-open)
+    |
+    +-->  Run -> Suite2p    ->  /save_path/zplane0N_tp00001-NNNNN/
+                                (one folder per plane; reload by opening
+                                 the parent folder)
 ```
 
-## Main Features
+1. **Open** a raw file (`o`) or a folder of files (`Shift+O`).
+2. **Preview** by selecting a small range — e.g. `1:500` in the timepoint field — to run everything against just those frames.
+3. **Save As** (`s`) for a Fiji-readable copy. The viewer keeps showing the original; reopen the saved file to work with it.
+4. **Run** (Run tab) for full Suite2p / Cellpose processing. Run on the original raw data — Save As outputs aren't auto-fed in.
+5. **Reload** Suite2p output: drop the *parent* directory (containing the `zplane0N_tp00001-NNNNN/` subdirs) onto the file dialog. Each plane loads as a registered binary; rerun detection/extraction without re-registering.
 
-- **Time/Z sliders**: Navigate through frames and z-planes
-- **Window functions**: Mean, max, std, mean-subtracted projections
-- **Scan-phase correction**: Preview bidirectional correction
-- **Contrast controls**: Adjust vmin/vmax
-- **Export**: Save to .tiff, .zarr, .bin, .h5
+## Subset processing
 
-## Window Functions
+Both Save As and Run respect the timepoint and z-plane selection from the Selection popup.
 
-| Function | Description |
-|----------|-------------|
-| mean | Average intensity over window |
-| max | Maximum projection |
-| std | Standard deviation |
-| mean-sub | Mean-subtracted (highlights changes) |
+| Field | Example | Meaning |
+| --- | --- | --- |
+| Timepoints | `1:500` | first 500 frames |
+| Timepoints | `1:5000:10` | every 10th frame, 1-5000 |
+| Timepoints | `1:1000,500:600` | 1-1000 excluding 500-600 |
+| Z-planes | `1:14:2` | every other plane |
 
-## Scan-Phase Correction
+Use a small range to dial in detection parameters in seconds; rerun on the full range once happy.
 
-Preview bidirectional phase correction:
+## Run tab
 
-1. View mean-subtracted projection (window 3-15)
-2. Toggle Fix Phase on/off to compare
-3. Adjust border-px and max-offset
-4. Enable Sub-Pixel for refinement
+- **Main** — `tau`, `fs` (auto-filled from metadata), denoise, dF/F window
+- **Registration** — Skip / Run / Force, non-rigid block size
+- **ROI Detection** — anatomical_only, diameter (Y/X), Cellpose thresholds
+- **Deconv/Classify** — neuropil coefficient, baseline, classifier path, accept-all-cells
 
-## Opening Data
+Re-running on a Suite2p output that was loaded from `zplane0N_…/`: the pipeline links to the existing `data.bin` automatically when Registration is set to **Skip**, so detection sweeps don't copy gigabytes of binary per run.
 
-- **Open File** (`o`): loads exactly the file(s) you select
-- **Open Folder** (`Shift+O`): loads all compatible files in a directory
-
-Open File always loads only what you pick. Open Folder scans
-the directory and loads files that match the detected format
-(e.g. only raw ScanImage TIFFs, ignoring previously saved outputs).
-
-## Saving Data
-
-Access via **File > Save As** or press **s**
-
-Output formats: `.zarr` (recommended), `.tiff`, `.bin`, `.h5`
-
-Save As exports a copy of the current data to a new file.
-The viewer continues to display the original dataset.
-To work with the saved file, open it with File > Open File.
-
-Running Suite2p after Save As still processes the original
-dataset that is loaded in the viewer, not the saved file.
+Scan-phase correction is previewed live in the viewer (Fix Phase / Sub-Pixel checkboxes) and applies on Save As and Run.

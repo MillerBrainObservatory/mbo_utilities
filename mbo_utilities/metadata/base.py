@@ -445,3 +445,90 @@ IMAGING_METADATA_KEYS: tuple[str, ...] = (
 )
 
 
+# fields stripped from tiff/h5/zarr metadata before stamping. these
+# belong only in suite2p layouts (ops.npy alongside data.bin) — embedding
+# them in non-suite2p outputs bloats files (regPC alone can be 500+ MB
+# after JSON expansion) and clutters readers like Fiji that load the
+# entire metadata blob into memory.
+
+_SUITE2P_REGISTRATION_INTERNALS = (
+    "regPC", "tPC", "regDX",
+    "yblock", "xblock", "NRsm",
+)
+
+_SUITE2P_SUMMARY_IMAGES = (
+    "meanImg", "meanImgE", "meanImg_chan2",
+    "Vmap", "Vcorr", "Vsplit", "Vmax",
+    "max_proj",
+    "refImg", "refImg1", "refAndMasks",
+)
+
+_PER_FRAME_VECTORS = (
+    "xoff", "yoff", "corrXY",
+    "xoff1", "yoff1", "corrXY1",
+    "badframes",
+)
+
+_MBO_ADDITIONS = (
+    "plane_shifts", "plane_shifts_params",
+    "_pad_yrange", "_pad_xrange",
+    "padded_shape", "original_shape",
+    "processing_history", "_metadata_provenance",
+    "apply_shift", "roi_mode",
+)
+
+_SUITE2P_GEOMETRY = (
+    "Ly", "Lx", "nframes", "nplanes", "nchannels",
+    "num_rois", "aspect", "tau",
+    "functional_chan", "align_by_chan",
+)
+
+_SUITE2P_PIPELINE_SETTINGS = (
+    "do_registration", "keep_movie_raw", "two_step_registration",
+    "nimg_init", "multiplane_parallel",
+    "nbinned", "batch_size",
+    "diameter", "cell_diameter", "spatial_scale", "spatscale_pix",
+    "roidetect", "spikedetect", "neuropil_extract",
+    "denoise", "anatomical_only",
+    "sparse_mode", "connected",
+    "threshold_scaling", "max_overlap", "max_iterations",
+    "high_pass", "smooth_sigma", "smooth_sigma_time",
+    "nonrigid", "block_size", "snr_thresh", "maxregshift",
+    "use_builtin_classifier", "classifier_path",
+    "preclassify", "chan2_thres",
+    "lam_percentile", "allow_overlap",
+    "inner_neuropil_radius", "min_neuropil_pixels",
+    "neucoeff",
+    "soma_crop", "win_baseline", "sig_baseline", "prctile_baseline",
+    "data_path", "save_path", "save_path0", "save_folder",
+    "fast_disk", "ops_path", "input_format",
+    "save_NWB", "save_mat",
+    "first_tiffs", "frames_include",
+    "h5py", "h5py_key",
+    "delete_bin", "combined", "report_time",
+    "do_bidiphase", "bidiphase",
+    "1Preg", "spatial_hp", "pre_smooth", "spatial_taper",
+)
+
+EXPORT_DENYLIST: frozenset[str] = frozenset(
+    _SUITE2P_REGISTRATION_INTERNALS
+    + _SUITE2P_SUMMARY_IMAGES
+    + _PER_FRAME_VECTORS
+    + _MBO_ADDITIONS
+    + _SUITE2P_GEOMETRY
+    + _SUITE2P_PIPELINE_SETTINGS
+)
+
+
+def strip_for_export(md: dict) -> dict:
+    """drop fields that should not be embedded in tiff/h5/zarr metadata.
+
+    suite2p ops fields (registration internals, summary images, per-frame
+    vectors, pipeline settings) and mbo-internal additions are kept only
+    in suite2p layouts (ops.npy alongside data.bin). everything else —
+    OME, ImageJ aliases, voxel size, frame rate, user description, etc. —
+    passes through untouched.
+    """
+    return {k: v for k, v in md.items() if k not in EXPORT_DENYLIST}
+
+

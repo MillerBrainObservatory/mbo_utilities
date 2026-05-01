@@ -46,6 +46,14 @@ def _filter_disabled_modules(metadata: dict, recursive: bool = True) -> dict:
     return result
 
 
+# belt-and-suspenders cap. EXPORT_DENYLIST handles known suite2p
+# fields, but a future ops version could add a new big array we
+# haven't named — drop anything over the cap so output never blows
+# up by surprise. 1 MB lets per-frame vectors through (xoff/yoff at
+# 10k frames = 80 KB) but stops regPC-class arrays cold.
+_MAX_NDARRAY_NBYTES = 1 * 1024 * 1024
+
+
 def _make_json_serializable(obj, filter_disabled: bool = True):
     if isinstance(obj, Path):
         return str(obj)
@@ -56,6 +64,8 @@ def _make_json_serializable(obj, filter_disabled: bool = True):
     if isinstance(obj, (list, tuple)):
         return [_make_json_serializable(v, filter_disabled=False) for v in obj]
     if isinstance(obj, np.ndarray):
+        if obj.nbytes > _MAX_NDARRAY_NBYTES:
+            return None
         return obj.tolist()
     if isinstance(obj, (np.integer, np.floating, np.bool_)):
         return obj.item()
@@ -942,10 +952,15 @@ def _write_tiff(path, data, overwrite=True, metadata=None, imagej=True, **kwargs
             target_shape = metadata.get("shape", data.shape)
             ij_meta, resolution = _build_imagej_metadata(metadata, target_shape)
 
-            # store full metadata as JSON in custom TIFF tag 50839
+            # store filtered metadata as JSON in custom TIFF tag 50839.
+            # strip_for_export drops suite2p-only fields (regPC, meanImg,
+            # xoff/yoff, pipeline settings, etc.) — those belong only in
+            # ops.npy. without this filter, regPC alone can balloon the
+            # tag to 500+ MB after JSON expansion.
             import json
+            from .metadata.base import strip_for_export
 
-            json_meta = _make_json_serializable(metadata)
+            json_meta = _make_json_serializable(strip_for_export(metadata))
             json_bytes = json.dumps(json_meta).encode("utf-8")
             # extratags format: (code, dtype, count, value, writeonce)
             # dtype 2 = ASCII string
@@ -1150,12 +1165,14 @@ def _write_volumetric_tiff(
     # build imagej metadata with adjusted dz and finterval
     ij_meta, resolution = out_meta.to_imagej(target_shape)
 
-    # store full metadata as JSON in ImageJ's Info field
-    # use imagej_metadata_tag to create both 50838 and 50839 tags properly
+    # store filtered metadata as JSON in ImageJ's Info field. strip
+    # suite2p-only fields first — regPC/tPC/meanImg/etc. belong in
+    # ops.npy, not stamped into every tiff page header.
     from tifffile import imagej_metadata_tag
     import json
+    from .metadata.base import strip_for_export
 
-    json_meta = _make_json_serializable(md)
+    json_meta = _make_json_serializable(strip_for_export(md))
     json_str = json.dumps(json_meta)
     ij_extratags = imagej_metadata_tag({"Info": json_str}, "<")
     extratags = list(ij_extratags) if ij_extratags else []
@@ -1497,8 +1514,10 @@ def _write_volumetric_h5(
 
             # serialize metadata onto root attrs. h5 doesn't accept None or
             # arbitrary Python objects so coerce to scalar where possible
-            # and stringify everything else; skip None entirely.
-            serializable_md = _make_json_serializable(md)
+            # and stringify everything else; skip None entirely. strip
+            # suite2p-only fields first — those belong in ops.npy.
+            from .metadata.base import strip_for_export
+            serializable_md = _make_json_serializable(strip_for_export(md))
             for k, v in serializable_md.items():
                 if v is None:
                     continue
@@ -1904,8 +1923,11 @@ def _write_volumetric_zarr(
     # set OME metadata on the group
     root.attrs["ome"] = ome_content
 
-    # also store full metadata as JSON-serializable attrs
-    serializable_md = _make_json_serializable(md)
+    # also store filtered metadata as JSON-serializable attrs. strip
+    # suite2p-only fields first — those belong in ops.npy, not in the
+    # zarr group attrs where every reader has to load them.
+    from .metadata.base import strip_for_export
+    serializable_md = _make_json_serializable(strip_for_export(md))
     for k, v in serializable_md.items():
         root.attrs[k] = v
 
