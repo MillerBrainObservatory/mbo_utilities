@@ -77,6 +77,6 @@ class TimeSeriesViewer(BaseViewer):
                 if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
                     imgui.set_tooltip(
                         "Suite2p not installed.\n"
-                        'Install with: uv pip install "mbo_utilities[suite2p]"'
+                        "Install with: uv pip install mbo_utilities"
                     )
             imgui.end_tab_bar()
