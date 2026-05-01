@@ -127,7 +127,7 @@ def draw_run_tab(parent: Any) -> None:
         imgui.text("Install a pipeline package:")
         imgui.text_colored(
             imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
-            "uv pip install mbo_utilities[suite2p]"
+            "uv pip install mbo_utilities"
         )
         return
 

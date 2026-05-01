@@ -47,6 +47,9 @@ dependencies = [
 	"napari",
 	"napari-ome-zarr",
 	"napari-animation",
+	"numba>=0.60.0",
+	"suite2p",
+	"lbm_suite2p_python>=3.0.1",
 ]
 
 [project.scripts]
@@ -61,12 +64,6 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-# Suite2p alone will not include torch
-suite2p = [
-    "numba>=0.60.0",
-    "lbm_suite2p_python>=3.0.1",
-    "setuptools",
-]
 # Rastermap for activity sorting
 rastermap = [
     "rastermap",
@@ -76,10 +73,6 @@ rastermap = [
 #     "torch",
 #     "torchvision",
 # ]
-# All processing pipelines
-processing = [
-    "mbo_utilities[suite2p,rastermap]",
-]
 # Documentation build
 docs = [
     "sphinx>=6.1.3",
@@ -102,7 +95,7 @@ docs = [
     "pygfx>=0.14.0",
 ]
 # Everything
-all = ["mbo_utilities[processing,docs]"]
+all = ["mbo_utilities[rastermap,docs]"]
 
 # [[tool.uv.index]]
 # name = "pytorch-cu126"

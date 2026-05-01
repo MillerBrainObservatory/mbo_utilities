@@ -45,19 +45,19 @@ uv venv --python 3.12.9
 # .venv\Scripts\activate   # optional 
 ```
 
-### Base (I/O, metadata, GUI)
+### Base (I/O, metadata, GUI, suite2p pipeline)
 
 ```bash
 uv pip install mbo_utilities
 ```
 
-### With processing pipelines
+### With extra processing pipelines
 
 ```bash
-# suite2p pipeline
-uv pip install "mbo_utilities[suite2p]"
+# adds rastermap for activity sorting
+uv pip install "mbo_utilities[rastermap]"
 
-# everything (suite2p + rastermap + torch)
+# everything (rastermap + docs)
 uv pip install "mbo_utilities[all]"
 ```
 
