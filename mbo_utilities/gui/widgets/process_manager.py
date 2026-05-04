@@ -326,6 +326,17 @@ class ProcessManager:
             # open log file for redirection
             f_out = open(log_file, "a")  # Append mode
 
+            # Force UTF-8 stdio in the worker. lsp prints status lines
+            # containing unicode (e.g. `→` U+2192 in run_plane_bin), which
+            # crash with UnicodeEncodeError on Windows because the default
+            # console encoding is cp1252 — and cp1252 is also what Python
+            # picks for redirected stdio there. PYTHONIOENCODING + PYTHONUTF8
+            # together force utf-8 for stdout/stderr writes regardless of
+            # the host code page.
+            child_env = os.environ.copy()
+            child_env.setdefault("PYTHONIOENCODING", "utf-8")
+            child_env.setdefault("PYTHONUTF8", "1")
+
             if sys.platform == "win32":
                 # DETACHED_PROCESS (0x00000008) | CREATE_NEW_PROCESS_GROUP (0x00000200) | CREATE_NO_WINDOW (0x08000000)
                 creationflags = 0x00000008 | 0x00000200 | 0x08000000
@@ -335,6 +346,7 @@ class ProcessManager:
                     stdin=subprocess.DEVNULL,
                     stdout=f_out,
                     stderr=f_out,
+                    env=child_env,
                 )
             else:
                 # on unix, use start_new_session to detach
@@ -344,6 +356,7 @@ class ProcessManager:
                     stdin=subprocess.DEVNULL,
                     stdout=f_out,
                     stderr=f_out,
+                    env=child_env,
                 )
 
             # Close file handle in parent process, subprocess still owns duped copy
