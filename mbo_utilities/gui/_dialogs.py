@@ -16,6 +16,185 @@ from mbo_utilities.arrays import ScanImageArray
 from mbo_utilities.preferences import add_recent_file, set_last_dir
 
 
+def _try_hydrate_s2p_from_binary(parent: Any, path: str | Path) -> bool:
+    """If `path` looks like a suite2p binary (data.bin / data_raw.bin),
+    hydrate parent.s2p / parent.s2p_db from the plane folder's settings
+    files AND point parent._s2p_outdir at the suite2p output ROOT (the
+    plane folder's parent) so re-running the pipeline recreates the same
+    layout in the same place.
+
+    Source-of-truth preference:
+      1. settings.npy + db.npy (canonical upstream-shape pair, exactly
+         what was passed into lsp.pipeline)
+      2. ops.npy (flat fused dict — may have been mutated by reactive
+         fs/dz rescaling, includes detection outputs)
+
+    No-op when the path isn't a suite2p binary or none of the sibling
+    settings files exist. Returns True iff settings were applied.
+    """
+    p = Path(path)
+    if p.name not in ("data.bin", "data_raw.bin"):
+        return False
+    plane_dir = p.parent
+    settings_file = plane_dir / "settings.npy"
+    db_file = plane_dir / "db.npy"
+    ops_file = plane_dir / "ops.npy"
+
+    import numpy as np  # local — keep _dialogs.py import surface tight
+
+    def _load_npy_dict(fp: Path) -> dict | None:
+        try:
+            arr = np.load(str(fp), allow_pickle=True)
+            d = arr.item() if hasattr(arr, "item") and arr.ndim == 0 else arr
+            return d if isinstance(d, dict) else None
+        except Exception as e:
+            parent.logger.warning(
+                f"suite2p hydrate: failed to read {fp}: {e}"
+            )
+            return None
+
+    loaded: dict = {}
+    sources: list[str] = []
+    try:
+        from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
+            from_structured as _from_structured,
+            from_flat as _from_flat,
+        )
+    except Exception as e:
+        parent.logger.warning(f"suite2p hydrate: schema import failed: {e}")
+        return False
+
+    if settings_file.is_file():
+        d = _load_npy_dict(settings_file)
+        if d:
+            loaded.update(_from_structured(d))
+            sources.append("settings.npy")
+    if db_file.is_file():
+        d = _load_npy_dict(db_file)
+        if d:
+            # db.npy is flat (paths/nplanes/keep_movie_raw at top level),
+            # so route via from_flat — it covers keep_movie_raw and any
+            # other db fields with entries in _FLAT_TO_MBO.
+            loaded.update(_from_flat(d))
+            sources.append("db.npy")
+    # ALSO read ops.npy: it's the only file that carries lsp's mbo-only
+    # post-processing knobs (dff_window_size / dff_percentile /
+    # dff_smooth_window — written at the dff_calculation step in
+    # run_lsp.py). We `setdefault` instead of `update` so existing
+    # entries from settings.npy / db.npy aren't overwritten by ops.npy
+    # (settings.npy is the canonical source for suite2p settings; ops.npy
+    # may have stale or run-time-mutated values for those same keys).
+    if ops_file.is_file():
+        d = _load_npy_dict(ops_file)
+        if d:
+            ops_view = _from_flat(d)
+            new_keys = []
+            for k, v in ops_view.items():
+                if k not in loaded:
+                    loaded[k] = v
+                    new_keys.append(k)
+            if new_keys:
+                if "ops.npy" not in sources:
+                    sources.append("ops.npy")
+                parent.logger.debug(
+                    f"suite2p hydrate: ops.npy contributed {len(new_keys)} fields "
+                    f"not in settings.npy/db.npy: {sorted(new_keys)}"
+                )
+
+    if not loaded:
+        parent.logger.info(
+            f"suite2p hydrate: no settings/db/ops sibling files at {plane_dir}; "
+            "leaving pipeline settings untouched."
+        )
+        return False
+
+    # access via lazy properties so the dataclasses get instantiated
+    # if they haven't been touched yet.
+    s2p = getattr(parent, "s2p", None)
+    s2p_db = getattr(parent, "s2p_db", None)
+    s2p_extras = getattr(parent, "s2p_extras", None)
+    if s2p is None or s2p_db is None:
+        parent.logger.info(
+            "suite2p hydrate: Suite2pSettings/Suite2pDB unavailable "
+            "(suite2p not installed?), skipping."
+        )
+        return False
+
+    n_settings = 0
+    n_db = 0
+    n_extras = 0
+    skipped: list[str] = []
+    for field, value in loaded.items():
+        target = None
+        if hasattr(s2p, field):
+            target = s2p
+        elif hasattr(s2p_db, field):
+            target = s2p_db
+        elif s2p_extras is not None and hasattr(s2p_extras, field):
+            target = s2p_extras
+        else:
+            skipped.append(field)
+            continue
+        # coerce to current field's type — the loaded value may be a
+        # numpy scalar (int64, float32, bool_) which imgui inputs don't
+        # handle uniformly. _s2p_schema._to_py normalizes numpy types
+        # to Python equivalents at the loader boundary, but a leaked
+        # ndarray here would still crash bool()/int()/float() with
+        # `truth value ambiguous`. The whole block is best-effort: any
+        # failure leaves the existing (well-typed) default in place
+        # rather than tanking the load.
+        cur = getattr(target, field)
+        if value is not None and cur is not None:
+            # defensive: skip multi-element arrays — they shouldn't
+            # reach a scalar field, but if they do, leaving the
+            # default is safer than raising.
+            if type(value).__name__ == "ndarray" and getattr(value, "size", 1) > 1:
+                parent.logger.debug(
+                    f"suite2p hydrate: skipping {field}: got ndarray "
+                    f"size={value.size}, expected scalar"
+                )
+                continue
+            try:
+                if isinstance(cur, bool):
+                    value = bool(value)
+                elif isinstance(cur, int) and not isinstance(value, bool):
+                    value = int(value)
+                elif isinstance(cur, float):
+                    value = float(value)
+                elif isinstance(cur, str):
+                    value = str(value)
+            except Exception as e:
+                parent.logger.debug(
+                    f"suite2p hydrate: type-coerce skipped for {field}: {e}"
+                )
+                continue
+        try:
+            setattr(target, field, value)
+            if target is s2p:
+                n_settings += 1
+            elif target is s2p_db:
+                n_db += 1
+            else:
+                n_extras += 1
+        except Exception as e:
+            parent.logger.debug(
+                f"suite2p hydrate: could not set {field}={value!r}: {e}"
+            )
+
+    # plane_dir is e.g. .../res/zplane01_tp00001-01574 — the ROOT is its
+    # parent (.../res). re-running with output=ROOT recreates the same
+    # plane subdir in place.
+    parent._s2p_outdir = str(plane_dir.parent)
+
+    parent.logger.info(
+        f"suite2p hydrate: loaded {n_settings} settings + {n_db} db + "
+        f"{n_extras} mbo-extras fields from {' + '.join(sources)}; "
+        f"output dir set to {parent._s2p_outdir}"
+        + (f" (skipped {len(skipped)} unmapped keys)" if skipped else "")
+    )
+    return True
+
+
 def check_file_dialogs(parent: Any):
     """Check if file/folder dialogs have results and load data if so."""
     # Check file dialog
@@ -151,10 +330,15 @@ def load_new_data(parent: Any, path: str):
             isinstance(underlying, TiffArray)
         )
 
-        # Suggest s2p output directory if not set
-        if not parent._s2p_outdir:
-            path_obj = Path(path[0] if isinstance(path, (list, tuple)) else path)
-            parent._s2p_outdir = str(path_obj.parent / "suite2p")
+        # If the loaded file is a suite2p binary, hydrate Suite2pSettings
+        # / Suite2pDB from the sibling ops.npy and point _s2p_outdir at
+        # the output ROOT so the user can re-run the exact same config
+        # (with whatever tweaks) and land the new run alongside the old
+        # one. Otherwise fall back to the generic "suggest output dir".
+        first_path = path[0] if isinstance(path, (list, tuple)) else path
+        if not _try_hydrate_s2p_from_binary(parent, first_path):
+            if not parent._s2p_outdir:
+                parent._s2p_outdir = str(Path(first_path).parent / "suite2p")
 
         # Update nz/nc for z-plane and channel counts
         if len(parent.shape) == 5:
