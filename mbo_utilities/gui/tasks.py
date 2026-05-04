@@ -679,6 +679,13 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             dff_window_size=s2p_settings.get("dff_window_size", 300),
             dff_percentile=s2p_settings.get("dff_percentile", 20),
             dff_smooth_window=s2p_settings.get("dff_smooth_window"),
+            save_json=s2p_settings.get("save_json", False),
+            cell_filters=s2p_settings.get("cell_filters") or None,
+            # unified rastermap api: dict keyed by mode ("planar" /
+            # "volumetric"). presence-of-key = mode on; empty sub-dict
+            # = use lsp's built-in defaults; None overall = both off.
+            # built gui-side by build_rastermap_kwargs() in settings.py.
+            rastermap_kwargs=s2p_settings.get("rastermap_kwargs"),
             writer_kwargs=writer_kwargs,
             progress_callback=_progress,
         )

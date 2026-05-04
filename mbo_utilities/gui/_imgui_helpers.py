@@ -8,6 +8,8 @@ This module contains:
 - Value formatting utilities
 """
 
+from contextlib import contextmanager
+
 from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 
 __all__ = [
@@ -18,8 +20,34 @@ __all__ = [
     "fmt_value",
     "set_tooltip",
     "settings_row_with_popup",
+    "style_imgui_opaque",
     "style_seaborn_dark",
+    "tooltip_marks_right",
 ]
+
+_IMGUI_OPAQUE_APPLIED = False
+
+
+# stack of override modes for set_tooltip's mark alignment.
+# when populated, the top of the stack overrides the per-call `align` arg.
+# entered via the `tooltip_marks_right()` context manager — used by the
+# unified pipeline-settings popup to right-align (?) markers inside each
+# column-child without affecting set_tooltip's default behavior elsewhere.
+_TOOLTIP_ALIGN_STACK: list[str] = []
+
+
+@contextmanager
+def tooltip_marks_right():
+    """Right-align the (?) marker for any set_tooltip call inside this block.
+
+    Use sparingly — pairs only with set_tooltip calls that happen inside a
+    bounded child window (column / panel) so the right edge is meaningful.
+    """
+    _TOOLTIP_ALIGN_STACK.append("right")
+    try:
+        yield
+    finally:
+        _TOOLTIP_ALIGN_STACK.pop()
 
 
 # =============================================================================
@@ -42,6 +70,56 @@ def begin_popup_size():
     h = min(max(h, 20), 60)
 
     return hello_imgui.em_to_vec2(w, h)
+
+
+# =============================================================================
+# ImGui global styling
+# =============================================================================
+
+
+def style_imgui_opaque():
+    """Force fully opaque popups, modals, child windows, and frames.
+
+    idempotent — safe to call from any per-frame entry point. only mutates
+    the live imgui context the first time it's called.
+    """
+    global _IMGUI_OPAQUE_APPLIED
+    if _IMGUI_OPAQUE_APPLIED:
+        return
+    if imgui.get_current_context() is None:
+        return
+    _IMGUI_OPAQUE_APPLIED = True
+
+    style = imgui.get_style()
+
+    # global alpha — full opacity for everything except disabled widgets
+    style.alpha = 1.0
+    style.disabled_alpha = 0.6
+
+    # window/popup/child backgrounds — fully opaque
+    style.set_color_(imgui.Col_.window_bg.value, ImVec4(0.07, 0.08, 0.10, 1.00))
+    style.set_color_(imgui.Col_.child_bg.value, ImVec4(0.07, 0.08, 0.10, 1.00))
+    style.set_color_(imgui.Col_.popup_bg.value, ImVec4(0.07, 0.08, 0.10, 1.00))
+    style.set_color_(imgui.Col_.menu_bar_bg.value, ImVec4(0.10, 0.11, 0.13, 1.00))
+
+    # frame backgrounds (inputs, sliders, checkboxes) — opaque so they
+    # don't bleed through the popup they sit in
+    style.set_color_(imgui.Col_.frame_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))
+    style.set_color_(imgui.Col_.frame_bg_hovered.value, ImVec4(0.18, 0.20, 0.24, 1.00))
+    style.set_color_(imgui.Col_.frame_bg_active.value, ImVec4(0.22, 0.25, 0.30, 1.00))
+
+    # title bars
+    style.set_color_(imgui.Col_.title_bg.value, ImVec4(0.05, 0.06, 0.08, 1.00))
+    style.set_color_(imgui.Col_.title_bg_active.value, ImVec4(0.10, 0.12, 0.16, 1.00))
+    style.set_color_(imgui.Col_.title_bg_collapsed.value, ImVec4(0.05, 0.06, 0.08, 1.00))
+
+    # borders — solid
+    style.set_color_(imgui.Col_.border.value, ImVec4(0.30, 0.32, 0.36, 1.00))
+    style.set_color_(imgui.Col_.border_shadow.value, ImVec4(0.00, 0.00, 0.00, 0.00))
+
+    # dim overlay drawn behind a modal — strong dark to hide app contents
+    style.set_color_(imgui.Col_.modal_window_dim_bg.value, ImVec4(0.0, 0.0, 0.0, 0.85))
+    style.set_color_(imgui.Col_.nav_windowing_dim_bg.value, ImVec4(0.0, 0.0, 0.0, 0.85))
 
 
 # =============================================================================
@@ -129,10 +207,28 @@ def checkbox_with_tooltip(label: str, value: bool, tooltip: str) -> bool:
     return value
 
 
-def set_tooltip(tooltip: str, show_mark: bool = True) -> None:
-    """Set a tooltip on the previous item, optionally with a (?) marker."""
+def set_tooltip(
+    tooltip: str, show_mark: bool = True, align: str = "left"
+) -> None:
+    """Set a tooltip on the previous item, optionally with a (?) marker.
+
+    `align` controls (?) placement: "left" (default, immediately after the
+    previous item) or "right" (snapped to the right edge of the current
+    window/column). The active `tooltip_marks_right()` context manager, if
+    any, overrides `align`.
+    """
     if show_mark:
         imgui.same_line()
+        effective_align = (
+            _TOOLTIP_ALIGN_STACK[-1] if _TOOLTIP_ALIGN_STACK else align
+        )
+        if effective_align == "right":
+            avail = imgui.get_content_region_avail().x
+            qm = imgui.calc_text_size("(?)").x
+            if avail > qm + 4:
+                imgui.set_cursor_pos_x(
+                    imgui.get_cursor_pos_x() + avail - qm - 4
+                )
         imgui.text_disabled("(?)")
     if imgui.is_item_hovered():
         imgui.begin_tooltip()

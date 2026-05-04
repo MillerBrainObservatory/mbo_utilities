@@ -52,9 +52,8 @@ def draw_menu_bar(parent: Any):
                         start_dir = str(get_last_dir("open_folder") or Path.home())
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
-                if imgui.menu_item("Set Metadata", "", p_selected=False, enabled=True)[0]:
-                    parent._saveas_popup_open = True
-                    parent._saveas_select_metadata_tab = True
+                if imgui.menu_item("Set Metadata", "Shift+M", p_selected=False, enabled=True)[0]:
+                    parent._show_metadata_popup = True
                 imgui.separator()
                 # Check if current data supports imwrite
                 can_save = parent.is_mbo_scan
@@ -248,6 +247,7 @@ def draw_keybinds_popup(parent: Any):
             ("File", None),
             ("o", "Open file"),
             ("Shift + O", "Open folder"),
+            ("Shift + M", "Set metadata"),
             ("s", "Save as"),
             ("", ""),
             ("View", None),

@@ -20,7 +20,6 @@ _doc_cache: dict[str, str] = {}
 # available docs: (display_name, filename)
 DOCS = [
     ("Quick Start", "gui_quickstart.md"),
-    ("Keybinds", "keybinds.md"),
     ("File Formats", "file_formats.md"),
 ]
 
@@ -193,72 +192,15 @@ def _render_inline(text: str, base_color: imgui.ImVec4 = _C_NORMAL) -> None:
         first_on_line = False
 
 
-_TABLE_COUNTER = [0]
-
-
-def _flush_table(rows: list, has_header: bool) -> None:
-    """Render a buffered set of pipe-table rows using imgui.begin_table
-    so columns actually line up.
-
-    `rows` is a list of lists of cell strings. `has_header` is True iff
-    the markdown source had a `|---|...|` separator after the first row;
-    in that case the first row gets the header style.
-    """
-    if not rows:
-        return
-    n_cols = max(len(r) for r in rows)
-    _TABLE_COUNTER[0] += 1
-    table_id = f"##help_table_{_TABLE_COUNTER[0]}"
-    flags = (
-        imgui.TableFlags_.sizing_fixed_fit
-        | imgui.TableFlags_.no_borders_in_body
-        | imgui.TableFlags_.no_host_extend_x
-    )
-    if not imgui.begin_table(table_id, n_cols, flags):
-        return
-    try:
-        for col in range(n_cols):
-            imgui.table_setup_column(
-                f"col{col}", imgui.TableColumnFlags_.width_fixed
-            )
-        start = 0
-        if has_header:
-            imgui.table_next_row()
-            for col, cell in enumerate(rows[0]):
-                imgui.table_set_column_index(col)
-                # headers in white (bold surrogate)
-                imgui.push_style_color(imgui.Col_.text, _C_BOLD)
-                _render_inline(cell, base_color=_C_BOLD)
-                imgui.pop_style_color()
-            start = 1
-        for row in rows[start:]:
-            imgui.table_next_row()
-            for col, cell in enumerate(row):
-                imgui.table_set_column_index(col)
-                _render_inline(cell)
-    finally:
-        imgui.end_table()
-
-
 def _render_markdown(content: str) -> None:
     """render markdown content with basic formatting."""
     in_code_block = False
-    table_rows: list[list[str]] = []
-    table_has_header = False
-
-    def _maybe_flush_table():
-        nonlocal table_rows, table_has_header
-        if table_rows:
-            _flush_table(table_rows, table_has_header)
-            table_rows = []
-            table_has_header = False
 
     for line in content.split("\n"):
         stripped = line.strip()
 
         # code blocks
         if stripped.startswith("```"):
-            _maybe_flush_table()
             in_code_block = not in_code_block
             continue
         if in_code_block:
@@ -273,28 +215,6 @@ def _render_markdown(content: str) -> None:
             finally:
                 imgui.pop_style_color()
             continue
-
-        # tables: collect rows; render via imgui.begin_table on flush.
-        if stripped.startswith("|"):
-            sep_only = (
-                stripped.replace("|", "")
-                .replace("-", "")
-                .replace(":", "")
-                .replace(" ", "")
-                == ""
-            )
-            if sep_only:
-                # this is the header separator. mark the previous row
-                # (already buffered) as the header.
-                if table_rows:
-                    table_has_header = True
-                continue
-            cells = [c.strip() for c in stripped.split("|")[1:-1]]
-            if cells:
-                table_rows.append(cells)
-            continue
-        # any non-table line ends the current table
-        _maybe_flush_table()
 
         # empty lines
         if not stripped:
@@ -336,6 +256,3 @@ def _render_markdown(content: str) -> None:
 
         # regular paragraph — wrap and apply inline spans
         _render_inline(stripped)
-
-    # end-of-document flush
-    _maybe_flush_table()

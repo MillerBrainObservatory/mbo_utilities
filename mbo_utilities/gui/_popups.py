@@ -207,14 +207,17 @@ def _draw_process_entry(pm: Any, proc: Any) -> None:
         tree_open = imgui.tree_node(f"Log Output##proc_{proc.pid}")
         if tree_open:
             try:
-                lines = proc.tail_log(30)
+                lines = proc.tail_log(500)
                 line_height = imgui.get_text_line_height_with_spacing()
-                max_height = 180
+                max_height = 320
                 content_h = min(len(lines) * line_height + 8, max_height) if lines else line_height + 8
 
                 child_flags = imgui.ChildFlags_.borders
                 # begin_child always needs end_child, regardless of return value
                 imgui.begin_child(f"##log_{proc.pid}", ImVec2(-1, content_h), child_flags)
+                # only auto-scroll when user is already pinned to the bottom;
+                # otherwise scrolling up would be overridden every frame
+                at_bottom = imgui.get_scroll_y() >= imgui.get_scroll_max_y() - 1.0
                 for line in lines:
                     line_stripped = line.strip()
                     # color code log lines
@@ -226,8 +229,8 @@ def _draw_process_entry(pm: Any, proc: Any) -> None:
                         imgui.text_colored(imgui.ImVec4(0.4, 1.0, 0.4, 1.0), line_stripped)
                     else:
                         imgui.text(line_stripped)
-                # auto-scroll to bottom
-                imgui.set_scroll_here_y(1.0)
+                if at_bottom:
+                    imgui.set_scroll_here_y(1.0)
                 imgui.end_child()
             finally:
                 imgui.tree_pop()

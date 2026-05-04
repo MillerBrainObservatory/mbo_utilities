@@ -520,10 +520,10 @@ def _create_image_widget(data_array, widget: bool = True):
         figure_kwargs = {
             "canvas": "pyqt6",
             "canvas_kwargs": {"present_method": "bitmap"},
-            "size": (800, 800)
+            "size": (1000, 1000)
         }
     else:
-        figure_kwargs = {"size": (800, 800)}
+        figure_kwargs = {"size": (1000, 1000)}
 
     # Determine slider dimension names from array's dims property if available
     from mbo_utilities.arrays.features import get_slider_dims

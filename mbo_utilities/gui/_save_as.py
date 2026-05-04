@@ -20,7 +20,7 @@ from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_time
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._selection_ui import draw_selection_table
-from mbo_utilities.gui._metadata_editor import _check_missing_metadata, draw_metadata_editor_content
+from mbo_utilities.gui._metadata_editor import _check_missing_metadata
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 import contextlib
@@ -156,19 +156,10 @@ def draw_saveas_popup(parent: Any):
     if opened:
         parent._saveas_modal_open = True
 
-        # one-shot tab selection: consume on the frame AFTER open_popup
-        # so imgui has time to create the tab bar first
-        select_meta = getattr(parent, "_saveas_select_metadata_tab", 0)
-        if select_meta is True:
-            # first frame: mark as pending, don't apply yet
-            parent._saveas_select_metadata_tab = 2
-            select_meta = False
-        elif isinstance(select_meta, int) and select_meta > 1:
-            # second frame: apply and clear
-            parent._saveas_select_metadata_tab = False
-            select_meta = True
-        else:
-            select_meta = False
+        # NOTE: the "Metadata" tab was removed — the metadata editor is now
+        # its own standalone popup (see gui/_metadata_editor.draw_metadata_popup),
+        # opened from File menu → "Set Metadata" or the Shift+M shortcut.
+        # The legacy `_saveas_select_metadata_tab` flag is unused.
 
         if imgui.begin_tab_bar("SaveAsTabBar"):
 
@@ -239,13 +230,6 @@ def draw_saveas_popup(parent: Any):
                 # Options popup (opened by button in _draw_save_button)
                 _draw_options_popup(parent)
 
-                imgui.end_tab_item()
-
-            # === Metadata tab ===
-            meta_flags = imgui.TabItemFlags_.set_selected if select_meta else 0
-            if imgui.begin_tab_item("Metadata", flags=meta_flags)[0]:
-                imgui.dummy(imgui.ImVec2(0, 5))
-                draw_metadata_editor_content(parent)
                 imgui.end_tab_item()
 
             imgui.end_tab_bar()

@@ -165,9 +165,12 @@ def _start_watchdog(uuid: str | None, logger: logging.Logger):
 
 def main():
     """Main entry point for worker subprocess."""
-    # force line buffering so print() output appears in logs immediately
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
+    # force line buffering so print() output appears in logs immediately,
+    # AND force utf-8 stdio so unicode prints from lsp (e.g. `→` U+2192
+    # in run_plane_bin) don't crash on Windows where the default file
+    # encoding for redirected stdio is cp1252.
+    sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+    sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
     # disable tqdm dynamic display for file output (no terminal = no \r updates)
     os.environ["TQDM_DISABLE"] = "1"

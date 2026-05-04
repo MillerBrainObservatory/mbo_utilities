@@ -61,6 +61,7 @@ from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts, rebind_space_
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
+from mbo_utilities.gui._metadata_editor import draw_metadata_popup
 
 
 import fastplotlib as fpl
@@ -137,6 +138,10 @@ class PreviewDataWidget(EdgeWindow):
         if implot.get_current_context() is None:
             implot.create_context()
 
+        # apply opaque imgui style (idempotent, runs once per process)
+        from mbo_utilities.gui._imgui_helpers import style_imgui_opaque
+        style_imgui_opaque()
+
         # Setup ImGui fonts
         self._init_fonts()
 
@@ -203,10 +208,20 @@ class PreviewDataWidget(EdgeWindow):
         start_output_capture()
 
     def _init_suite2p(self):
-        """Initialize Suite2p settings and start background preload."""
-        # start background preload of pipeline widgets (non-blocking)
-        from mbo_utilities.gui.widgets.pipelines import start_preload
-        start_preload()
+        """Initialize Suite2p settings (lazy)."""
+        # NOTE: removed the eager `start_preload()` call here. The preload
+        # spawned a daemon thread that, despite a 1s sleep, ended up
+        # contending for the GIL during fastplotlib's first-paint, so the
+        # widget felt frozen for ~3.5s after the window appeared (suite2p
+        # imports torch/numba/cellpose/scipy — ~3500 modules total).
+        #
+        # Pipeline registration is now fully lazy: `_register_pipelines()`
+        # is called the first time the user opens the Pipeline Settings
+        # popup, and it falls back to a synchronous import on that one
+        # click. Trade-off: ~3.5s pause when the user FIRST opens the
+        # popup, vs. instant widget startup. If you want the preload back
+        # on a different trigger (e.g. when the user navigates to the Run
+        # tab), call `start_preload()` from there.
 
         # defer dataclass creation until actually needed. all three are
         # lazy-initialized by matching properties below.
@@ -245,7 +260,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def s2p_extras(self):
-        """Fork/mbo-only suite2p fields (keep_raw, dff_*, 1P registration)."""
+        """Mbo-only suite2p helper fields (dff_*, accept_all_cells, etc.)."""
         if self._s2p_extras is None and HAS_SUITE2P:
             from mbo_utilities.gui.widgets.pipelines.settings import MboSuite2pExtras
             self._s2p_extras = MboSuite2pExtras()
@@ -271,14 +286,24 @@ class PreviewDataWidget(EdgeWindow):
         )
         io.set_ini_filename(str(fd_settings_dir))
 
-        sans_serif_font = str(
-            Path(imgui_bundle.__file__).parent.joinpath(
-                "assets", "fonts", "Roboto", "Roboto-Regular.ttf"
-            )
+        _fonts_dir = Path(imgui_bundle.__file__).parent.joinpath(
+            "assets", "fonts", "Roboto"
         )
+        sans_serif_font = str(_fonts_dir / "Roboto-Regular.ttf")
         self._default_imgui_font = io.fonts.add_font_from_file_ttf(
             sans_serif_font, 14, imgui.ImFontConfig()
         )
+        # bold-italic variant — used by the pipeline-settings popup to
+        # emphasize "look at these first" parameters listed in
+        # _IMPORTANT_FIELDS. fall back to None if the file is missing
+        # (the popup pushes the font only when non-None).
+        bold_italic_path = _fonts_dir / "Roboto-BoldItalic.ttf"
+        if bold_italic_path.is_file():
+            self._bold_italic_font = io.fonts.add_font_from_file_ttf(
+                str(bold_italic_path), 14, imgui.ImFontConfig()
+            )
+        else:
+            self._bold_italic_font = None
         imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
 
     def _init_state(self):
@@ -431,6 +456,10 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_running = False
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
+
+        # Set Metadata popup — driven by File menu and Shift+M shortcut
+        # (see gui/_metadata_editor.draw_metadata_popup).
+        self._show_metadata_popup = False
 
         # Directories
         save_as_dir = get_last_dir("save_as")
@@ -932,6 +961,7 @@ class PreviewDataWidget(EdgeWindow):
         # Draw independent floating windows
         draw_tools_popups(self)
         draw_saveas_popup(self)
+        draw_metadata_popup(self)
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
         draw_help_popup(self)
