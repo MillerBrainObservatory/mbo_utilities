@@ -61,6 +61,41 @@ def _resolve(root: dict, path: tuple[str, ...]) -> dict | None:
     return cur if isinstance(cur, dict) and "default" in cur else None
 
 
+def _to_py(v: Any) -> Any:
+    """Convert numpy scalars / arrays to Python equivalents.
+
+    Values loaded from .npy come back as numpy types: 0-d arrays for
+    scalars (e.g. tau as np.float64), N-d arrays for sequences (e.g.
+    diameter as np.array([12., 12.])). The rest of this module — and
+    every downstream consumer — assumes Python types: `value == default`,
+    `value in (None, "", [])`, `bool(value)`, etc. all break on
+    multi-element numpy arrays with `truth value of an array with more
+    than one element is ambiguous`. Normalising at the boundary here
+    keeps the rest of the module simple and bug-free.
+
+    No-op for already-Python values; cheap to call defensively.
+    """
+    # numpy scalar wrapped as a 0-d array
+    if hasattr(v, "shape") and v.shape == () and hasattr(v, "item"):
+        try:
+            return v.item()
+        except Exception:
+            return v
+    # multi-element numpy array → tuple of Python scalars
+    if type(v).__name__ == "ndarray":
+        try:
+            return tuple(x.item() if hasattr(x, "item") else x for x in v.tolist())
+        except Exception:
+            return v
+    # numpy scalar that isn't a 0-d array (e.g. np.float64) — has .item()
+    if hasattr(v, "item") and v.__class__.__module__ == "numpy":
+        try:
+            return v.item()
+        except Exception:
+            return v
+    return v
+
+
 # (mbo_field) -> (upstream path, optional list/tuple index)
 # - upstream path is a tuple of keys into SETTINGS (or DB) ending at a
 #   parameter spec dict (the one with "default", "type", etc.)
@@ -245,10 +280,25 @@ def is_default(mbo_field: str, value: Any) -> bool:
     if mbo_field in MBO_ONLY_FIELDS:
         return False  # no upstream default to compare against
     default = get_default(mbo_field)
-    if default is None and value in (None, "", []):
-        return True
-    if value == default:
-        return True
+    # normalize at the boundary — numpy types leak through ops.npy round
+    # trips and break `value in (...)` / `value == default` with
+    # `truth value of an array with more than one element is ambiguous`.
+    value = _to_py(value)
+    default = _to_py(default)
+    # treat any equality / membership exception as "not default" so a
+    # surprising type combination doesn't crash the gui — the user
+    # sees the field as modified, which is the safer bias (visually
+    # flags it for review).
+    try:
+        if default is None and value in (None, "", [], ()):
+            return True
+    except Exception:
+        pass
+    try:
+        if value == default:
+            return True
+    except Exception:
+        pass
     # numeric comparison with float32 tolerance, but never compare bool to
     # number (Python's `True == 1` would otherwise sneak past).
     if (
@@ -258,9 +308,12 @@ def is_default(mbo_field: str, value: Any) -> bool:
         and not isinstance(default, bool)
     ):
         import math
-        return math.isclose(
-            float(value), float(default), rel_tol=1e-6, abs_tol=1e-9
-        )
+        try:
+            return math.isclose(
+                float(value), float(default), rel_tol=1e-6, abs_tol=1e-9
+            )
+        except Exception:
+            return False
     return False
 
 
@@ -443,6 +496,14 @@ _FLAT_TO_MBO: dict[str, Any] = {
     "win_baseline": "win_baseline",
     "sig_baseline": "sig_baseline",
     "prctile_baseline": "prctile_baseline",
+    # mbo-only post-processing knobs (MboSuite2pExtras). lsp persists
+    # these as top-level ops keys after the post-processing block runs,
+    # outside the suite2p settings schema (so settings.npy stays a
+    # record of the suite2p stages only). Listed here so flat-ops
+    # loaders pick them up; the hydrator routes them to s2p_extras.
+    "dff_window_size": "dff_window_size",
+    "dff_percentile": "dff_percentile",
+    "dff_smooth_window": "dff_smooth_window",
 }
 
 
@@ -475,9 +536,16 @@ def from_structured(settings: dict) -> dict[str, Any]:
             cur = cur[k]
         if not ok:
             continue
+        # normalize numpy types at the boundary so downstream code only
+        # ever sees Python scalars / tuples (`is_default`, type-coercion
+        # in the gui hydrator, etc. all break on numpy multi-element
+        # arrays — `truth value ambiguous`).
+        cur = _to_py(cur)
         if idx is not None:
+            # accept any sequence here (numpy arrays now arrive as
+            # tuples after _to_py, but also handle list/tuple defensively).
             if isinstance(cur, (list, tuple)) and idx < len(cur):
-                out[mbo_field] = cur[idx]
+                out[mbo_field] = _to_py(cur[idx])
             continue
         if mbo_field == "align_by_chan":
             out[mbo_field] = 2 if cur else 1
@@ -489,7 +557,7 @@ def from_structured(settings: dict) -> dict[str, Any]:
     cp = settings.get("detection", {}).get("cellpose_settings", {}) if isinstance(settings.get("detection"), dict) else {}
     params = cp.get("params") if isinstance(cp, dict) else None
     if isinstance(params, dict) and "niter" in params:
-        out["cellpose_niter"] = int(params["niter"])
+        out["cellpose_niter"] = int(_to_py(params["niter"]))
     return out
 
 
@@ -505,21 +573,28 @@ def from_flat(ops: dict) -> dict[str, Any]:
     for flat_key, target in _FLAT_TO_MBO.items():
         if flat_key not in ops:
             continue
-        v = ops[flat_key]
+        # normalize numpy at the boundary — diameter, block_size,
+        # det_block_size land here as np.ndarray when ops.npy was
+        # produced via numpy. _to_py turns 0-d arrays into scalars and
+        # multi-element arrays into tuples so the unpack and downstream
+        # comparisons work correctly.
+        v = _to_py(ops[flat_key])
         # (mbo_field, callable) transform
         if isinstance(target, tuple) and len(target) == 2 and callable(target[1]):
             out[target[0]] = target[1](v)
             continue
-        # (y_field, x_field) list unpack
+        # (y_field, x_field) list unpack — covers diameter, block_size,
+        # det_block_size. v is now guaranteed to be a Python tuple/list
+        # if it was a numpy array, so the isinstance check works.
         if isinstance(target, tuple):
             yf, xf = target
             if isinstance(v, (list, tuple)):
                 if len(v) >= 1:
-                    out[yf] = v[0]
+                    out[yf] = _to_py(v[0])
                 if len(v) >= 2:
-                    out[xf] = v[1]
+                    out[xf] = _to_py(v[1])
                 else:
-                    out[xf] = v[0]
+                    out[xf] = _to_py(v[0])
             else:
                 out[yf] = v
                 out[xf] = v

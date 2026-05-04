@@ -7,7 +7,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
+from imgui_bundle import (
+    imgui,
+    imgui_ctx,
+    portable_file_dialogs as pfd,
+    hello_imgui,
+    icons_fontawesome_6 as fa,
+)
 
 from mbo_utilities.gui._imgui_helpers import (
     set_tooltip,
@@ -127,15 +133,28 @@ _rm_install_thread: "threading.Thread | None" = None
 
 
 def _do_rastermap_install_check() -> None:
-    """Worker — import rastermap and capture its version string."""
+    """Worker — confirm rastermap is importable and capture its version.
+
+    Version source priority:
+      1. importlib.metadata.version("rastermap") — canonical package
+         metadata (works even when the module doesn't expose __version__,
+         which is the case for current rastermap releases).
+      2. rastermap.__version__ — fallback if metadata lookup fails.
+      3. "unknown" — last resort; module imports but no version found.
+    """
     global _rm_install
     try:
         import importlib
         importlib.invalidate_caches()  # pick up packages installed mid-session
         mod = importlib.import_module("rastermap")
-        version = getattr(mod, "__version__", "installed")
+        version: str
+        try:
+            from importlib.metadata import version as _pkg_version
+            version = _pkg_version("rastermap")
+        except Exception:
+            version = str(getattr(mod, "__version__", "unknown"))
         with _rm_install_lock:
-            _rm_install = ("ok", str(version))
+            _rm_install = ("ok", version)
     except Exception:
         with _rm_install_lock:
             _rm_install = ("missing", None)
@@ -245,6 +264,39 @@ def build_planar_rastermap_kwargs(extras) -> dict | None:
     if extras.rastermap_mode == 0 or not extras.rastermap_planar:
         return None
     return _build_planar_sub(extras)
+
+
+def collect_modified_params(s2p, s2p_db) -> list[tuple[str, object, object]]:
+    """Return list of (mbo_field, current_value, upstream_default) tuples
+    for every mapped suite2p / db field where the current value differs
+    from the upstream default. Sorted alphabetically by field name.
+
+    Drives the "modified parameters" preview on the Run tab so users can
+    see at a glance what their settings.npy / db.npy hydration changed
+    away from the suite2p factory defaults.
+    """
+    from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
+        _MBO_TO_S2P,
+        _MBO_DB_TO_S2P,
+        get_default,
+        is_default,
+    )
+
+    out: list[tuple[str, object, object]] = []
+    for field in _MBO_TO_S2P:
+        if not hasattr(s2p, field):
+            continue
+        cur = getattr(s2p, field)
+        if not is_default(field, cur):
+            out.append((field, cur, get_default(field)))
+    for field in _MBO_DB_TO_S2P:
+        if not hasattr(s2p_db, field):
+            continue
+        cur = getattr(s2p_db, field)
+        if not is_default(field, cur):
+            out.append((field, cur, get_default(field)))
+    out.sort(key=lambda t: t[0])
+    return out
 
 
 def draw_suite2p_settings_panel(
@@ -1391,26 +1443,48 @@ def _draw_section_suite2p_content(self):
     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
     has_save_path = bool(s2p_path)
 
-    # uniform button width — used by Browse, Data Slicing, Data Options,
-    # Pipeline Settings, and Run Suite2p so the column reads tidily.
-    _BTN_W = 180
+    # button-width constants:
+    #   _RUN_W: full-width green Run Suite2p button at the bottom
+    #   _BTN_W: small "Open" / "Set slice" entry buttons next to titles
+    #   _ICON_W: square icon-only button (folder picker)
+    _RUN_W = 220
+    _BTN_W = 90
+    _ICON_W = imgui.get_frame_height()  # square; matches frame height
 
     # === OUTPUT FOLDER ===
-    # [Browse] opens the folder picker directly. The path text field below
-    # is fully editable — typing or pasting works the same as picking via
-    # the dialog. Both write to self._s2p_outdir.
+    # Section title + small folder-icon Browse button + full-width
+    # editable path. The text input below is fully editable — typing or
+    # pasting works the same as picking via the dialog. Both write to
+    # self._s2p_outdir.
     #
-    # NOTE: the "Metadata" button was removed — the metadata editor is now
-    # accessible only via File menu → "Set Metadata" or the Shift+M shortcut.
+    # NOTE: the "Metadata" button was removed — the metadata editor is
+    # now accessible only via File menu → "Set Metadata" or Shift+M.
     imgui.spacing()
-    if imgui.button("Browse", imgui.ImVec2(_BTN_W, 0)):
+    imgui.text_colored(_SUBSECTION_COLOR, "Select output data folder")
+    if imgui.button(
+        f"{fa.ICON_FA_FOLDER_OPEN}##s2p_browse",
+        imgui.ImVec2(_ICON_W, _ICON_W),
+    ):
         default_dir = s2p_path or str(
             get_last_dir("suite2p_output") or pathlib.Path().home()
         )
         self._s2p_folder_dialog = pfd.select_folder(
             "Select Suite2p output folder", default_dir
         )
-    set_tooltip("Pick the suite2p output folder via the system file dialog")
+    set_tooltip("Browse for the suite2p output folder")
+    imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+    # editable path field — fills the rest of the row
+    imgui.set_next_item_width(-1)
+    _path_changed, _new_path = imgui.input_text(
+        "##s2p_outdir", self._s2p_outdir or ""
+    )
+    if _path_changed:
+        self._s2p_outdir = _new_path
+        s2p_path = _new_path
+        has_save_path = bool(_new_path)
+    set_tooltip(
+        "Final output folder. Type / paste a path or use the folder button."
+    )
 
     # consume async folder-dialog result on the frame it becomes ready
     if (
@@ -1423,32 +1497,18 @@ def _draw_section_suite2p_content(self):
             set_last_dir("suite2p_output", result)
         self._s2p_folder_dialog = None
 
-    # editable path field — full width
-    imgui.set_next_item_width(-1)
-    _path_changed, _new_path = imgui.input_text(
-        "##s2p_outdir", self._s2p_outdir or ""
-    )
-    if _path_changed:
-        self._s2p_outdir = _new_path
-        s2p_path = _new_path
-        has_save_path = bool(_new_path)
-    set_tooltip(
-        "Final output folder. Type / paste a path or use the Browse button."
-    )
-
     imgui.spacing()
     imgui.spacing()
 
     # === DATA SLICING ===
-    if imgui.button("Data Slicing", imgui.ImVec2(_BTN_W, 0)):
+    imgui.text_colored(_SUBSECTION_COLOR, "Data slicing")
+    if imgui.button("Set slice", imgui.ImVec2(_BTN_W, 0)):
         self._s2p_slicing_open = True
     set_tooltip("Choose which timepoints, z-planes, and channels to process")
+    imgui.same_line(0, imgui.get_style().item_inner_spacing.x * 2)
+    _draw_s2p_selection_preview(self, max_frames, num_planes, num_channels)
 
     _draw_s2p_slicing_popup(self)
-
-    imgui.indent(8)
-    _draw_s2p_selection_preview(self, max_frames, num_planes, num_channels)
-    imgui.unindent(8)
 
     imgui.spacing()
     imgui.spacing()
@@ -1824,7 +1884,10 @@ def _draw_section_suite2p_content(self):
             )
         set_tooltip("Maximum allowed shift as a fraction of the image size.")
 
-        # bidirectional phase offset (2P only)
+        # bidirectional phase offset (2P only). The user-provided offset
+        # is mutually exclusive with auto-compute: when do_bidiphase is on
+        # suite2p ignores the manual value, so we grey the input out to
+        # signal that and prevent stale edits.
         with _hi("do_bidiphase", self.s2p.do_bidiphase):
             _, self.s2p.do_bidiphase = imgui.checkbox(
                 "Compute bidiphase", self.s2p.do_bidiphase
@@ -1834,10 +1897,12 @@ def _draw_section_suite2p_content(self):
             "to all frames (2P only)."
         )
         imgui.set_next_item_width(INPUT_WIDTH)
+        imgui.begin_disabled(self.s2p.do_bidiphase)
         with _hi("bidiphase", self.s2p.bidiphase):
             _, self.s2p.bidiphase = imgui.input_float(
                 "Bidiphase offset", self.s2p.bidiphase, 0.0, 0.0, "%.2f"
             )
+        imgui.end_disabled()
         set_tooltip(
             "User-provided bidirectional phase offset; applied to all frames "
             "when 'Compute bidiphase' is off."
@@ -2574,17 +2639,22 @@ def _draw_section_suite2p_content(self):
                 self._classifier_dialog = None
 
     # === ENTRY BUTTONS ===
-    # stacked vertically (Data Options first, then Pipeline Settings, then
-    # Run Suite2p) so they share a consistent width with Browse and Data
-    # Slicing above. Data Options is data-specific (scan-phase, axial
-    # reg); Pipeline Settings opens the unified pipeline-step parameters
-    # popup; Run Suite2p kicks off the actual run.
-    if imgui.button("Data Options", imgui.ImVec2(_BTN_W, 0)):
+    # Each section: light-blue title (matching the Pipeline Settings
+    # popup convention) + small Open button below it. Data Options is
+    # data-specific (scan-phase, axial reg); Pipeline Settings opens the
+    # unified pipeline-step parameters popup. The popup itself is
+    # declared further down once the per-column closures are in scope.
+    imgui.text_colored(_SUBSECTION_COLOR, "Data-specific options")
+    if imgui.button("Open##data_options_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["data_options"] = True
         imgui.open_popup("Data Options##data_options")
-    set_tooltip("Data-specific options (scan-phase correction, axial registration)")
+    set_tooltip("Open data-specific options (scan-phase, axial registration)")
 
-    if imgui.button("Pipeline Settings", imgui.ImVec2(_BTN_W, 0)):
+    imgui.spacing()
+    imgui.spacing()
+
+    imgui.text_colored(_SUBSECTION_COLOR, "Parameters and settings")
+    if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["pipeline_settings"] = True
         # one-shot: tells the popup body to auto-fit its content on this
         # frame so the user gets a "tall enough — no scrollbars" view
@@ -2592,12 +2662,51 @@ def _draw_section_suite2p_content(self):
         # popup is freely user-resizable afterwards.
         self._pipe_settings_just_opened = True
         imgui.open_popup("Pipeline Settings##pipeline_settings_popup")
-    set_tooltip("Configure all pipeline-step parameters in one popup")
+    set_tooltip("Open the unified pipeline-step parameters popup")
+
+    imgui.spacing()
+    imgui.spacing()
+
+    # === MODIFIED PARAMETERS PREVIEW ===
+    # Shows fields whose current value differs from the upstream suite2p
+    # default. Driven by collect_modified_params() which iterates the
+    # _MBO_TO_S2P / _MBO_DB_TO_S2P maps and uses _is_default() for the
+    # diff check. Useful right after a settings.npy hydration so the
+    # user can see at a glance what's changed.
+    imgui.text_colored(_SUBSECTION_COLOR, "Modified parameters")
+    _mods = collect_modified_params(self.s2p, self.s2p_db)
+    if _mods:
+        # bounded scroll region — caps height so this section never
+        # eats the Run Suite2p button's space when many fields differ.
+        _mod_h = min(160, imgui.get_frame_height_with_spacing() * (len(_mods) + 1))
+        if imgui.begin_child(
+            "##mod_params",
+            imgui.ImVec2(-1, _mod_h),
+            imgui.ChildFlags_.borders,
+        ):
+            for _field, _cur, _def in _mods:
+                _cur_s = (
+                    f"{_cur:.3g}" if isinstance(_cur, float) else str(_cur)
+                )
+                _def_s = (
+                    f"{_def:.3g}" if isinstance(_def, float) else str(_def)
+                )
+                imgui.text_colored(_MODIFIED_COLOR, _field)
+                imgui.same_line()
+                imgui.text(f": {_cur_s}")
+                imgui.same_line()
+                imgui.text_disabled(f"(default: {_def_s})")
+        imgui.end_child()
+    else:
+        imgui.text_disabled("Run pipeline to view parameters")
+
+    imgui.spacing()
+    imgui.spacing()
 
     # === RUN SUITE2P BUTTON ===
-    # Same width as the other entry buttons; left-aligned in the column
-    # for a tidy stack. Disabled until an output path is set; greenish
-    # styling so it still reads as the primary action.
+    # Wider button than the entry "Open" buttons so it reads as the
+    # primary action. Disabled until an output path is set; green style
+    # signals "this kicks off the work".
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
     imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
     imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
@@ -2605,7 +2714,7 @@ def _draw_section_suite2p_content(self):
     if not has_save_path:
         imgui.begin_disabled()
 
-    button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(_BTN_W, 0))
+    button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(_RUN_W, 0))
 
     if not has_save_path:
         imgui.end_disabled()
@@ -2613,7 +2722,9 @@ def _draw_section_suite2p_content(self):
     imgui.pop_style_color(3)
 
     if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-        imgui.set_tooltip("Set output path via Browse or by typing in the path field")
+        imgui.set_tooltip(
+            "Set the output folder above (folder button or paste a path)"
+        )
 
     if button_clicked and has_save_path:
         run_process(self)
@@ -2980,12 +3091,51 @@ def _draw_section_suite2p_content(self):
 
                 imgui.spacing()
                 imgui.separator()
-                # Reset all upstream-mapped fields to suite2p defaults.
-                # Pulls live values from suite2p.parameters.SETTINGS via the
-                # schema helper, so when upstream bumps a default the
-                # button picks it up automatically.
-                # Width 0 = auto-fit to label + frame padding.
-                if imgui.button("Reset to suite2p defaults"):
+                # Bottom button row: Run Suite2p (green, left) | Reset
+                # (suite2p-yellow, middle) | Close (red, right). Run and
+                # Reset share one width derived from the Reset label so
+                # they read as a matched pair; Close stays compact and
+                # right-aligned regardless of popup width.
+                _reset_label = "Reset to suite2p defaults"
+                _frame_pad_x = imgui.get_style().frame_padding.x
+                _btn_w = imgui.calc_text_size(_reset_label).x + 2 * _frame_pad_x
+                _close_w = 60
+                _pad_x = imgui.get_style().window_padding.x
+
+                # Run Suite2p (green) — kicks off the same run_process used
+                # by the column-level button, then dismisses the popup.
+                # Disabled when no output path is set, matching the
+                # column button.
+                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
+                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
+                imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
+                if not has_save_path:
+                    imgui.begin_disabled()
+                _run_clicked = imgui.button("Run Suite2p##pipeline_settings_run", imgui.ImVec2(_btn_w, 0))
+                if not has_save_path:
+                    imgui.end_disabled()
+                imgui.pop_style_color(3)
+                if not has_save_path and imgui.is_item_hovered(
+                    imgui.HoveredFlags_.allow_when_disabled
+                ):
+                    imgui.set_tooltip(
+                        "Set output path via Browse or by typing in the path field"
+                    )
+                if _run_clicked and has_save_path:
+                    run_process(self)
+                    _popup_states["pipeline_settings"] = False
+                    imgui.close_current_popup()
+
+                imgui.same_line()
+
+                # Reset to suite2p defaults — suite2p-yellow. Pulls live
+                # values from suite2p.parameters.SETTINGS via the schema
+                # helper, so when upstream bumps a default the button
+                # picks it up automatically.
+                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.55, 0.45, 0.15, 1.0))
+                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.70, 0.60, 0.22, 1.0))
+                imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.45, 0.38, 0.12, 1.0))
+                if imgui.button(_reset_label, imgui.ImVec2(_btn_w, 0)):
                     from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
                         all_mapped_fields as _all_fields,
                         get_default as _get_default,
@@ -3020,6 +3170,7 @@ def _draw_section_suite2p_content(self):
                             except (TypeError, ValueError, OverflowError):
                                 continue
                         setattr(_target, _f, _new)
+                imgui.pop_style_color(3)
                 set_tooltip(
                     "Reset every parameter in this popup to its upstream "
                     "suite2p default (from suite2p.parameters.SETTINGS).\n\n"
@@ -3027,19 +3178,21 @@ def _draw_section_suite2p_content(self):
                     "dff_*) — shown in green — are NOT touched. Only the "
                     "upstream-mapped (orange-when-modified) fields are reset."
                 )
-                # Right-align a compact Close button on the same line.
-                # `set_cursor_pos_x` jumps to (window_right_edge - button_w -
-                # window_padding) so the button hugs the right side regardless
-                # of how wide the popup is when the user resizes it.
-                _close_w = 60
-                _pad_x = imgui.get_style().window_padding.x
+
+                # Close (red) — right-aligned. `set_cursor_pos_x` snaps
+                # to (window_right_edge - button_w - window_padding) so
+                # the button hugs the right side regardless of popup width.
                 imgui.same_line()
                 imgui.set_cursor_pos_x(
                     imgui.get_window_width() - _close_w - _pad_x
                 )
+                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.55, 0.13, 0.13, 1.0))
+                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.65, 0.18, 0.18, 1.0))
+                imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.45, 0.10, 0.10, 1.0))
                 if imgui.button("Close##pipeline_settings", imgui.ImVec2(_close_w, 0)):
                     _popup_states["pipeline_settings"] = False
                     imgui.close_current_popup()
+                imgui.pop_style_color(3)
 
                 # End of the auto-fit frame — clear the one-shot flag
                 # so subsequent frames let the popup be user-resizable
