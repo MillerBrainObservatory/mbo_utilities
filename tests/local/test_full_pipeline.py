@@ -5,7 +5,7 @@ usage:
     uv run pytest tests/local/test_full_pipeline.py -v -s
     KEEP_TEST_OUTPUT=1 uv run pytest tests/local/test_full_pipeline.py -v -s
 
-test input: E:/tests/lbm/mbo_utilities/test_input.tif (14 z-planes)
+test input: ~/.mbo/tests/lbm/mbo_utilities/test_input.tif (14 z-planes)
 """
 
 import shutil
@@ -18,8 +18,9 @@ import pytest
 
 import mbo_utilities as mbo
 
-TEST_INPUT = Path("E:/tests/lbm/mbo_utilities/test_input.tif")
-OUTPUT_ROOT = Path("E:/tests/lbm/mbo_utilities/test_outputs/full_pipeline")
+_TEST_DATA_ROOT = Path.home() / ".mbo" / "tests" / "lbm" / "mbo_utilities"
+TEST_INPUT = _TEST_DATA_ROOT / "test_input.tif"
+OUTPUT_ROOT = _TEST_DATA_ROOT / "test_outputs" / "full_pipeline"
 
 # formats to test
 WRITE_FORMATS = [".tiff", ".zarr", ".h5", ".bin"]
