@@ -9,6 +9,7 @@ imports are done in a background thread to avoid blocking the GUI.
 
 from typing import Any
 import threading
+import time
 
 from imgui_bundle import imgui
 
@@ -21,6 +22,12 @@ _REGISTRATION_LOCK = threading.Lock()
 _REGISTRATION_STARTED = False
 _REGISTRATION_COMPLETE = False
 
+# delay before the bg thread starts heavy imports. lets the main thread
+# finish painting the first frame and initializing fastplotlib/qt
+# without GIL contention from a multi-second suite2p import. tune via
+# start_preload(delay_s=...) if needed.
+_PRELOAD_DELAY_S = 1.0
+
 
 def _register_pipelines_sync() -> None:
     """Register pipeline widgets (called from background thread)."""
@@ -31,7 +38,10 @@ def _register_pipelines_sync() -> None:
             _REGISTRATION_COMPLETE = True
             return
 
-        # preload settings module first (it's imported by Suite2pPipelineWidget.__init__)
+        # preload settings module first (it's imported by Suite2pPipelineWidget.__init__).
+        # _s2p_schema is now lazy, so this import is cheap — it does NOT
+        # transitively pull in suite2p. the actual suite2p load happens
+        # in the warm_up step below.
         try:
             from mbo_utilities.gui.widgets.pipelines import settings as _  # noqa: F401
         except Exception:
@@ -50,12 +60,32 @@ def _register_pipelines_sync() -> None:
 
         _REGISTRATION_COMPLETE = True
 
+    # explicitly warm up suite2p.parameters now (still on bg thread).
+    # _s2p_schema's lazy loader is idempotent + thread-safe; if the user
+    # opens the popup before this finishes, they wait on the same lock.
+    try:
+        from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
+            warm_up_suite2p_schema,
+        )
+        warm_up_suite2p_schema()
+    except Exception:
+        pass
 
-def start_preload() -> None:
-    """Start background preloading of pipeline widgets.
+
+def _delayed_preload(delay_s: float) -> None:
+    """Sleep, then run the heavy preload. Runs in a daemon thread."""
+    if delay_s > 0:
+        time.sleep(delay_s)
+    _register_pipelines_sync()
+
+
+def start_preload(delay_s: float | None = None) -> None:
+    """Start background preloading of pipeline widgets + suite2p schema.
 
     Call this early (e.g., on GUI startup) to warm up imports
-    before the user clicks the Run tab.
+    before the user clicks the Run tab. The bg thread sleeps briefly
+    before doing heavy work so it doesn't contend with the main
+    thread during first paint / fastplotlib init.
     """
     global _REGISTRATION_STARTED
 
@@ -63,7 +93,10 @@ def start_preload() -> None:
         return
 
     _REGISTRATION_STARTED = True
-    thread = threading.Thread(target=_register_pipelines_sync, daemon=True)
+    delay = _PRELOAD_DELAY_S if delay_s is None else delay_s
+    thread = threading.Thread(
+        target=_delayed_preload, args=(delay,), daemon=True
+    )
     thread.start()
 
 
