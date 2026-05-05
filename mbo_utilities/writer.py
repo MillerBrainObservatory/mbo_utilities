@@ -39,6 +39,7 @@ def imwrite(
     channels: list | tuple | int | None = None,
     num_frames: int | None = None,
     register_z: bool = False,
+    bake_axial_shifts: bool = False,
     roi_mode: RoiMode | str = RoiMode.concat_y,
     roi: int | Sequence[int] | None = None,
     metadata: dict | None = None,
@@ -115,12 +116,25 @@ def imwrite(
         Number of frames to export. If None (default), exports all frames.
 
     register_z : bool, default=False
-        Compute per-plane rigid shifts via phase correlation and apply
-        them on write. Shifts are cached in ``metadata["plane_shifts"]``.
+        Compute per-plane rigid shifts via phase correlation and store
+        them in ``metadata["plane_shifts"]``. By default the shifts are
+        NOT baked into the bin pixels — apply them at render time
+        (e.g. napari layer ``translate``, or the ``AxiallyAlignedView``
+        wrapper) so per-plane suite2p output stays bit-identical to the
+        unregistered case. Pass ``bake_axial_shifts=True`` to opt in to
+        the legacy behavior of padding/shifting bin pixels on write.
         Optional tunables via kwargs: ``max_frames`` (subsample count,
         default 200), ``chunk_frames`` (streaming batch, default 10),
         ``max_reg_xy`` (search radius in pixels, default 150). GPU is
         used automatically when cupy + CUDA are available.
+
+    bake_axial_shifts : bool, default=False
+        When ``register_z=True``, controls whether the computed shifts
+        are physically applied to the output bin/zarr/h5 pixels (with
+        canvas padding) or stored only as metadata. Default ``False``
+        keeps bins at the raw plane shape; viewers should consume
+        ``plane_shifts`` to align planes at render time. Has no effect
+        when ``register_z=False``.
 
     metadata : dict, optional
         Additional metadata to merge into output file headers/attributes.
@@ -280,7 +294,6 @@ def imwrite(
         # if caller already provided valid shifts in metadata, reuse them.
         if validate_axial_shifts(file_metadata, num_planes):
             logger.info("using plane_shifts already present in metadata.")
-            file_metadata["apply_shift"] = True
             if progress_callback:
                 progress_callback(1.0, "Using cached plane shifts")
         else:
@@ -298,7 +311,20 @@ def imwrite(
                     "axial registration did not produce valid plane_shifts. "
                     "proceeding without registration."
                 )
-                file_metadata["apply_shift"] = False
+
+        # default: shifts are stored in metadata only — viewers apply
+        # them at render time so per-plane outputs stay bit-identical to
+        # the unregistered case. opt in to the legacy "pad and bake into
+        # pixels" behavior with `bake_axial_shifts=True`.
+        file_metadata["apply_shift"] = (
+            bool(bake_axial_shifts)
+            and validate_axial_shifts(file_metadata, num_planes)
+        )
+        if bake_axial_shifts and not file_metadata["apply_shift"]:
+            logger.warning(
+                "bake_axial_shifts=True but no valid plane_shifts available; "
+                "writing bins without baking."
+            )
     else:
         file_metadata["apply_shift"] = False
 

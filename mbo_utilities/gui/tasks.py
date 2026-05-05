@@ -604,11 +604,19 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                     )
 
             if validate_axial_shifts(combined_meta, num_planes_reg):
-                ops["apply_shift"] = True
+                # default: store shifts as metadata only, do not bake into
+                # bin pixels. each plane's bin stays at raw H0 x W0, so
+                # suite2p sees the same input it would with axial reg off.
+                # cross-plane alignment is applied at render time (napari
+                # translate, AxiallyAlignedView, etc.) by reading
+                # ops["plane_shifts"]. opt in to the legacy padded-canvas
+                # behavior with `bake_axial_shifts=True` in the task args.
+                bake = bool(args.get("bake_axial_shifts", False))
+                ops["apply_shift"] = bake
                 ops["plane_shifts"] = list(combined_meta["plane_shifts"])
                 logger.info(
                     f"task_suite2p: axial shifts wired into ops "
-                    f"(apply_shift=True, {num_planes_reg} planes)"
+                    f"(apply_shift={bake}, {num_planes_reg} planes)"
                 )
             else:
                 logger.warning(
@@ -647,6 +655,24 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         "fix_phase": args.get("fix_phase", True),
         "use_fft": args.get("use_fft", True),
     }
+
+    # Rastermap Force → drop cached model.npy in every plane subdir under
+    # output_dir before pipeline runs. lsp's plot_zplane_figures already
+    # deletes the rastermap PNG every run, but reuses model.npy when its
+    # isort length matches n_accepted. Force == "recompute from scratch".
+    if s2p_settings.get("force_rastermap") and s2p_settings.get("rastermap_kwargs") is not None:
+        try:
+            removed = 0
+            for cached in Path(output_dir).glob("plane*/model.npy"):
+                try:
+                    cached.unlink()
+                    removed += 1
+                except OSError as _e:
+                    logger.warning(f"force_rastermap: could not remove {cached}: {_e}")
+            if removed:
+                logger.info(f"force_rastermap: removed {removed} cached model.npy file(s)")
+        except Exception as _e:
+            logger.warning(f"force_rastermap pre-clean failed: {_e}")
 
     try:
         monitor.update(0.1, "Running Suite2p...")
