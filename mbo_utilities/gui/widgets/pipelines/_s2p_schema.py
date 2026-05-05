@@ -267,6 +267,8 @@ def get_default(mbo_field: str) -> Any:
     return default
 
 
+
+
 def is_default(mbo_field: str, value: Any) -> bool:
     """Whether the given value matches upstream's default. False for mbo-only fields.
 
@@ -280,8 +282,8 @@ def is_default(mbo_field: str, value: Any) -> bool:
     if mbo_field in MBO_ONLY_FIELDS:
         return False  # no upstream default to compare against
     default = get_default(mbo_field)
-    # normalize at the boundary — numpy types leak through ops.npy round
-    # trips and break `value in (...)` / `value == default` with
+    # normalize at the boundary — numpy types leak through ops.npy
+    # round-trips and break `value in (...)` / `value == default` with
     # `truth value of an array with more than one element is ambiguous`.
     value = _to_py(value)
     default = _to_py(default)

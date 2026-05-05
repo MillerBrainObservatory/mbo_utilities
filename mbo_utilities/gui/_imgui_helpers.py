@@ -15,6 +15,7 @@ from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 __all__ = [
     "begin_popup_size",
     "checkbox_with_tooltip",
+    "draw_boxed_label",
     "draw_checkbox_grid",
     "fmt_multivalue",
     "fmt_value",
@@ -24,6 +25,52 @@ __all__ = [
     "style_seaborn_dark",
     "tooltip_marks_right",
 ]
+
+
+def draw_boxed_label(
+    text: str,
+    *,
+    font=None,
+    pad_x: float = 4.0,
+    pad_y: float = 2.0,
+    rounding: float = 3.0,
+    thickness: float = 1.0,
+) -> None:
+    """Render `text` as a label surrounded by a thin rectangle.
+
+    Border and text use the current `Col_.text` color, so any pushed text
+    color (e.g. a "modified value" tint) flows through to both. Layout
+    space is claimed via `imgui.dummy`, so a following `same_line()` /
+    `set_tooltip` (?) marker positions correctly.
+
+    If `font` is provided it's pushed for the size measurement, dummy
+    sizing, and text rendering — pass a bold font here for "bold + box"
+    emphasis.
+    """
+    if font is not None:
+        imgui.push_font(font, font.legacy_size)
+    try:
+        text_size = imgui.calc_text_size(text)
+        origin = imgui.get_cursor_screen_pos()
+        box_w = text_size.x + 2 * pad_x
+        box_h = text_size.y + 2 * pad_y
+        imgui.dummy(ImVec2(box_w, box_h))
+        draw_list = imgui.get_window_draw_list()
+        col = imgui.get_color_u32(imgui.Col_.text)
+        draw_list.add_rect(
+            origin,
+            ImVec2(origin.x + box_w, origin.y + box_h),
+            col,
+            rounding,
+            0,
+            thickness,
+        )
+        draw_list.add_text(
+            ImVec2(origin.x + pad_x, origin.y + pad_y), col, text
+        )
+    finally:
+        if font is not None:
+            imgui.pop_font()
 
 _IMGUI_OPAQUE_APPLIED = False
 

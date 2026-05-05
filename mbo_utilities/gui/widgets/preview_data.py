@@ -293,17 +293,17 @@ class PreviewDataWidget(EdgeWindow):
         self._default_imgui_font = io.fonts.add_font_from_file_ttf(
             sans_serif_font, 14, imgui.ImFontConfig()
         )
-        # bold-italic variant — used by the pipeline-settings popup to
-        # emphasize "look at these first" parameters listed in
-        # _IMPORTANT_FIELDS. fall back to None if the file is missing
-        # (the popup pushes the font only when non-None).
-        bold_italic_path = _fonts_dir / "Roboto-BoldItalic.ttf"
-        if bold_italic_path.is_file():
-            self._bold_italic_font = io.fonts.add_font_from_file_ttf(
-                str(bold_italic_path), 14, imgui.ImFontConfig()
+        # bold variant — used by the pipeline-settings popup to emphasize
+        # "look at these first" parameters listed in _IMPORTANT_FIELDS,
+        # paired with a thin box around the label. fall back to None if the
+        # file is missing (the popup pushes the font only when non-None).
+        bold_path = _fonts_dir / "Roboto-Bold.ttf"
+        if bold_path.is_file():
+            self._bold_font = io.fonts.add_font_from_file_ttf(
+                str(bold_path), 14, imgui.ImFontConfig()
             )
         else:
-            self._bold_italic_font = None
+            self._bold_font = None
         imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
 
     def _init_state(self):
