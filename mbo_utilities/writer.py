@@ -23,8 +23,9 @@ from mbo_utilities.metadata import RoiMode, get_param
 from typing import TYPE_CHECKING
 import contextlib
 
+import numpy as np
+
 if TYPE_CHECKING:
-    import numpy as np
     from collections.abc import Callable, Sequence
 
 logger = log.get("writer")
@@ -39,7 +40,6 @@ def imwrite(
     channels: list | tuple | int | None = None,
     num_frames: int | None = None,
     register_z: bool = False,
-    bake_axial_shifts: bool = False,
     roi_mode: RoiMode | str = RoiMode.concat_y,
     roi: int | Sequence[int] | None = None,
     metadata: dict | None = None,
@@ -52,6 +52,7 @@ def imwrite(
     output_name: str | None = None,
     output_suffix: str | None = None,
     dataset_name: str | None = None,
+    dim_order: str | Sequence[str] | None = None,
     **kwargs,
 ):
     """
@@ -117,24 +118,14 @@ def imwrite(
 
     register_z : bool, default=False
         Compute per-plane rigid shifts via phase correlation and store
-        them in ``metadata["plane_shifts"]``. By default the shifts are
-        NOT baked into the bin pixels — apply them at render time
-        (e.g. napari layer ``translate``, or the ``AxiallyAlignedView``
-        wrapper) so per-plane suite2p output stays bit-identical to the
-        unregistered case. Pass ``bake_axial_shifts=True`` to opt in to
-        the legacy behavior of padding/shifting bin pixels on write.
+        them in ``metadata["plane_shifts"]``. The shifts are not applied
+        to the output pixels; viewers consume ``plane_shifts`` to align
+        planes at render time (e.g. napari layer ``translate`` or
+        ``AxiallyAlignedView``).
         Optional tunables via kwargs: ``max_frames`` (subsample count,
         default 200), ``chunk_frames`` (streaming batch, default 10),
-        ``max_reg_xy`` (search radius in pixels, default 150). GPU is
+        ``max_reg_xy`` (search radius in pixels, default 30). GPU is
         used automatically when cupy + CUDA are available.
-
-    bake_axial_shifts : bool, default=False
-        When ``register_z=True``, controls whether the computed shifts
-        are physically applied to the output bin/zarr/h5 pixels (with
-        canvas padding) or stored only as metadata. Default ``False``
-        keeps bins at the raw plane shape; viewers should consume
-        ``plane_shifts`` to align planes at render time. Has no effect
-        when ``register_z=False``.
 
     metadata : dict, optional
         Additional metadata to merge into output file headers/attributes.
@@ -175,11 +166,23 @@ def imwrite(
         ``"data"`` for the legacy mbo name, or any other key for custom
         consumers. Ignored for non-h5 formats.
 
+    dim_order : str, optional
+        Axis labels for an in-memory numpy array of ndim 3/4/5, drawn from
+        ``"TCZYX"``. The array is permuted and singleton-padded to canonical
+        5D TCZYX before writing. Examples: ``"TYX"``, ``"TZYX"``, ``"TCYX"``,
+        ``"TCZYX"``. Ignored when ``lazy_array`` is already a lazy array.
+
     **kwargs
         Additional format-specific options passed to writer backends.
         Zarr-specific options (ext=".zarr"):
         ``sharded`` (bool, default True) uses Zarr v3 sharding codec,
-        ``level`` (int, default 1) sets gzip compression level (0-9),
+        ``compressor`` (str, default "none") one of "none", "gzip",
+        "zstd", "blosc-lz4", "blosc-zstd". Default is no compression so
+        interactive scrubbing doesn't pay decompression cost per frame;
+        pass an explicit value when storage size matters more than
+        random-access speed.
+        ``compression_level`` (int) compressor-specific level (gzip 0–9,
+        zstd 1–22, blosc 1–9). Ignored when ``compressor="none"``.
         ``ome`` (bool, default True) writes OME-NGFF v0.5 metadata,
         ``pyramid`` (bool, default False) generates multi-resolution pyramid,
         ``pyramid_max_layers`` (int, default 4) sets max resolution levels,
@@ -237,6 +240,13 @@ def imwrite(
         )
     outpath.mkdir(exist_ok=True)
 
+    # auto-wrap raw numpy arrays so the full ext-aware writer pipeline runs
+    if isinstance(lazy_array, np.ndarray):
+        from mbo_utilities.arrays.numpy import NumpyArray
+        lazy_array = NumpyArray(lazy_array, dim_order=dim_order)
+    elif dim_order is not None:
+        logger.debug("dim_order ignored: lazy_array is not a raw numpy array")
+
     # handle roi based on roi_mode
     # ROI support detected via duck typing: hasattr(arr, 'roi_mode')
     if roi_mode == RoiMode.separate:
@@ -286,12 +296,11 @@ def imwrite(
     # axial registration knobs (all optional). defaults match compute_axial_shifts.
     axial_max_frames = int(kwargs.pop("max_frames", 200))
     axial_chunk_frames = int(kwargs.pop("chunk_frames", 10))
-    axial_max_reg_xy = int(kwargs.pop("max_reg_xy", 150))
+    axial_max_reg_xy = int(kwargs.pop("max_reg_xy", 30))
 
     if register_z:
         num_planes = get_param(file_metadata, "nplanes")
 
-        # if caller already provided valid shifts in metadata, reuse them.
         if validate_axial_shifts(file_metadata, num_planes):
             logger.info("using plane_shifts already present in metadata.")
             if progress_callback:
@@ -308,25 +317,8 @@ def imwrite(
             )
             if not validate_axial_shifts(file_metadata, num_planes):
                 logger.error(
-                    "axial registration did not produce valid plane_shifts. "
-                    "proceeding without registration."
+                    "axial registration did not produce valid plane_shifts."
                 )
-
-        # default: shifts are stored in metadata only — viewers apply
-        # them at render time so per-plane outputs stay bit-identical to
-        # the unregistered case. opt in to the legacy "pad and bake into
-        # pixels" behavior with `bake_axial_shifts=True`.
-        file_metadata["apply_shift"] = (
-            bool(bake_axial_shifts)
-            and validate_axial_shifts(file_metadata, num_planes)
-        )
-        if bake_axial_shifts and not file_metadata["apply_shift"]:
-            logger.warning(
-                "bake_axial_shifts=True but no valid plane_shifts available; "
-                "writing bins without baking."
-            )
-    else:
-        file_metadata["apply_shift"] = False
 
     if hasattr(lazy_array, "metadata"):
         with contextlib.suppress(AttributeError):
@@ -403,11 +395,9 @@ def imwrite(
     if scan_phase_params:
         processing_extra["scan_phase_correction"] = scan_phase_params
 
-    # Add z-registration info if used
     if register_z:
         processing_extra["z_registration"] = {
             "enabled": True,
-            "apply_shift": file_metadata.get("apply_shift", False),
             "n_planes": len(file_metadata.get("plane_shifts", []))
             if "plane_shifts" in file_metadata else 0,
             "params": file_metadata.get("plane_shifts_params"),

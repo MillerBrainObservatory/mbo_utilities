@@ -258,108 +258,6 @@ def _close_specific_npy_writer(filepath):
             _write_npy._metadata.pop(key, None)
 
 
-def compute_pad_from_shifts(plane_shifts):
-    """compute padding needed to accommodate all plane shifts."""
-    shifts = np.asarray(plane_shifts, dtype=int)
-    dy_min, dx_min = shifts.min(axis=0)
-    dy_max, dx_max = shifts.max(axis=0)
-    pad_top = max(0, -dy_min)
-    pad_bottom = max(0, dy_max)
-    pad_left = max(0, -dx_min)
-    pad_right = max(0, dx_max)
-    return pad_top, pad_bottom, pad_left, pad_right
-
-
-def load_registration_shifts(metadata: dict | None, debug: bool = False):
-    """read z-registration shifts directly from the metadata dict.
-
-    parameters
-    ----------
-    metadata : dict or None
-        metadata dict with keys 'apply_shift' (bool) and 'plane_shifts'
-        (list of [dy, dx] per plane, shape (nz, 2)).
-    debug : bool
-        verbose logging.
-
-    returns
-    -------
-    (apply_shift, plane_shifts, padding)
-        - apply_shift: bool
-        - plane_shifts: ndarray (nz, 2) or None
-        - padding: (pt, pb, pl, pr)
-    """
-    padding = (0, 0, 0, 0)
-
-    if not metadata or not metadata.get("apply_shift", False):
-        return False, None, padding
-
-    shifts = metadata.get("plane_shifts")
-    if shifts is None:
-        logger.warning("apply_shift=True but metadata['plane_shifts'] is missing.")
-        return False, None, padding
-
-    try:
-        plane_shifts = np.asarray(shifts, dtype=int)
-    except Exception as e:
-        logger.warning(f"plane_shifts could not be coerced to ndarray: {e}")
-        return False, None, padding
-
-    if plane_shifts.ndim != 2 or plane_shifts.shape[1] != 2:
-        logger.warning(f"plane_shifts has bad shape {plane_shifts.shape}, expected (nz, 2).")
-        return False, None, padding
-
-    padding = compute_pad_from_shifts(plane_shifts)
-    if debug:
-        pt, pb, pl, pr = padding
-        logger.info(
-            f"loaded z-registration shifts with padding: top={pt}, bottom={pb}, left={pl}, right={pr}"
-        )
-    return True, plane_shifts, padding
-
-
-def apply_shifts_to_chunk(chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out):
-    """
-    apply z-registration shifts to a data chunk.
-
-    parameters
-    ----------
-    chunk_data : ndarray
-        input chunk with shape (T, Z, Y, X).
-    plane_shifts : ndarray
-        per-plane [dy, dx] shifts.
-    z_indices : list
-        z-plane indices (0-based) being written.
-    padding : tuple
-        (pt, pb, pl, pr) padding values.
-    Ly_out, Lx_out : int
-        output spatial dimensions including padding.
-
-    returns
-    -------
-    ndarray
-        shifted and padded chunk with shape (T, Z, Ly_out, Lx_out).
-    """
-    pt, pb, pl, pr = padding
-    n_t, n_z_chunk, h, w = chunk_data.shape
-
-    shifted_chunk = np.zeros((n_t, n_z_chunk, Ly_out, Lx_out), dtype=chunk_data.dtype)
-
-    for z_local in range(n_z_chunk):
-        z_global = z_indices[z_local]
-        if z_global < len(plane_shifts):
-            iy, ix = map(int, plane_shifts[z_global])
-            yy = slice(pt + iy, pt + iy + h)
-            xx = slice(pl + ix, pl + ix + w)
-            shifted_chunk[:, z_local, yy, xx] = chunk_data[:, z_local, :, :]
-        else:
-            # no shift for this plane, center it
-            shifted_chunk[:, z_local, pt : pt + h, pl : pl + w] = chunk_data[
-                :, z_local, :, :
-            ]
-
-    return shifted_chunk
-
-
 def _write_plane(
     data: np.ndarray | Any,
     filename: Path,
@@ -373,7 +271,6 @@ def _write_plane(
     dshape=None,
     plane_index=None,
     channel_index=None,
-    shift_vector=None,
     **kwargs,
 ):
     if dshape is None:
@@ -386,7 +283,6 @@ def _write_plane(
             raise TypeError(f"plane_index must be an integer, got {type(plane_index)}")
         metadata["plane"] = int(plane_index) + 1
 
-    # Get target frame count (nframes is primary, num_frames is alias)
     nframes_target = (
         kwargs.get("nframes")
         or kwargs.get("num_frames")
@@ -399,10 +295,8 @@ def _write_plane(
 
     nframes_target = int(nframes_target)
     metadata["nframes"] = nframes_target
-    metadata["num_frames"] = nframes_target  # alias for backwards compatibility
+    metadata["num_frames"] = nframes_target
 
-    # Update dshape to use the target frame count, not the original array shape
-    # This ensures metadata["shape"] matches metadata["nframes"]
     dshape = (nframes_target, *dshape[1:])
     metadata["shape"] = dshape
 
@@ -410,11 +304,9 @@ def _write_plane(
     fname = filename
     writer = _get_file_writer(fname.suffix, overwrite=overwrite)
 
-    # get chunk size via bytes per timepoint
     itemsize = np.dtype(data.dtype).itemsize
-    ntime = int(nframes_target)  # T
+    ntime = int(nframes_target)
 
-    # Handle empty data
     if ntime == 0:
         raise ValueError(
             f"Cannot write file with 0 frames. Data shape: {data.shape}, nframes_target: {nframes_target}"
@@ -426,13 +318,10 @@ def _write_plane(
     if chunk_size <= 0:
         chunk_size = 20 * 1024 * 1024
 
-    total_bytes = int(ntime) * int(bytes_per_t)  # keep in int64 range
+    total_bytes = int(ntime) * int(bytes_per_t)
     nchunks = max(1, math.ceil(total_bytes / chunk_size))
-
-    # don't create more chunks than timepoints
     nchunks = min(nchunks, ntime)
 
-    # distribute frames across chunks as evenly as possible
     base = ntime // nchunks
     extra = ntime % nchunks
 
@@ -441,104 +330,14 @@ def _write_plane(
     else:
         pbar = None
 
-    shift_applied = False
-
-    apply_shift = metadata.get("apply_shift", False)
-
-    if fname.name == "data_raw.bin":
-        # suite2p intermediate; shifts will be applied downstream
-        apply_shift = False
-
-    if shift_vector is not None:
-        logger.debug(
-            f"Using provided shift_vector of type {type(shift_vector)} length {len(shift_vector)}"
-        )
-        apply_shift = True
-        if plane_index is not None:
-            iy, ix = map(int, shift_vector)
-            # padding is computed over all planes so every per-plane output
-            # has the same canvas, not just this plane's shift.
-            all_plane_shifts = kwargs.get("all_plane_shifts")
-            if all_plane_shifts is not None:
-                pt, pb, pl, pr = compute_pad_from_shifts(all_plane_shifts)
-            else:
-                pt, pb, pl, pr = compute_pad_from_shifts([shift_vector])
-            H_out = H0 + pt + pb
-            W_out = W0 + pl + pr
-            yy = slice(pt + iy, pt + iy + H0)
-            xx = slice(pl + ix, pl + ix + W0)
-            out_shape = (ntime, H_out, W_out)
-            shift_applied = True
-            metadata[f"plane{plane_index}_shift"] = (iy, ix)
-            if all_plane_shifts is not None:
-                _ps = np.asarray(all_plane_shifts, dtype=int)
-                metadata["_pad_yrange"] = [
-                    int((pt + _ps[:, 0]).max()),
-                    int((pt + _ps[:, 0] + H0).min()),
-                ]
-                metadata["_pad_xrange"] = [
-                    int((pl + _ps[:, 1]).max()),
-                    int((pl + _ps[:, 1] + W0).min()),
-                ]
-        else:
-            raise ValueError("plane_index must be provided when using shift_vector")
-
-    if apply_shift and not shift_applied:
-        shifts_raw = metadata.get("plane_shifts")
-        if shifts_raw is None:
-            raise KeyError(
-                "apply_shift=True but metadata['plane_shifts'] is missing. "
-                "call compute_axial_shifts on the source array first."
-            )
-
-        plane_shifts = np.asarray(shifts_raw)
-        if plane_shifts.ndim != 2 or plane_shifts.shape[1] != 2:
-            raise ValueError(
-                f"metadata['plane_shifts'] has invalid shape {plane_shifts.shape}, expected (nz, 2)"
-            )
-
-        if plane_index is None:
-            raise ValueError("plane_index must be provided when using shifts")
-
-        if plane_index >= len(plane_shifts):
-            raise IndexError(
-                f"plane_index {plane_index} is out of range for plane_shifts "
-                f"with length {len(plane_shifts)}"
-            )
-
-        pt, pb, pl, pr = compute_pad_from_shifts(plane_shifts)
-        H_out = H0 + pt + pb
-        W_out = W0 + pl + pr
-
-        iy, ix = map(int, plane_shifts[plane_index])
-        yy = slice(pt + iy, pt + iy + H0)
-        xx = slice(pl + ix, pl + ix + W0)
-        out_shape = (ntime, H_out, W_out)
-        shift_applied = True
-        metadata[f"plane{plane_index}_shift"] = (iy, ix)
-        metadata["_pad_yrange"] = [
-            int((pt + plane_shifts[:, 0]).max()),
-            int((pt + plane_shifts[:, 0] + H0).min()),
-        ]
-        metadata["_pad_xrange"] = [
-            int((pl + plane_shifts[:, 1]).max()),
-            int((pl + plane_shifts[:, 1] + W0).min()),
-        ]
-        logger.debug(f"Applying shift for plane {plane_index}: y={iy}, x={ix}")
-
-    if not shift_applied:
-        out_shape = (ntime, H0, W0)
-
     start = 0
     for i in range(nchunks):
         end = start + base + (1 if i < extra else 0)
 
-        # extract chunk as 3D (T, Y, X) from 5D TCZYX input
         c_idx = channel_index if channel_index is not None else 0
         z_idx = plane_index if plane_index is not None else 0
         chunk = data[start:end, c_idx, z_idx, :, :]
 
-        # convert lazy/disk-backed arrays to contiguous numpy
         if hasattr(chunk, "compute"):
             chunk = chunk.compute()
         elif isinstance(chunk, np.memmap):
@@ -546,24 +345,7 @@ def _write_plane(
         elif not isinstance(chunk, np.ndarray):
             chunk = np.asarray(chunk)
 
-        if shift_applied:
-            if chunk.shape[-2:] != (H0, W0):
-                if chunk.shape[-2:] == (W0, H0):
-                    chunk = np.swapaxes(chunk, -1, -2)
-                else:
-                    raise ValueError(
-                        f"Unexpected chunk shape {chunk.shape[-2:]}, expected {(H0, W0)}"
-                    )
-
-            buf = np.zeros(
-                (chunk.shape[0], out_shape[1], out_shape[2]), dtype=chunk.dtype
-            )
-            buf[:, yy, xx] = chunk
-            metadata["padded_shape"] = buf.shape
-
-            writer(fname, buf, metadata=metadata, **kwargs)
-        else:
-            writer(fname, chunk, metadata=metadata, **kwargs)
+        writer(fname, chunk, metadata=metadata, **kwargs)
 
         if pbar:
             pbar.update(1)
@@ -573,7 +355,6 @@ def _write_plane(
     if pbar:
         pbar.close()
 
-    # Close only the specific writer for this file (thread-safe)
     if fname.suffix in [".tiff", ".tif"]:
         _close_specific_tiff_writer(fname)
     elif fname.suffix in [".bin"]:
@@ -1089,28 +870,8 @@ def _write_volumetric_tiff(
     n_channels = slicing.selections["C"].count if "C" in slicing.selections else 1
     Ly, Lx = slicing.spatial_shape
 
-    # check for z-registration shift application (shared logic)
-    if debug:
-        logger.info(
-            f"  TIFF metadata: apply_shift={metadata.get('apply_shift')}, "
-            f"plane_shifts={len(metadata.get('plane_shifts', [])) if 'plane_shifts' in metadata else 0} planes"
-        )
-    apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
-    pt, pb, pl, pr = padding
-    if debug:
-        logger.info(
-            f"  Registration result: apply_shift={apply_shift}, has_shifts={plane_shifts is not None}"
-        )
-
-    # compute padded output dimensions if shifts are applied
-    if apply_shift and plane_shifts is not None:
-        Ly_out = Ly + pt + pb
-        Lx_out = Lx + pl + pr
-    else:
-        Ly_out, Lx_out = Ly, Lx
-
     # always 5D TZCYX for imagej page ordering
-    target_shape = (n_frames, n_planes, n_channels, Ly_out, Lx_out)
+    target_shape = (n_frames, n_planes, n_channels, Ly, Lx)
 
     # update metadata for imagej using OutputMetadata for reactive values
     from mbo_utilities.metadata import OutputMetadata
@@ -1135,32 +896,10 @@ def _write_volumetric_tiff(
         selections=output_selections,
     )
 
-    # get adjusted metadata dict (now includes reactive Lx, Ly, shape)
     md = out_meta.to_dict()
-    # override shape with padded values if shifts applied
     md["shape"] = target_shape
-    md["Lx"] = Lx_out
-    md["Ly"] = Ly_out
-    if apply_shift and plane_shifts is not None:
-        md["padded_shape"] = (Ly_out, Lx_out)
-        md["original_shape"] = (Ly, Lx)
-        # valid region — same calc as _write_plane. lsp.run_plane reads
-        # these as ops["_pad_yrange"/"_pad_xrange"] and clips cellpose to
-        # the area where every plane has real data. without them cellpose
-        # finds spurious masks in the zero-padded borders.
-        _ps = np.asarray(plane_shifts, dtype=int)
-        md["_pad_yrange"] = [
-            int((pt + _ps[:, 0]).max()),
-            int((pt + _ps[:, 0] + Ly).min()),
-        ]
-        md["_pad_xrange"] = [
-            int((pl + _ps[:, 1]).max()),
-            int((pl + _ps[:, 1] + Lx).min()),
-        ]
-    # shifts baked into pixels — mark consumed (same as zarr/h5 writers)
-    md["apply_shift"] = False
-    md.pop("plane_shifts", None)
-    md.pop("plane_shifts_params", None)
+    md["Lx"] = Lx
+    md["Ly"] = Ly
 
     # build imagej metadata with adjusted dz and finterval
     ij_meta, resolution = out_meta.to_imagej(target_shape)
@@ -1215,43 +954,12 @@ def _write_volumetric_tiff(
             total_pages = n_frames * n_planes * n_channels
             pbar = tqdm(total=total_pages, desc="Writing TIFF", unit="pg")
 
-        # get z-plane indices being written (0-based)
-        z_indices = (
-            slicing.selections["Z"].indices
-            if "Z" in slicing.selections
-            else list(range(n_planes))
-        )
-
         for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
-            # read chunk using unified reader
             chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
             # always 5D TCZYX input → transpose to TZCYX for ImageJ page order
             chunk_data = chunk_data.transpose(0, 2, 1, 3, 4)
             chunk_data = np.ascontiguousarray(chunk_data)
-
-            if apply_shift and plane_shifts is not None:
-                # apply_shifts_to_chunk returns a (T, Z, Ly_out, Lx_out)
-                # buffer at the PADDED spatial dims; we cannot assign
-                # back into chunk_data[:, :, c, :, :] because that slice
-                # is still at the raw (Ly, Lx). Allocate the padded
-                # 5D destination once and fill per channel — same
-                # reassignment pattern the zarr writer uses, lifted to
-                # 5D so the C axis survives.
-                n_t, n_z, n_c = chunk_data.shape[:3]
-                padded = np.zeros(
-                    (n_t, n_z, n_c, Ly_out, Lx_out), dtype=chunk_data.dtype
-                )
-                for c in range(n_c):
-                    padded[:, :, c, :, :] = apply_shifts_to_chunk(
-                        chunk_data[:, :, c, :, :],
-                        plane_shifts,
-                        z_indices,
-                        padding,
-                        Ly_out,
-                        Lx_out,
-                    )
-                chunk_data = padded
 
             chunk_5d = chunk_data  # (T, Z, C, Y, X)
 
@@ -1417,16 +1125,7 @@ def _write_volumetric_h5(
         )
 
     Ly, Lx = slicing.spatial_shape
-
-    # check for z-registration shift application (shared with zarr/_write_plane)
-    apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
-    pt, pb, pl, pr = padding
-
-    if apply_shift and plane_shifts is not None:
-        Ly_out = int(Ly) + int(pt) + int(pb)
-        Lx_out = int(Lx) + int(pl) + int(pr)
-    else:
-        Ly_out, Lx_out = int(Ly), int(Lx)
+    Ly_out, Lx_out = int(Ly), int(Lx)
     n_frames = int(n_frames)
     n_planes = int(n_planes)
 
@@ -1453,13 +1152,6 @@ def _write_volumetric_h5(
     md["shape"] = target_shape
     md["dataset_name"] = dataset_name
     md["dims"] = ("T", "Z", "Y", "X")
-    if apply_shift and plane_shifts is not None:
-        md["padded_shape"] = (Ly_out, Lx_out)
-        md["original_shape"] = (Ly, Lx)
-    # shifts baked into pixels — mark consumed (same as zarr/tiff writers)
-    md["apply_shift"] = False
-    md.pop("plane_shifts", None)
-    md.pop("plane_shifts_params", None)
 
     if debug:
         logger.info(f"Writing volumetric h5: {filename}")
@@ -1468,8 +1160,6 @@ def _write_volumetric_h5(
         logger.info(
             f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}"
         )
-        if apply_shift:
-            logger.info(f"  Z-registration: padding=({pt}, {pb}, {pl}, {pr})")
 
     # h5 chunking — one frame per chunk so any (t, z, y, x) read pulls
     # exactly its plane's worth of bytes off disk. matches the zarr
@@ -1490,12 +1180,6 @@ def _write_volumetric_h5(
                 f"Unknown h5 compression '{compression}'; falling back to none."
             )
 
-    z_indices = (
-        slicing.selections["Z"].indices
-        if "Z" in slicing.selections
-        else list(range(n_planes))
-    )
-
     pbar = None
     if show_progress:
         pbar = tqdm(total=n_frames, desc="Writing H5", unit="frames")
@@ -1512,10 +1196,6 @@ def _write_volumetric_h5(
                 compression_opts=h5_compression_opts,
             )
 
-            # serialize metadata onto root attrs. h5 doesn't accept None or
-            # arbitrary Python objects so coerce to scalar where possible
-            # and stringify everything else; skip None entirely. strip
-            # suite2p-only fields first — those belong in ops.npy.
             from .metadata.base import strip_for_export
             serializable_md = _make_json_serializable(strip_for_export(md))
             for k, v in serializable_md.items():
@@ -1532,15 +1212,9 @@ def _write_volumetric_h5(
                 chunk_dim="T", target_mb=target_chunk_mb
             ):
                 chunk_data = read_chunk(data, chunk_info, slicing.dims)
-                # squeeze singleton C — h5 dataset is 4D TZYX
                 if chunk_data.ndim == 5:
                     chunk_data = chunk_data[:, 0, :, :, :]
                 chunk_data = np.ascontiguousarray(chunk_data)
-
-                if apply_shift and plane_shifts is not None:
-                    chunk_data = apply_shifts_to_chunk(
-                        chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
-                    )
 
                 t_start = t_offset
                 t_end = t_start + chunk_data.shape[0]
@@ -1724,20 +1398,11 @@ def _write_volumetric_zarr(
         )
     Ly, Lx = slicing.spatial_shape
 
-    # check for z-registration shift application (shared logic)
-    apply_shift, plane_shifts, padding = load_registration_shifts(metadata, debug)
-    pt, pb, pl, pr = padding
-
-    # compute padded output dimensions if shifts are applied. coerce to plain
-    # python int — `slicing.spatial_shape` returns np.int from `arr.shape`, and
-    # `padding` from `compute_pad_from_shifts` is np.int as well. zarr v3's
-    # `parse_shapelike` rejects np.int64 with a TypeError, so we normalize here
-    # and use the cleaned values for every downstream tuple.
-    if apply_shift and plane_shifts is not None:
-        Ly_out = int(Ly) + int(pt) + int(pb)
-        Lx_out = int(Lx) + int(pl) + int(pr)
-    else:
-        Ly_out, Lx_out = int(Ly), int(Lx)
+    # coerce to plain python int — `slicing.spatial_shape` returns np.int
+    # from `arr.shape`. zarr v3's `parse_shapelike` rejects np.int64 with
+    # a TypeError, so normalize here and use the cleaned values for every
+    # downstream tuple.
+    Ly_out, Lx_out = int(Ly), int(Lx)
     n_frames = int(n_frames)
     n_planes = int(n_planes)
 
@@ -1763,32 +1428,8 @@ def _write_volumetric_zarr(
         selections=output_selections,
     )
 
-    # get adjusted metadata dict
     md = out_meta.to_dict()
     md["shape"] = target_shape
-    if apply_shift and plane_shifts is not None:
-        md["padded_shape"] = (Ly_out, Lx_out)
-        md["original_shape"] = (Ly, Lx)
-        # valid region — same calc as _write_plane. lsp.run_plane reads
-        # these as ops["_pad_yrange"/"_pad_xrange"] and clips cellpose to
-        # the area where every plane has real data.
-        _ps = np.asarray(plane_shifts, dtype=int)
-        md["_pad_yrange"] = [
-            int((pt + _ps[:, 0]).max()),
-            int((pt + _ps[:, 0] + Ly).min()),
-        ]
-        md["_pad_xrange"] = [
-            int((pl + _ps[:, 1]).max()),
-            int((pl + _ps[:, 1] + Lx).min()),
-        ]
-    # shifts are baked into the pixel data during the chunk write below.
-    # mark them as consumed so downstream readers (e.g. suite2p binary
-    # writer) don't try to re-apply them to already-aligned data — that
-    # caused double-padding, wrong frame counts, and the "boolean index
-    # did not match" crash when loading saved zarrs on a different machine.
-    md["apply_shift"] = False
-    md.pop("plane_shifts", None)
-    md.pop("plane_shifts_params", None)
 
     if debug:
         logger.info(f"Writing volumetric zarr: {filename}")
@@ -1800,8 +1441,6 @@ def _write_volumetric_zarr(
             logger.info(
                 f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)"
             )
-        if apply_shift:
-            logger.info(f"  Z-registration: padding=({pt}, {pb}, {pl}, {pr})")
 
     # determine chunking based on target_chunk_mb
     # for 4D TZYX, chunk along T dimension
@@ -1810,8 +1449,13 @@ def _write_volumetric_zarr(
     frames_per_chunk = max(1, int(target_bytes / bytes_per_frame))
     frames_per_chunk = min(frames_per_chunk, n_frames)
 
-    # inner chunk shape: 1 frame at a time for efficient random access
-    inner_chunk = (1, n_planes, Ly_out, Lx_out)
+    # inner chunk shape: one (t, z) plane per chunk. (1, n_planes, Y, X)
+    # forced every per-plane read to decompress the full Z-stack, making
+    # scrubbing ~10x slower than necessary (each frame paid the cost of
+    # decompressing 14× the data it needed). single-plane chunks let
+    # zarr v3 sharding fetch exactly the requested plane out of the
+    # shard, with no change in compressed size.
+    inner_chunk = (1, 1, Ly_out, Lx_out)
 
     # build codec chain
     inner_codecs = _build_inner_codecs(compressor, compression_level, shuffle=shuffle)
@@ -1942,36 +1586,18 @@ def _write_volumetric_zarr(
     if show_progress:
         pbar = tqdm(total=total_work, desc="Writing Zarr", unit="frames")
 
-    # track output offset (since ChunkInfo doesn't have offset)
     t_offset = 0
 
-    # get z-plane indices being written (0-based)
-    z_indices = (
-        slicing.selections["Z"].indices
-        if "Z" in slicing.selections
-        else list(range(n_planes))
-    )
-
-    # iterate over chunks using unified slicing
     try:
         for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
-            # read chunk using unified reader (returns 5D TCZYX)
             chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
             # squeeze singleton C — zarr target is 4D TZYX (n_channels==1 enforced above)
             if chunk_data.ndim == 5:
                 chunk_data = chunk_data[:, 0, :, :, :]
 
-            # ensure contiguous for efficient writes
             chunk_data = np.ascontiguousarray(chunk_data)
 
-            # apply z-registration shifts if enabled (shared logic)
-            if apply_shift and plane_shifts is not None:
-                chunk_data = apply_shifts_to_chunk(
-                    chunk_data, plane_shifts, z_indices, padding, Ly_out, Lx_out
-                )
-
-            # get the output T range for this chunk
             t_start = t_offset
             t_end = t_start + chunk_data.shape[0]
 
