@@ -163,7 +163,7 @@ def align_planes(
     mov3D,
     sigma=(1.45, 0),
     smooth_sigma=1.15,
-    max_reg_xy=150,
+    max_reg_xy=30,
     use_gpu=None,
     progress_callback=None,
 ):
@@ -230,7 +230,7 @@ def compute_plane_shifts(
     mov,
     sigma=(1.45, 0),
     smooth_sigma=1.15,
-    max_reg_xy=150,
+    max_reg_xy=30,
     use_gpu=None,
     progress_callback=None,
 ):
@@ -311,7 +311,6 @@ def compute_axial_shifts(
     `metadata` is passed) writes the result in place under the keys:
 
         metadata["plane_shifts"]        = tvecs.tolist()     (nz, 2)
-        metadata["apply_shift"]         = True
         metadata["plane_shifts_params"] = {...}              (reproducibility)
 
     parameters
@@ -355,7 +354,6 @@ def compute_axial_shifts(
 
     if metadata is not None:
         metadata["plane_shifts"] = tvecs.tolist()
-        metadata["apply_shift"] = True
         metadata["plane_shifts_params"] = {
             "max_reg_xy": int(max_reg_xy),
             "sigma": list(sigma),
@@ -390,10 +388,9 @@ class AxiallyAlignedView:
     """4D lazy view that aligns per-plane bins via stored plane_shifts.
 
     Each plane's bin file stays at raw (H0, W0) on disk; the canvas-padded
-    aligned frame is materialized only on read. Companion to the unbaked
-    axial-registration workflow (`imwrite(register_z=True)` with default
-    `bake_axial_shifts=False`), where shifts live in `ops['plane_shifts']`
-    and viewers are responsible for applying them.
+    aligned frame is materialized only on read. Companion to
+    `imwrite(register_z=True)`, which records `plane_shifts` in metadata so
+    viewers can align planes at render time.
 
     Parameters
     ----------

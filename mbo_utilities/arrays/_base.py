@@ -415,7 +415,7 @@ def _imwrite_base(
         from mbo_utilities import log
         _logger = log.get("writers")
         _n_shifts = len(md.get("plane_shifts", [])) if "plane_shifts" in md else 0
-        _logger.info(f"_imwrite_base: apply_shift={md.get('apply_shift')}, plane_shifts={_n_shifts} planes")
+        _logger.info(f"_imwrite_base: plane_shifts={_n_shifts} planes")
 
     if "metadata_overrides" in kwargs:
         overrides = kwargs.pop("metadata_overrides", None)
@@ -463,8 +463,13 @@ def _imwrite_base(
     if ext_clean == "zarr":
         output_suffix = kwargs.pop("output_suffix", None)
         sharded = kwargs.pop("sharded", True)
-        compression_level = kwargs.pop("compression_level", 1)
-        compressor = kwargs.pop("compressor", "gzip")
+        # default to no compression — scrubbing decompresses one chunk
+        # per frame, so gzip-1 added ~5 ms/frame of CPU work to
+        # interactive viewing for ~60% storage savings. for imaging data
+        # the trade is the wrong way; users who want compression can pass
+        # `compressor="gzip"|"blosc-lz4"|"zstd"` and `compression_level`.
+        compression_level = kwargs.pop("compression_level", 0)
+        compressor = kwargs.pop("compressor", "none")
         shuffle = kwargs.pop("shuffle", None)
         result = _write_volumetric_zarr(
             arr,

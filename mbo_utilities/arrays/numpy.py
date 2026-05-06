@@ -8,6 +8,7 @@ as lazy arrays conforming to LazyArrayProtocol.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 
@@ -34,6 +35,36 @@ _NUMPY_INFO = PipelineInfo(
     category="reader",
 )
 register_pipeline(_NUMPY_INFO)
+
+
+_CANONICAL_DIMS = "TCZYX"
+
+
+def _canonicalize_to_5d(arr: np.ndarray, dim_order: str | Sequence[str]) -> np.ndarray:
+    """Permute and expand `arr` to canonical 5D TCZYX given user's `dim_order`."""
+    labels = "".join(str(c).upper() for c in dim_order)
+    if len(labels) != arr.ndim:
+        raise ValueError(
+            f"dim_order length {len(labels)} does not match array.ndim {arr.ndim}"
+        )
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"dim_order has duplicate axes: {labels!r}")
+    bad = [c for c in labels if c not in _CANONICAL_DIMS]
+    if bad:
+        raise ValueError(
+            f"dim_order chars must be from {_CANONICAL_DIMS!r}, got {bad!r}"
+        )
+
+    positions = [_CANONICAL_DIMS.index(c) for c in labels]
+    perm = sorted(range(len(positions)), key=lambda i: positions[i])
+    arr = np.transpose(arr, perm)
+    sorted_labels = "".join(labels[i] for i in perm)
+
+    for i, c in enumerate(_CANONICAL_DIMS):
+        if c not in sorted_labels:
+            arr = np.expand_dims(arr, axis=i)
+            sorted_labels = sorted_labels[:i] + c + sorted_labels[i:]
+    return arr
 
 
 class NumpyArray(ReductionMixin, Shape5DMixin):
@@ -76,7 +107,12 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
     >>> imwrite(arr, "output", ext=".zarr")  # Full write support
     """
 
-    def __init__(self, array: np.ndarray | str | Path, metadata: dict | None = None):
+    def __init__(
+        self,
+        array: np.ndarray | str | Path,
+        metadata: dict | None = None,
+        dim_order: str | Sequence[str] | None = None,
+    ):
         self._tempfile = None
         self._npz_file = None
         self._is_in_memory = False
@@ -109,8 +145,8 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
                 self._metadata = {}
 
         elif isinstance(array, np.ndarray):
-            # Keep array in memory - no temp file needed
-            # This is more efficient and avoids disk I/O
+            if dim_order is not None:
+                array = _canonicalize_to_5d(array, dim_order)
             self.data = array
             self.path = None
             self._metadata = {}
