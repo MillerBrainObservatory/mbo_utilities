@@ -60,16 +60,13 @@ def _register_pipelines_sync() -> None:
 
         _REGISTRATION_COMPLETE = True
 
-    # explicitly warm up suite2p.parameters now (still on bg thread).
-    # _s2p_schema's lazy loader is idempotent + thread-safe; if the user
-    # opens the popup before this finishes, they wait on the same lock.
-    try:
-        from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
-            warm_up_suite2p_schema,
-        )
-        warm_up_suite2p_schema()
-    except Exception:
-        pass
+    # NOTE: do NOT eagerly import suite2p.parameters here. doing so
+    # pulls torch/numba/scipy/cellpose into the bg thread and the
+    # python GIL held during that import freezes the imgui main loop
+    # for 10–20s. _s2p_schema._ensure_loaded() runs lazily on first
+    # actual use (settings panel / Run tab), which restores the v2.7.7
+    # startup behavior (instant) at the cost of a one-time freeze when
+    # the user first opens settings — same trade as before.
 
 
 def _delayed_preload(delay_s: float) -> None:

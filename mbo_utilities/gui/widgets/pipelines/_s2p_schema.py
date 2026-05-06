@@ -281,6 +281,14 @@ def is_default(mbo_field: str, value: Any) -> bool:
     """
     if mbo_field in MBO_ONLY_FIELDS:
         return False  # no upstream default to compare against
+    # don't trigger the suite2p import from per-frame draw paths. if the
+    # schema hasn't been loaded yet (cold session, settings popup not yet
+    # opened), report "matches default" so we don't paint every parameter
+    # row in the modified-color while the user is just looking at the
+    # Run tab. once any user action loads the schema (opening settings,
+    # querying a tooltip), subsequent draws color-code accurately.
+    if _SETTINGS is None:
+        return True
     default = get_default(mbo_field)
     # normalize at the boundary — numpy types leak through ops.npy
     # round-trips and break `value in (...)` / `value == default` with

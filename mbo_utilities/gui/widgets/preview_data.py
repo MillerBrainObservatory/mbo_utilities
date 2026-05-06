@@ -71,6 +71,49 @@ import contextlib
 __all__ = ["PreviewDataWidget"]
 
 
+import re as _re
+
+_PLANE_DIR_RE = _re.compile(r"^plane\d+$", _re.IGNORECASE)
+
+
+def _derive_suite2p_output_dir(fpath) -> str | None:
+    """Detect a suite2p output location from a file or directory path.
+
+    Returns the directory suite2p would have written into (the parent of
+    the `plane*/` subdirs), or None if `fpath` doesn't look like a suite2p
+    output. Used to auto-populate the GUI's output-folder field when the
+    user opens an existing data.bin / ops.npy / volumetric results dir.
+
+    Cases handled:
+      - file inside `…/<root>/plane0/` (e.g. data.bin, ops.npy) → `<root>`
+      - directory `…/<root>/plane0/`                            → `<root>`
+      - directory `…/<root>/` containing one or more `plane*/`  → `<root>`
+    """
+    if fpath is None:
+        return None
+    if isinstance(fpath, (list, tuple)):
+        if not fpath:
+            return None
+        fpath = fpath[0]
+    try:
+        p = Path(str(fpath))
+    except (TypeError, ValueError):
+        return None
+    if not p.exists():
+        return None
+
+    parent = p.parent if p.is_file() else p
+    if _PLANE_DIR_RE.match(parent.name):
+        return str(parent.parent)
+    try:
+        for child in parent.iterdir():
+            if child.is_dir() and _PLANE_DIR_RE.match(child.name):
+                return str(parent)
+    except (OSError, PermissionError):
+        pass
+    return None
+
+
 class PreviewDataWidget(EdgeWindow):
     """
     Main GUI widget for data preview and processing.
@@ -381,8 +424,9 @@ class PreviewDataWidget(EdgeWindow):
         self._register_z_running = False
         self._register_z_current_msg = ""
         # axial registration knobs; exposed in the save-as options popup.
+        # default search radius matches compute_axial_shifts(max_reg_xy=30).
         self._axial_max_frames = 200
-        self._axial_max_reg_xy = 150
+        self._axial_max_reg_xy = 30
 
         # Selection state
         self._selected_pipelines = None
@@ -466,6 +510,15 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_outdir = str(save_as_dir) if save_as_dir else ""
         s2p_output_dir = get_last_dir("suite2p_output")
         self._s2p_outdir = str(s2p_output_dir) if s2p_output_dir else ""
+
+        # Auto-detect: if the loaded data lives inside a suite2p output
+        # tree (data.bin in plane*/, ops.npy / stat.npy / etc.), or is a
+        # volumetric root containing plane*/, point _s2p_outdir at that
+        # root so a re-run lands in the same place. Wins over the cached
+        # last-used dir from prefs since the user just opened this dataset.
+        _derived_s2p_dir = _derive_suite2p_output_dir(self.fpath)
+        if _derived_s2p_dir:
+            self._s2p_outdir = _derived_s2p_dir
         self._saveas_folder_dialog = None
         self._saveas_total = 0
 
