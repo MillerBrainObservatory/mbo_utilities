@@ -59,10 +59,22 @@ def _try_hydrate_s2p_from_binary(parent: Any, path: str | Path) -> bool:
         from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
             from_structured as _from_structured,
             from_flat as _from_flat,
+            warm_up_suite2p_schema as _warm_up_schema,
         )
     except Exception as e:
         parent.logger.warning(f"suite2p hydrate: schema import failed: {e}")
         return False
+    # Force-load suite2p.parameters.SETTINGS now (synchronous, idempotent).
+    # `is_default` short-circuits to True while the schema is unloaded, so
+    # without this the hydrated values would not be flagged as modified
+    # in the Run tab summary or tinted in the Pipeline Settings popup
+    # until something else triggered the import. The user is opening
+    # suite2p data here, so paying the import cost during file-load is
+    # appropriate.
+    try:
+        _warm_up_schema()
+    except Exception as e:
+        parent.logger.warning(f"suite2p hydrate: schema warm-up failed: {e}")
 
     if settings_file.is_file():
         d = _load_npy_dict(settings_file)
