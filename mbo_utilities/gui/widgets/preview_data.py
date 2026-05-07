@@ -548,6 +548,18 @@ class PreviewDataWidget(EdgeWindow):
         _derived_s2p_dir = _derive_suite2p_output_dir(self.fpath)
         if _derived_s2p_dir:
             self._s2p_outdir = _derived_s2p_dir
+
+        # Hydrate Suite2pSettings/DB/Extras from a sibling settings.npy /
+        # db.npy / ops.npy when the loaded data is a suite2p output. The
+        # file-menu Open path does this in load_new_data; doing it here
+        # covers the CLI launch (`mbo path/to/data.bin` → fpath comes from
+        # data_array.source_path which is the plane / volume directory).
+        try:
+            from mbo_utilities.gui._dialogs import _try_hydrate_s2p_from_binary
+            _try_hydrate_s2p_from_binary(self, self.fpath)
+        except Exception as _e:
+            self.logger.debug(f"suite2p hydrate (init): {_e}")
+
         self._saveas_folder_dialog = None
         self._saveas_total = 0
 

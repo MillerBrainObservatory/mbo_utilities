@@ -514,6 +514,7 @@ _FLAT_TO_MBO: dict[str, Any] = {
     "dff_window_size": "dff_window_size",
     "dff_percentile": "dff_percentile",
     "dff_smooth_window": "dff_smooth_window",
+    "correct_neuropil": "correct_neuropil",
 }
 
 
