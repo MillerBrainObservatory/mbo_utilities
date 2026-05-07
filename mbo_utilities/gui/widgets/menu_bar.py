@@ -87,22 +87,6 @@ def draw_menu_bar(parent: Any):
                         "https://millerbrainobservatory.github.io/mbo_utilities/"
                     )
                 imgui.end_menu()
-            if imgui.begin_menu("View", True):
-                imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
-                imgui.separator()
-                imgui.spacing()
-                _, parent.show_scope_window = imgui.menu_item(
-                    "Scope Inspector", "", parent.show_scope_window, True
-                )
-                imgui.spacing()
-                imgui.separator()
-                imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Display")
-                imgui.separator()
-                imgui.spacing()
-                _, parent._show_progress_overlay = imgui.menu_item(
-                    "Status Indicator", "", parent._show_progress_overlay, True
-                )
-                imgui.end_menu()
         imgui.end_menu_bar()
 
         # Draw process status indicator (consolidated)
