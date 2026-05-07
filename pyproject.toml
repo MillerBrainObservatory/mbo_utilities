@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.0.1"
+version = "3.0.2"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -48,8 +48,8 @@ dependencies = [
 	"napari-ome-zarr",
 	"napari-animation",
 	"numba>=0.60.0",
-	"suite2p",
-	"lbm_suite2p_python>=3.0.1",
+	"suite2p>=1.0.0.1",
+	"lbm_suite2p_python>=3.0.2",
 ]
 
 [project.scripts]
@@ -178,6 +178,7 @@ exclude_lines = [
 [dependency-groups]
 dev = [
     "graphviz>=0.21",
+    "lbm-suite2p-python",
     "pillow>=12.1.0",
     "pyautogui>=0.9.54",
     "pygetwindow>=0.0.9",
