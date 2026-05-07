@@ -255,7 +255,10 @@ def checkbox_with_tooltip(label: str, value: bool, tooltip: str) -> bool:
 
 
 def set_tooltip(
-    tooltip: str, show_mark: bool = True, align: str = "left"
+    tooltip: str,
+    show_mark: bool = True,
+    align: str = "left",
+    mark_dimmed: bool = True,
 ) -> None:
     """Set a tooltip on the previous item, optionally with a (?) marker.
 
@@ -263,6 +266,10 @@ def set_tooltip(
     previous item) or "right" (snapped to the right edge of the current
     window/column). The active `tooltip_marks_right()` context manager, if
     any, overrides `align`.
+
+    `mark_dimmed` controls (?) color: True (default) uses the disabled-text
+    color so the marker reads as a soft hint; False renders it in normal
+    text color when the marker should stand out.
     """
     if show_mark:
         imgui.same_line()
@@ -276,7 +283,10 @@ def set_tooltip(
                 imgui.set_cursor_pos_x(
                     imgui.get_cursor_pos_x() + avail - qm - 4
                 )
-        imgui.text_disabled("(?)")
+        if mark_dimmed:
+            imgui.text_disabled("(?)")
+        else:
+            imgui.text("(?)")
     if imgui.is_item_hovered():
         imgui.begin_tooltip()
         imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)
