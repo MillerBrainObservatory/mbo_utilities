@@ -77,17 +77,6 @@ class RasterScanWidget(Widget):
             else:
                 imgui.text(display_text)
 
-        # upsample factor
-        imgui.set_next_item_width(hello_imgui.em_size(5))
-        upsample_changed, upsample_val = imgui.input_int(
-            "Upsample", parent.phase_upsample, step=1, step_fast=2
-        )
-        set_tooltip(
-            "Phase-correction upsampling factor: interpolates the image by this integer factor to improve subpixel alignment."
-        )
-        if upsample_changed:
-            parent.phase_upsample = max(1, upsample_val)
-
         # border exclusion
         imgui.set_next_item_width(hello_imgui.em_size(5))
         border_changed, border_val = imgui.input_int(

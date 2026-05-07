@@ -23,14 +23,12 @@ raw file (TIFF / Zarr / .bin / .h5)
 
 ## Subset processing
 
-Both Save As and Run respect the timepoint and z-plane selection from the Selection popup.
+Both Save As and Run respect the timepoint and z-plane selection from the Selection popup. Examples:
 
-| Field | Example | Meaning |
-| --- | --- | --- |
-| Timepoints | `1:500` | first 500 frames |
-| Timepoints | `1:5000:10` | every 10th frame, 1-5000 |
-| Timepoints | `1:1000,500:600` | 1-1000 excluding 500-600 |
-| Z-planes | `1:14:2` | every other plane |
+- **Timepoints** `1:500` — first 500 frames
+- **Timepoints** `1:5000:10` — every 10th frame, 1-5000
+- **Timepoints** `1:1000,500:600` — 1-1000 excluding 500-600
+- **Z-planes** `1:14:2` — every other plane
 
 Use a small range to dial in detection parameters in seconds; rerun on the full range once happy.
 

@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 import struct
-from tqdm.auto import tqdm
 
 import numpy as np
 import tifffile
@@ -493,11 +493,13 @@ def get_metadata_batch(file_paths: list | tuple):
     # this is what we divide by to get frame count, not num_planes (spatial z-planes)
     nchannels = metadata.get("nchannels", 1)
 
-    # Count frames for all files
-    frames_per_file = [
-        query_tiff_pages(fp) // nchannels
-        for fp in tqdm(file_paths, desc="Counting frames", disable=len(file_paths) < 2)
-    ]
+    # count frames for all files (page-header read, sub-millisecond per file)
+    _t0 = time.perf_counter()
+    frames_per_file = [query_tiff_pages(fp) // nchannels for fp in file_paths]
+    logger.debug(
+        "counted %d frames across %d files in %.2fs",
+        sum(frames_per_file), len(file_paths), time.perf_counter() - _t0,
+    )
 
     total_frames = sum(frames_per_file)
     return metadata | {

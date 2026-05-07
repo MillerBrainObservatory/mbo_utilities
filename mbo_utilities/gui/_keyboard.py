@@ -61,6 +61,11 @@ def handle_keyboard_shortcuts(parent: Any):
         parent.logger.info("Shortcut: 'm' (Metadata Viewer)")
         parent.show_metadata_viewer = not parent.show_metadata_viewer
 
+    # Shift+M: open the standalone "Set Metadata" popup (no ctrl)
+    if not io.key_ctrl and io.key_shift and imgui.is_key_pressed(imgui.Key.m, False):
+        parent.logger.info("Shortcut: 'Shift+M' (Set Metadata)")
+        parent._show_metadata_popup = True
+
     # enter or p: toggle side panel collapse (no modifiers)
     if not io.key_ctrl and not io.key_shift and (
         imgui.is_key_pressed(imgui.Key.enter, False)

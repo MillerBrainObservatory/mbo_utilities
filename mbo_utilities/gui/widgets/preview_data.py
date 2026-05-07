@@ -43,7 +43,7 @@ from scipy.ndimage import gaussian_filter
 from imgui_bundle import imgui, hello_imgui, imgui_ctx, implot
 
 from mbo_utilities.preferences import get_mbo_dirs
-from mbo_utilities.reader import MBO_SUPPORTED_FTYPES
+from mbo_utilities.reader import MBO_AVAILABLE_FTYPES
 from mbo_utilities.arrays.features import PhaseCorrectionFeature
 from mbo_utilities.preferences import get_last_dir
 from mbo_utilities.arrays import ScanImageArray
@@ -61,6 +61,7 @@ from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts, rebind_space_
 from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
+from mbo_utilities.gui._metadata_editor import draw_metadata_popup
 
 
 import fastplotlib as fpl
@@ -68,6 +69,70 @@ from fastplotlib.ui import EdgeWindow
 import contextlib
 
 __all__ = ["PreviewDataWidget"]
+
+
+import re as _re
+
+_PLANE_DIR_RE = _re.compile(r"^plane\d+$", _re.IGNORECASE)
+
+
+def _outdir_from_fpath(fpath) -> str | None:
+    """Default output dir from a loaded fpath: the parent folder when fpath
+    is a file, or the folder itself when fpath IS a directory. Used to
+    seed the Run-tab output field so re-runs land alongside the source
+    data unless the user explicitly browses elsewhere.
+    """
+    if fpath is None:
+        return None
+    if isinstance(fpath, (list, tuple)):
+        if not fpath:
+            return None
+        fpath = fpath[0]
+    try:
+        p = Path(str(fpath))
+    except (TypeError, ValueError):
+        return None
+    if not p.exists():
+        return None
+    return str(p if p.is_dir() else p.parent)
+
+
+def _derive_suite2p_output_dir(fpath) -> str | None:
+    """Detect a suite2p output location from a file or directory path.
+
+    Returns the directory suite2p would have written into (the parent of
+    the `plane*/` subdirs), or None if `fpath` doesn't look like a suite2p
+    output. Used to auto-populate the GUI's output-folder field when the
+    user opens an existing data.bin / ops.npy / volumetric results dir.
+
+    Cases handled:
+      - file inside `…/<root>/plane0/` (e.g. data.bin, ops.npy) → `<root>`
+      - directory `…/<root>/plane0/`                            → `<root>`
+      - directory `…/<root>/` containing one or more `plane*/`  → `<root>`
+    """
+    if fpath is None:
+        return None
+    if isinstance(fpath, (list, tuple)):
+        if not fpath:
+            return None
+        fpath = fpath[0]
+    try:
+        p = Path(str(fpath))
+    except (TypeError, ValueError):
+        return None
+    if not p.exists():
+        return None
+
+    parent = p.parent if p.is_file() else p
+    if _PLANE_DIR_RE.match(parent.name):
+        return str(parent.parent)
+    try:
+        for child in parent.iterdir():
+            if child.is_dir() and _PLANE_DIR_RE.match(child.name):
+                return str(parent)
+    except (OSError, PermissionError):
+        pass
+    return None
 
 
 class PreviewDataWidget(EdgeWindow):
@@ -137,6 +202,10 @@ class PreviewDataWidget(EdgeWindow):
         if implot.get_current_context() is None:
             implot.create_context()
 
+        # apply opaque imgui style (idempotent, runs once per process)
+        from mbo_utilities.gui._imgui_helpers import style_imgui_opaque
+        style_imgui_opaque()
+
         # Setup ImGui fonts
         self._init_fonts()
 
@@ -203,10 +272,20 @@ class PreviewDataWidget(EdgeWindow):
         start_output_capture()
 
     def _init_suite2p(self):
-        """Initialize Suite2p settings and start background preload."""
-        # start background preload of pipeline widgets (non-blocking)
-        from mbo_utilities.gui.widgets.pipelines import start_preload
-        start_preload()
+        """Initialize Suite2p settings (lazy)."""
+        # NOTE: removed the eager `start_preload()` call here. The preload
+        # spawned a daemon thread that, despite a 1s sleep, ended up
+        # contending for the GIL during fastplotlib's first-paint, so the
+        # widget felt frozen for ~3.5s after the window appeared (suite2p
+        # imports torch/numba/cellpose/scipy — ~3500 modules total).
+        #
+        # Pipeline registration is now fully lazy: `_register_pipelines()`
+        # is called the first time the user opens the Pipeline Settings
+        # popup, and it falls back to a synchronous import on that one
+        # click. Trade-off: ~3.5s pause when the user FIRST opens the
+        # popup, vs. instant widget startup. If you want the preload back
+        # on a different trigger (e.g. when the user navigates to the Run
+        # tab), call `start_preload()` from there.
 
         # defer dataclass creation until actually needed. all three are
         # lazy-initialized by matching properties below.
@@ -245,7 +324,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @property
     def s2p_extras(self):
-        """Fork/mbo-only suite2p fields (keep_raw, dff_*, 1P registration)."""
+        """Mbo-only suite2p helper fields (dff_*, accept_all_cells, etc.)."""
         if self._s2p_extras is None and HAS_SUITE2P:
             from mbo_utilities.gui.widgets.pipelines.settings import MboSuite2pExtras
             self._s2p_extras = MboSuite2pExtras()
@@ -271,14 +350,24 @@ class PreviewDataWidget(EdgeWindow):
         )
         io.set_ini_filename(str(fd_settings_dir))
 
-        sans_serif_font = str(
-            Path(imgui_bundle.__file__).parent.joinpath(
-                "assets", "fonts", "Roboto", "Roboto-Regular.ttf"
-            )
+        _fonts_dir = Path(imgui_bundle.__file__).parent.joinpath(
+            "assets", "fonts", "Roboto"
         )
+        sans_serif_font = str(_fonts_dir / "Roboto-Regular.ttf")
         self._default_imgui_font = io.fonts.add_font_from_file_ttf(
             sans_serif_font, 14, imgui.ImFontConfig()
         )
+        # bold variant — used by the pipeline-settings popup to emphasize
+        # "look at these first" parameters listed in _IMPORTANT_FIELDS,
+        # paired with a thin box around the label. fall back to None if the
+        # file is missing (the popup pushes the font only when non-None).
+        bold_path = _fonts_dir / "Roboto-Bold.ttf"
+        if bold_path.is_file():
+            self._bold_font = io.fonts.add_font_from_file_ttf(
+                str(bold_path), 14, imgui.ImFontConfig()
+            )
+        else:
+            self._bold_font = None
         imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
 
     def _init_state(self):
@@ -356,8 +445,9 @@ class PreviewDataWidget(EdgeWindow):
         self._register_z_running = False
         self._register_z_current_msg = ""
         # axial registration knobs; exposed in the save-as options popup.
+        # default search radius matches compute_axial_shifts(max_reg_xy=30).
         self._axial_max_frames = 200
-        self._axial_max_reg_xy = 150
+        self._axial_max_reg_xy = 30
 
         # Selection state
         self._selected_pipelines = None
@@ -406,7 +496,7 @@ class PreviewDataWidget(EdgeWindow):
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
         self._ext = ".tiff"
-        self._ext_idx = MBO_SUPPORTED_FTYPES.index(".tiff")
+        self._ext_idx = MBO_AVAILABLE_FTYPES.index(".tiff")
         self._overwrite = True
         self._debug = False
         self._saveas_chunk_mb = 100
@@ -432,11 +522,32 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_progress = 0.0
         self._saveas_current_index = 0
 
+        # Set Metadata popup — driven by File menu and Shift+M shortcut
+        # (see gui/_metadata_editor.draw_metadata_popup).
+        self._show_metadata_popup = False
+
         # Directories
         save_as_dir = get_last_dir("save_as")
         self._saveas_outdir = str(save_as_dir) if save_as_dir else ""
-        s2p_output_dir = get_last_dir("suite2p_output")
-        self._s2p_outdir = str(s2p_output_dir) if s2p_output_dir else ""
+
+        # Default suite2p output dir = the loaded path's parent (file) or
+        # the folder itself (directory). Most intuitive default — re-runs
+        # land next to the source data. Falls back to the cached last-used
+        # dir only when nothing is loaded yet.
+        _loaded_outdir = _outdir_from_fpath(self.fpath)
+        if _loaded_outdir:
+            self._s2p_outdir = _loaded_outdir
+        else:
+            s2p_output_dir = get_last_dir("suite2p_output")
+            self._s2p_outdir = str(s2p_output_dir) if s2p_output_dir else ""
+
+        # If the loaded data lives inside a suite2p output tree (data.bin
+        # in plane*/, ops.npy / stat.npy / etc.), or is a volumetric root
+        # containing plane*/, point _s2p_outdir at that root so a re-run
+        # lands in the same place. Wins over the parent-folder default.
+        _derived_s2p_dir = _derive_suite2p_output_dir(self.fpath)
+        if _derived_s2p_dir:
+            self._s2p_outdir = _derived_s2p_dir
         self._saveas_folder_dialog = None
         self._saveas_total = 0
 
@@ -460,6 +571,21 @@ class PreviewDataWidget(EdgeWindow):
         # defaults to True for save operations
         self._saveas_fix_phase = True
         self._saveas_use_fft = True
+
+        # Video export options (active when ext is .mp4/.avi/.mov)
+        self._saveas_video_fps = 30
+        self._saveas_video_speed_factor = 1.0
+        self._saveas_video_auto = True
+        self._saveas_video_vmin = 0.0
+        self._saveas_video_vmax = 1000.0
+        self._saveas_video_vmin_pct = 1.0
+        self._saveas_video_vmax_pct = 99.5
+        self._saveas_video_temporal_smooth = 0
+        self._saveas_video_spatial_smooth = 0.0
+        self._saveas_video_gamma = 1.0
+        self._saveas_video_cmap_idx = 0  # 0 = grayscale (None)
+        self._saveas_video_quality = 9
+        self._saveas_video_codec_idx = 0  # 0 = libx264
 
     def _init_viewer(self):
         """Initialize the viewer based on data type."""
@@ -725,24 +851,6 @@ class PreviewDataWidget(EdgeWindow):
         per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         self._set_processor_attr("window_sizes", per_processor_sizes)
 
-    @property
-    def phase_upsample(self) -> int:
-        """Upsampling factor for subpixel phase correlation."""
-        if not self.has_raster_scan_support:
-            return 5
-        arrays = self._get_data_arrays()
-        return getattr(arrays[0], "upsample", 5) if arrays else 5
-
-    @phase_upsample.setter
-    def phase_upsample(self, value: int):
-        if not self.has_raster_scan_support:
-            return
-        self.logger.info(f"Setting phase_upsample to {value}.")
-        for arr in self._get_data_arrays():
-            if hasattr(arr, "upsample"):
-                arr.upsample = value
-        self._refresh_image_widget()
-
     # === Internal methods ===
 
     def _refresh_image_widget(self):
@@ -932,6 +1040,7 @@ class PreviewDataWidget(EdgeWindow):
         # Draw independent floating windows
         draw_tools_popups(self)
         draw_saveas_popup(self)
+        draw_metadata_popup(self)
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
         draw_help_popup(self)

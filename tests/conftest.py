@@ -1,7 +1,7 @@
 """
 Shared pytest fixtures for mbo_utilities tests.
 
-Test data location: E:/tests/lbm/mbo_utilities/
+Test data location: ~/.mbo/tests/lbm/mbo_utilities/
 
 Usage:
     pytest tests/ -v                    # Run all tests
@@ -17,7 +17,7 @@ import pytest
 
 import mbo_utilities as mbo
 
-TEST_DATA_ROOT = Path("E:/tests/lbm/mbo_utilities")
+TEST_DATA_ROOT = Path.home() / ".mbo" / "tests" / "lbm" / "mbo_utilities"
 TEST_INPUT_TIFF = TEST_DATA_ROOT / "test_input.tif"
 BASELINE_DIR = TEST_DATA_ROOT / "baselines"
 OUTPUT_DIR = TEST_DATA_ROOT / "test_outputs"
@@ -149,7 +149,7 @@ def output_dir(request, test_data_root):
     """
     Unique output directory for each test.
 
-    Creates: E:/tests/lbm/mbo_utilities/test_outputs/<test_name>/
+    Creates: ~/.mbo/tests/lbm/mbo_utilities/test_outputs/<test_name>/
     Cleaned up after test unless KEEP_TEST_OUTPUT=1
     """
     import os

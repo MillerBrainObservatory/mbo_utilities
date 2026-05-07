@@ -203,6 +203,8 @@ class BinArray(ReductionMixin, Shape5DMixin):
         self,
         outpath: Path | str,
         planes=None,
+        frames=None,
+        channels=None,
         target_chunk_mb: int = 50,
         ext: str = ".bin",
         progress_callback=None,
@@ -217,8 +219,10 @@ class BinArray(ReductionMixin, Shape5DMixin):
 
         ext_clean = ext.lower().lstrip(".")
 
-        # For binary output, use direct memmap copy (faster)
-        if ext_clean == "bin":
+        # Fast memmap copy only when no selection is requested. Any
+        # frames/planes/channels filter must go through _imwrite_base
+        # so the selection is honored.
+        if ext_clean == "bin" and frames is None and planes is None and channels is None:
             md = dict(self.metadata) if self.metadata else {}
             md["Ly"] = self.Ly
             md["Lx"] = self.Lx
@@ -246,11 +250,13 @@ class BinArray(ReductionMixin, Shape5DMixin):
             logger.info(f"Wrote ops.npy to {ops_file}")
             return outpath
 
-        # For other formats, use common implementation
+        # For other formats (or .bin with a selection), use common implementation
         return _imwrite_base(
             self,
             outpath,
             planes=planes,
+            frames=frames,
+            channels=channels,
             ext=ext,
             overwrite=overwrite,
             target_chunk_mb=target_chunk_mb,

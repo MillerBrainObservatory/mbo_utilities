@@ -16,8 +16,9 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Test configuration
-TEST_INPUT = Path("E:/tests/lbm/mbo_utilities/test_input.tif")
-OUTPUT_DIR = Path("E:/tests/lbm/mbo_utilities/summary_images")
+_TEST_DATA_ROOT = Path.home() / ".mbo" / "tests" / "lbm" / "mbo_utilities"
+TEST_INPUT = _TEST_DATA_ROOT / "test_input.tif"
+OUTPUT_DIR = _TEST_DATA_ROOT / "summary_images"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Array types to test

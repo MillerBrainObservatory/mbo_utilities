@@ -52,9 +52,8 @@ def draw_menu_bar(parent: Any):
                         start_dir = str(get_last_dir("open_folder") or Path.home())
                     parent._folder_dialog = pfd.select_folder("Select Data Folder", start_dir)
                 imgui.separator()
-                if imgui.menu_item("Set Metadata", "", p_selected=False, enabled=True)[0]:
-                    parent._saveas_popup_open = True
-                    parent._saveas_select_metadata_tab = True
+                if imgui.menu_item("Set Metadata", "Shift+M", p_selected=False, enabled=True)[0]:
+                    parent._show_metadata_popup = True
                 imgui.separator()
                 # Check if current data supports imwrite
                 can_save = parent.is_mbo_scan
@@ -87,22 +86,6 @@ def draw_menu_bar(parent: Any):
                     webbrowser.open(
                         "https://millerbrainobservatory.github.io/mbo_utilities/"
                     )
-                imgui.end_menu()
-            if imgui.begin_menu("View", True):
-                imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Tools")
-                imgui.separator()
-                imgui.spacing()
-                _, parent.show_scope_window = imgui.menu_item(
-                    "Scope Inspector", "", parent.show_scope_window, True
-                )
-                imgui.spacing()
-                imgui.separator()
-                imgui.text_colored(imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Display")
-                imgui.separator()
-                imgui.spacing()
-                _, parent._show_progress_overlay = imgui.menu_item(
-                    "Status Indicator", "", parent._show_progress_overlay, True
-                )
                 imgui.end_menu()
         imgui.end_menu_bar()
 
@@ -248,6 +231,7 @@ def draw_keybinds_popup(parent: Any):
             ("File", None),
             ("o", "Open file"),
             ("Shift + O", "Open folder"),
+            ("Shift + M", "Set metadata"),
             ("s", "Save as"),
             ("", ""),
             ("View", None),

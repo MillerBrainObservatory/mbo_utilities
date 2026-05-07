@@ -1,14 +1,126 @@
+import json
 import pathlib
 import threading
 from pathlib import Path
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import numpy as np
 
-from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd, hello_imgui
+from imgui_bundle import (
+    imgui,
+    imgui_ctx,
+    portable_file_dialogs as pfd,
+    hello_imgui,
+    icons_fontawesome_6 as fa,
+)
 
-from mbo_utilities.gui._imgui_helpers import set_tooltip, settings_row_with_popup, _popup_states
+from mbo_utilities.gui._imgui_helpers import (
+    draw_boxed_label,
+    set_tooltip,
+    settings_row_with_popup,
+    tooltip_marks_right,
+    _popup_states,
+)
+from mbo_utilities.gui.widgets.pipelines._s2p_schema import is_default as _is_default
+
+
+# light orange for parameters whose value differs from upstream suite2p
+# default. picked to read as "modified" without competing with the title
+# color (which is also orange-ish) — slightly redder, lower brightness.
+_MODIFIED_COLOR = imgui.ImVec4(1.0, 0.72, 0.40, 1.0)
+
+# light green for mbo-only parameters that have no upstream suite2p
+# equivalent (cellpose_niter, accept_all_cells, dff_*). Always rendered
+# in this color regardless of value, to flag "this isn't a vanilla
+# suite2p knob".
+_MBO_ONLY_COLOR = imgui.ImVec4(0.55, 0.85, 0.55, 1.0)
+
+# orangish-yellow — reserved for the MAIN suite2p section header
+# ("Suite2p Main Settings"). Matches the column-header color so users
+# can tell "this group is vanilla suite2p" at a glance.
+_S2P_TITLE_COLOR = imgui.ImVec4(1.0, 0.85, 0.4, 1.0)
+
+# light blue — used for sub-section titles within any column (Cell
+# Filters, dF/F, Rastermap, Sparsery, Sourcery, Cellpose, Shared,
+# Classification, Denoise Block, Channel 2). Distinct from
+# _S2P_TITLE_COLOR (main header) and _MBO_ONLY_COLOR (mbo-only group).
+_SUBSECTION_COLOR = imgui.ImVec4(0.55, 0.75, 1.0, 1.0)
+
+
+# "Look at these first" — fields whose label is rendered in a bold font
+# inside a thin rounded box in the pipeline-settings popup, so users know
+# which knobs typically matter most. Add / remove freely; the emphasis is
+# applied automatically by `_emp_label` inside `_draw_section_suite2p_content`
+# whenever its `field` argument is in this set.
+#
+# The bold font (Roboto-Bold.ttf) is loaded in `gui/widgets/preview_data.py`
+# and stashed on the parent widget as `self._bold_font`. If that's None
+# (font file missing) the box is still drawn but with the regular font.
+_IMPORTANT_FIELDS: set[str] = {
+    "algorithm",
+    "tau",
+    "threshold_scaling",
+    "two_step_registration",
+    "cellprob_threshold",
+    "flow_threshold",
+    "cellpose_img",
+    "highpass_time",
+}
+
+
+@contextmanager
+def _hi(field: str, value):
+    """Push _MODIFIED_COLOR for widget text iff `value` differs from upstream
+    default for `field`. No-op for mbo-only fields (they have no default to
+    compare against). Use as a context manager around any imgui widget call:
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("tau", self.s2p.tau):
+            _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
+        set_tooltip(...)
+
+    Wrap only the widget — keep set_next_item_width above and set_tooltip
+    below the `with` so the (?) marker stays at the default color.
+    """
+    pushed = not _is_default(field, value)
+    if pushed:
+        imgui.push_style_color(imgui.Col_.text, _MODIFIED_COLOR)
+    try:
+        yield
+    finally:
+        if pushed:
+            imgui.pop_style_color()
+
+
+@contextmanager
+def _mbo():
+    """Push _MBO_ONLY_COLOR (off-green) around a widget. Use for fields
+    that have no upstream suite2p equivalent so they're visually flagged
+    as mbo-only (cellpose_niter, accept_all_cells, dff_window_size, etc.).
+    """
+    imgui.push_style_color(imgui.Col_.text, _MBO_ONLY_COLOR)
+    try:
+        yield
+    finally:
+        imgui.pop_style_color()
+
+
+@contextmanager
+def _ghost_button():
+    """Material-design-inspired ghost button: a faint white surface tint
+    at rest with a slightly stronger overlay on hover/active. Use for
+    secondary affordances (copy buttons, etc.) so they stay legible
+    without dominating the panel like the default chunky button fill.
+    """
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(1, 1, 1, 0.05))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(1, 1, 1, 0.10))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(1, 1, 1, 0.16))
+    try:
+        yield
+    finally:
+        imgui.pop_style_color(3)
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._writers import _convert_paths_to_strings
@@ -18,15 +130,285 @@ _HAS_LSP: bool | None = None
 
 
 def _check_lsp_available() -> bool:
-    """check if lbm_suite2p_python is available (lazy, cached)."""
+    """check if lbm_suite2p_python is available.
+
+    Caches a positive result for the session (find_spec is cheap but a
+    True answer can't change once we've seen it), but ALWAYS re-probes
+    after a negative or unknown answer — that way `pip install
+    lbm_suite2p_python` mid-session is picked up on the next click
+    instead of leaving the user stuck behind a stale False cache.
+    """
     global _HAS_LSP
-    if _HAS_LSP is None:
-        import importlib.util
-        _HAS_LSP = importlib.util.find_spec("lbm_suite2p_python") is not None
-    return _HAS_LSP
+    if _HAS_LSP is True:
+        return True
+    import importlib.util
+    found = importlib.util.find_spec("lbm_suite2p_python") is not None
+    if found:
+        _HAS_LSP = True
+    return found
+
+
+# Rastermap install probe — kicked off in a daemon thread when the user
+# flips the Rastermap stage gate to Run or Force. Cached for the GUI
+# session, but re-checks fire on subsequent clicks until we see a
+# positive result, so a mid-session `pip install rastermap` is picked up.
+# State shape: (status, version_or_none) where status is one of
+# "unknown" / "checking" / "ok" / "missing".
+_rm_install: tuple[str, str | None] = ("unknown", None)
+_rm_install_lock = threading.Lock()
+_rm_install_thread: "threading.Thread | None" = None
+
+
+def _do_rastermap_install_check() -> None:
+    """Worker — confirm rastermap is importable and capture its version.
+
+    Version source priority:
+      1. importlib.metadata.version("rastermap") — canonical package
+         metadata (works even when the module doesn't expose __version__,
+         which is the case for current rastermap releases).
+      2. rastermap.__version__ — fallback if metadata lookup fails.
+      3. "unknown" — last resort; module imports but no version found.
+    """
+    global _rm_install
+    try:
+        import importlib
+        importlib.invalidate_caches()  # pick up packages installed mid-session
+        mod = importlib.import_module("rastermap")
+        version: str
+        try:
+            from importlib.metadata import version as _pkg_version
+            version = _pkg_version("rastermap")
+        except Exception:
+            version = str(getattr(mod, "__version__", "unknown"))
+        with _rm_install_lock:
+            _rm_install = ("ok", version)
+    except Exception:
+        with _rm_install_lock:
+            _rm_install = ("missing", None)
+
+
+def _kick_rastermap_install_check() -> None:
+    """Start a background install probe unless we already know it's there.
+
+    Idempotent: returns immediately if a positive result is cached or
+    another probe is already running. A "missing" result does NOT block
+    re-checks — that way the user can install rastermap and click Run
+    again to see the indicator turn green.
+    """
+    global _rm_install, _rm_install_thread
+    with _rm_install_lock:
+        if _rm_install[0] == "ok":
+            return
+        if _rm_install_thread is not None and _rm_install_thread.is_alive():
+            return
+        _rm_install = ("checking", None)
+        _rm_install_thread = threading.Thread(
+            target=_do_rastermap_install_check, daemon=True
+        )
+        _rm_install_thread.start()
 
 
 USER_PIPELINES = ["suite2p"]
+
+
+def build_cell_filters(
+    min_um_enabled: bool,
+    min_um: float,
+    max_um_enabled: bool,
+    max_um: float,
+    *,
+    baseline_filter_enabled: bool = False,
+    baseline_reject_negative_F0: bool = False,
+    baseline_min_F0_abs_enabled: bool = False,
+    baseline_min_F0_abs: float = 0.0,
+    baseline_min_F0_rel_enabled: bool = False,
+    baseline_min_F0_rel: float = 0.0,
+    correct_neuropil: bool = True,
+) -> list[dict]:
+    """Compose lsp's `cell_filters` list from the GUI's paired checkbox+value fields.
+
+    Emits one entry per active criterion. lsp runs filters in apply order
+    (each one writes its own 14<letter>_filter_<name>.png) so the order
+    here is the order the user sees in the output dir.
+
+    Possible entries:
+      - `{"name": "max_diameter", ...}` — diameter bounds.
+      - `{"name": "negative_baseline", "correct_neuropil": ...}` — drop ROIs
+        whose rolling F0 dips below zero anywhere.
+      - `{"name": "min_baseline_abs", "correct_neuropil": ..., "min_F0_abs":
+        ...}` — drop ROIs whose median rolling F0 is below an absolute
+        photon-count floor.
+      - `{"name": "min_baseline_rel", "correct_neuropil": ..., "min_F0_rel":
+        ...}` — drop ROIs whose minimum rolling F0 is below this fraction
+        of median(F_raw).
+
+    The dff window/percentile that each baseline filter scores against is
+    resolved at the lsp layer from ops/pipeline kwargs (same values feeding
+    the dF/F plot), so we don't thread those per-filter here.
+    """
+    out: list[dict] = []
+
+    diameter: dict = {}
+    if min_um_enabled and min_um > 0:
+        diameter["min_diameter_um"] = float(min_um)
+    if max_um_enabled and max_um > 0:
+        diameter["max_diameter_um"] = float(max_um)
+    if diameter:
+        diameter["name"] = "max_diameter"
+        out.append(diameter)
+
+    if baseline_filter_enabled:
+        cn = bool(correct_neuropil)
+        if baseline_reject_negative_F0:
+            out.append({"name": "negative_baseline", "correct_neuropil": cn})
+        if baseline_min_F0_abs_enabled and baseline_min_F0_abs > 0:
+            out.append({
+                "name": "min_baseline_abs",
+                "correct_neuropil": cn,
+                "min_F0_abs": float(baseline_min_F0_abs),
+            })
+        if baseline_min_F0_rel_enabled and baseline_min_F0_rel > 0:
+            out.append({
+                "name": "min_baseline_rel",
+                "correct_neuropil": cn,
+                "min_F0_rel": float(baseline_min_F0_rel),
+            })
+
+    return out
+
+
+def _build_planar_sub(extras) -> dict:
+    """Compose the planar sub-dict for lsp's rastermap_kwargs.
+
+    Sentinel values (0 for ints, -1 for locality) signal "omit — use
+    lsp's cell-count-aware default for this field". An empty dict is
+    valid and means "use defaults for ALL params" — still on.
+    """
+    sub: dict = {}
+    if extras.rastermap_planar_n_clusters > 0:
+        sub["n_clusters"] = int(extras.rastermap_planar_n_clusters)
+    if extras.rastermap_planar_n_pcs > 0:
+        sub["n_PCs"] = int(extras.rastermap_planar_n_pcs)
+    if extras.rastermap_planar_locality >= 0:
+        sub["locality"] = float(extras.rastermap_planar_locality)
+    return sub
+
+
+def _build_volumetric_sub(extras) -> dict:
+    """Compose the volumetric sub-dict for lsp's rastermap_kwargs."""
+    sub: dict = {}
+    if extras.rastermap_volumetric_n_clusters > 0:
+        sub["n_clusters"] = int(extras.rastermap_volumetric_n_clusters)
+    if extras.rastermap_volumetric_n_pcs > 0:
+        sub["n_PCs"] = int(extras.rastermap_volumetric_n_pcs)
+    return sub
+
+
+def build_rastermap_kwargs(extras) -> dict | None:
+    """Compose lsp's unified rastermap_kwargs for `pipeline()`.
+
+    Returns:
+      None — when rastermap_mode is Skip, OR when neither sub-mode is
+             enabled (lsp treats None as "both off").
+      {"planar": {...}}                   — planar only.
+      {"volumetric": {...}}               — volumetric only.
+      {"planar": {...}, "volumetric": ...} — both.
+    """
+    if extras.rastermap_mode == 0:
+        return None
+    out: dict = {}
+    if extras.rastermap_planar:
+        out["planar"] = _build_planar_sub(extras)
+    if extras.rastermap_volumetric:
+        out["volumetric"] = _build_volumetric_sub(extras)
+    return out or None
+
+
+def build_planar_rastermap_kwargs(extras) -> dict | None:
+    """Compose the planar-only kwargs for `run_plane()`.
+
+    `run_plane` doesn't have a volumetric mode, so we hand it just the
+    planar sub-dict (or None to disable). Empty dict = "on, use defaults".
+    """
+    if extras.rastermap_mode == 0 or not extras.rastermap_planar:
+        return None
+    return _build_planar_sub(extras)
+
+
+_s2p_schema_warmup_thread: "threading.Thread | None" = None
+
+
+def _kick_s2p_schema_warmup() -> None:
+    """Background-load `suite2p.parameters.SETTINGS` so `is_default` can
+    distinguish modified suite2p fields from defaults.
+
+    `_s2p_schema._ensure_loaded` is idempotent and thread-safe; until it
+    runs, `is_default` short-circuits to True and `collect_modified_params`
+    sees zero suite2p modifications. We start the warmup the first time
+    Modified Parameters is computed and let subsequent frames pick up the
+    loaded schema. Idempotent: skip if a thread is already running or the
+    schema is already loaded.
+    """
+    global _s2p_schema_warmup_thread
+    from mbo_utilities.gui.widgets.pipelines import _s2p_schema as _sch
+    if _sch._SETTINGS is not None:
+        return
+    if _s2p_schema_warmup_thread is not None and _s2p_schema_warmup_thread.is_alive():
+        return
+    _s2p_schema_warmup_thread = threading.Thread(
+        target=_sch.warm_up_suite2p_schema, daemon=True
+    )
+    _s2p_schema_warmup_thread.start()
+
+
+def collect_modified_params(
+    s2p, s2p_db, s2p_extras=None
+) -> list[tuple[str, object, object, str]]:
+    """Return modified parameters across both pipelines.
+
+    Each tuple is `(field, current, default, source)` where `source` is
+    `"s2p"` for upstream-mapped fields (Suite2pSettings / Suite2pDB) and
+    `"lsp"` for MboSuite2pExtras fields (lbm_suite2p_python kwargs). s2p
+    defaults come from `suite2p.parameters.SETTINGS` via the schema map;
+    lsp defaults come from the dataclass field spec.
+
+    Sorted: s2p group first (alphabetical), then lsp group (alphabetical).
+    """
+    _kick_s2p_schema_warmup()
+    from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
+        _MBO_TO_S2P,
+        _MBO_DB_TO_S2P,
+        get_default,
+        is_default,
+    )
+
+    s2p_rows: list[tuple[str, object, object, str]] = []
+    for field in _MBO_TO_S2P:
+        if not hasattr(s2p, field):
+            continue
+        cur = getattr(s2p, field)
+        if not is_default(field, cur):
+            s2p_rows.append((field, cur, get_default(field), "s2p"))
+    for field in _MBO_DB_TO_S2P:
+        if not hasattr(s2p_db, field):
+            continue
+        cur = getattr(s2p_db, field)
+        if not is_default(field, cur):
+            s2p_rows.append((field, cur, get_default(field), "s2p"))
+    s2p_rows.sort(key=lambda t: t[0])
+
+    lsp_rows: list[tuple[str, object, object, str]] = []
+    if s2p_extras is not None:
+        import dataclasses as _dc
+        for ef in _dc.fields(s2p_extras):
+            if ef.default is _dc.MISSING:
+                continue
+            cur = getattr(s2p_extras, ef.name)
+            if cur != ef.default:
+                lsp_rows.append((ef.name, cur, ef.default, "lsp"))
+        lsp_rows.sort(key=lambda t: t[0])
+
+    return s2p_rows + lsp_rows
 
 
 def draw_suite2p_settings_panel(
@@ -171,14 +553,19 @@ def draw_suite2p_settings_panel(
     imgui.same_line(hello_imgui.em_size(20))
     imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Run cell detection")
 
+    _algo_options = ["cellpose", "sparsery", "sourcery"]
     if readonly:
-        imgui.text(f"  [{'x' if settings.sparse_mode else ' '}] sparse_mode")
+        imgui.text(f"  algorithm = {settings.algorithm}")
     else:
-        _, settings.sparse_mode = imgui.checkbox(
-            "sparse_mode##panel", settings.sparse_mode
-        )
+        if settings.algorithm not in _algo_options:
+            settings.algorithm = "sparsery"
+        _algo_idx = _algo_options.index(settings.algorithm)
+        imgui.set_next_item_width(hello_imgui.em_size(10))
+        _changed, _new_idx = imgui.combo("algorithm##panel", _algo_idx, _algo_options)
+        if _changed:
+            settings.algorithm = _algo_options[_new_idx]
     imgui.same_line(hello_imgui.em_size(20))
-    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Sparse detection (faster)")
+    imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Detection algorithm")
 
     imgui.text("  diameter")
     imgui.same_line(hello_imgui.em_size(14))
@@ -271,17 +658,23 @@ class Suite2pSettings:
     flat for GUI ergonomics; `to_dict()` produces the upstream-shaped
     nested dict (run / io / registration / detection / ... ).
 
-    Paths, plane counts, and I/O config live on `Suite2pDB`. Fork/mbo-only
-    fields (keep_raw, dff_*, 1P registration, etc.) live on
+    Paths, plane counts, and I/O config live on `Suite2pDB`. Mbo-only
+    helper fields (dff_*, accept_all_cells, etc.) live on
     `MboSuite2pExtras`.
     """
 
-    # top-level
-    torch_device: str = "cuda"  # passed through; _assign_torch_device falls back to cpu on allocation failure
+    # top-level — defaults match suite2p.parameters.SETTINGS exactly.
+    # Don't bake in LBM tunings here; users start from upstream defaults
+    # and tweak from there (the schema helper at _s2p_schema.py is the
+    # single source of truth for what "default" means).
+    torch_device: str = "cuda"  # upstream default
     tau: float = 1.0  # upstream default
     fs: float = 10.0  # upstream default
-    diameter_y: float = 4.0  # LBM default (upstream default is [12., 12.])
-    diameter_x: float = 4.0
+    diameter_y: float = 12.0  # upstream default; was 4.0 (LBM tuning)
+    diameter_x: float = 12.0  # upstream default; was 4.0 (LBM tuning)
+    # Cell-detection algorithm. Drives which sub-section of detection
+    # settings is honored at runtime.
+    algorithm: str = "sparsery"  # upstream default; one of "cellpose"/"sparsery"/"sourcery"
 
     # run section
     do_registration: int = 1  # 0=skip, 1=run, 2=force
@@ -320,15 +713,20 @@ class Suite2pSettings:
     reg_tif: bool = False
     reg_tif_chan2: bool = False
 
-    # detection section (algorithm is derived from sparse_mode + anatomical_only at serialize time)
-    sparse_mode: bool = True  # user-visible per spec
-    anatomical_only: int = 3  # LBM default: enhanced mean image (cellpose)
+    # detection section
+    # NOTE: legacy `sparse_mode` (bool) and `anatomical_only` (int 0-4) were
+    # removed in favor of `algorithm` (the canonical selector) and
+    # `cellpose_img` (the literal upstream string). Old flat ops files using
+    # those legacy keys are remapped on load by _s2p_schema._FLAT_TO_MBO.
     denoise: bool = False
     det_block_size_y: int = 64
     det_block_size_x: int = 64
     nbins: int = 5000  # was fork's "nbinned"
+    bin_size: int | None = None  # upstream defaults to tau*fs when None
     highpass_time: int = 100  # was fork's "high_pass"
     threshold_scaling: float = 1.0
+    npix_norm_min: float = 0.0
+    npix_norm_max: float = 100.0
     max_overlap: float = 0.75
     soma_crop: bool = True
     chan2_threshold: float = 0.25  # was fork's "chan2_thres" (default differs)
@@ -344,25 +742,27 @@ class Suite2pSettings:
     connected: bool = True
     max_iterations: int = 20
     smooth_masks: bool = False  # upstream default False (fork was True)
-    spatial_hp_detect: int = 25  # fork-only (fork puts this under detection) — kept here for GUI parity
+    # NOTE: legacy `spatial_hp_detect` was renamed to `highpass_neuropil`
+    # (under detection.sparsery_settings) in the upstream restructure.
+    # Old flat ops.npy files with `spatial_hp_detect` are remapped on load
+    # by _s2p_schema._FLAT_TO_MBO.
 
     # detection.cellpose_settings
     cellpose_model: str = "cpsam"
-    # cellpose_settings.img is derived from anatomical_only at serialize time
-    # (1→"max_proj / meanImg", 2→"meanImg", 3/4→"max_proj"). upstream removed
-    # enhanced_mean_img so 3 falls back to max_proj.
-    highpass_spatial: float = 0.0  # was fork's "spatial_hp_cp"
-    flow_threshold: float = 0.0  # LBM default (flow-check disabled); upstream default is 0.4
-    cellprob_threshold: float = -6.0  # permissive LBM default (upstream is 0.0)
+    # cellpose image source — one of upstream's three allowed strings:
+    # "max_proj / meanImg" | "meanImg" | "max_proj"
+    cellpose_img: str = "max_proj / meanImg"
+    highpass_spatial: float = 0.0  # upstream default
+    flow_threshold: float = 0.4  # upstream default; was 0.0 (LBM tuning, flow-check disabled)
+    cellprob_threshold: float = 0.0  # upstream default; was -6.0 (LBM permissive tuning)
     # cellpose iterations (upstream forwards via `params` dict → model.eval(niter=...))
     # 0 = let cellpose pick based on diameter (default). Bump for dense / small cells.
     cellpose_niter: int = 0
 
     # classification section (upstream settings keys)
-    classifier_path: str = ""
+    classifier_path: str | None = None  # upstream default; was "" (mbo legacy)
     use_builtin_classifier: bool = False
     preclassify: float = 0.0
-    skip_classification: bool = False
     # `accept_all_cells` is NOT an upstream settings key; it's an
     # lbm_suite2p_python.run_plane kwarg — moved to MboSuite2pExtras.
 
@@ -373,7 +773,7 @@ class Suite2pSettings:
     neuropil_coefficient: float = 0.7  # was fork's "neucoeff"
     inner_neuropil_radius: int = 2
     min_neuropil_pixels: int = 350
-    lam_percentile: int = 50
+    lam_percentile: float = 50.0  # upstream type is float; was int 50 (caused input_int crash on Reset)
     allow_overlap: bool = False
     circular_neuropil: bool = False
 
@@ -382,11 +782,6 @@ class Suite2pSettings:
     win_baseline: float = 60.0
     sig_baseline: float = 10.0
     prctile_baseline: float = 8.0
-
-    def _derived_algorithm(self) -> str:
-        if self.anatomical_only and int(self.anatomical_only) > 0:
-            return "cellpose"
-        return "sparsery" if self.sparse_mode else "sourcery"
 
     def to_dict(self) -> dict:
         """Return the upstream-shaped nested settings dict."""
@@ -435,12 +830,15 @@ class Suite2pSettings:
                 "reg_tif_chan2": self.reg_tif_chan2,
             },
             "detection": {
-                "algorithm": self._derived_algorithm(),
+                "algorithm": self.algorithm,
                 "denoise": self.denoise,
                 "block_size": (int(self.det_block_size_y), int(self.det_block_size_x)),
                 "nbins": self.nbins,
+                "bin_size": self.bin_size,
                 "highpass_time": self.highpass_time,
                 "threshold_scaling": self.threshold_scaling,
+                "npix_norm_min": self.npix_norm_min,
+                "npix_norm_max": self.npix_norm_max,
                 "max_overlap": self.max_overlap,
                 "soma_crop": self.soma_crop,
                 "chan2_threshold": self.chan2_threshold,
@@ -458,9 +856,7 @@ class Suite2pSettings:
                 },
                 "cellpose_settings": {
                     "cellpose_model": self.cellpose_model,
-                    "img": {1: "max_proj / meanImg", 2: "meanImg"}.get(
-                        int(self.anatomical_only), "max_proj"
-                    ),
+                    "img": self.cellpose_img,
                     "highpass_spatial": self.highpass_spatial,
                     "flow_threshold": self.flow_threshold,
                     "cellprob_threshold": self.cellprob_threshold,
@@ -479,7 +875,6 @@ class Suite2pSettings:
                 "classifier_path": self.classifier_path,
                 "use_builtin_classifier": self.use_builtin_classifier,
                 "preclassify": self.preclassify,
-                "skip_classification": self.skip_classification,
             },
             "extraction": {
                 "snr_threshold": self.snr_threshold,
@@ -503,6 +898,60 @@ class Suite2pSettings:
     def to_file(self, filepath):
         """Save settings to settings.npy (upstream-shaped nested dict)."""
         np.save(filepath, _convert_paths_to_strings(self.to_dict()), allow_pickle=True)
+
+    def update_from_ops(self, ops) -> list[str]:
+        """Merge values from a flat ops.npy dict OR structured settings.npy dict
+        OR a path to either, into this Suite2pSettings instance.
+
+        Auto-detects flat vs structured via _s2p_schema.from_ops. Only writes
+        to fields that already exist on the dataclass. Returns the names of
+        fields whose value actually changed.
+        """
+        from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
+            from_ops as _decode_ops,
+            from_npy_file as _decode_file,
+        )
+        if isinstance(ops, (str, pathlib.Path)):
+            mapping = _decode_file(ops)
+        else:
+            mapping = _decode_ops(ops)
+        changed: list[str] = []
+        for field, value in mapping.items():
+            if not hasattr(self, field):
+                continue
+            current = getattr(self, field)
+            # coerce numeric types to match the field's current type — keeps
+            # imgui input_int / input_float widgets happy when an old ops.npy
+            # contains loose types (e.g. lam_percentile written as int when
+            # the current dataclass field is float, or vice versa).
+            if value is not None and current is not None:
+                ct = type(current)
+                try:
+                    if ct is bool and not isinstance(value, bool):
+                        value = bool(value)
+                    elif ct is int and isinstance(value, bool):
+                        # bool → int (handles upstream bools being assigned
+                        # to mbo's tri-state ints, e.g. do_detection)
+                        value = int(value)
+                    elif ct is int and isinstance(value, float):
+                        value = int(value)
+                    elif ct is float and isinstance(value, int) and not isinstance(value, bool):
+                        value = float(value)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+            if current != value:
+                setattr(self, field, value)
+                changed.append(field)
+        return changed
+
+    @classmethod
+    def from_ops(cls, ops) -> "Suite2pSettings":
+        """Build a fresh Suite2pSettings populated from a flat ops.npy /
+        structured settings.npy / path to either. Unmentioned fields keep
+        their dataclass defaults."""
+        instance = cls()
+        instance.update_from_ops(ops)
+        return instance
 
 
 @dataclass
@@ -576,13 +1025,18 @@ class MboSuite2pExtras:
     by mbo's pre/post-processing (dF/F, target_timepoints clipping).
     """
 
-    # lbm_suite2p_python.run_plane kwargs.
-    # force_reg / force_detect are NOT stored here — they're derived at
-    # call time from `Suite2pSettings.do_registration == 2` and
-    # `Suite2pSettings.do_detection == 2` so the Skip/Run/Force radios
-    # remain the single source of truth.
-    keep_raw: bool = False
-    keep_reg: bool = True
+    # lbm_suite2p_python.run_plane kwargs that are MBO-only (no upstream
+    # equivalent). The `keep_raw`/`keep_reg` kwargs are still passed to
+    # run_plane at runtime, but they're derived from upstream fields:
+    #   keep_raw <- self.s2p_db.keep_movie_raw
+    #   keep_reg <- not self.s2p.delete_bin
+    # so we don't store duplicate state here.
+    #
+    # force_reg / force_detect are also derived at call time from
+    # `Suite2pSettings.do_registration == 2` and
+    # `Suite2pSettings.do_detection == 2` (the Skip/Run/Force radios are
+    # the single source of truth).
+
     # when True, lbm's run_plane keeps every detected ROI after upstream
     # classification (mirrors the `accept_all_cells` kwarg in lsp.pipeline).
     accept_all_cells: bool = False
@@ -590,23 +1044,85 @@ class MboSuite2pExtras:
     dff_percentile: int = 20
     dff_smooth_window: int = 0
 
+    # save a human-readable ops.json sibling next to ops.npy via
+    # lbm_suite2p_python.pipeline(save_json=...). useful for inspecting
+    # what suite2p actually ran with. mbo-only (lsp run-plane kwarg, not
+    # a suite2p settings field).
+    save_json: bool = False
+
+    # cell_filters knobs — paired (enabled, value). compose into the lsp
+    # `cell_filters` list at run time. value 0 keeps the spinner enabled
+    # but is treated as disabled by build_cell_filters() — both signals
+    # collapse to "ignore this bound".
+    min_diameter_um_enabled: bool = False
+    min_diameter_um: float = 0.0
+    max_diameter_um_enabled: bool = False
+    max_diameter_um: float = 0.0
+
+    # baseline cell filter (lsp's `baseline` filter — rejects ROIs whose
+    # F0 baseline is negative, sub-photon-floor, or sub-fraction-of-median).
+    # baseline scoring inherits the dF/F window/percentile and the top-level
+    # correct_neuropil toggle so the filter sees the same trace the dF/F
+    # plot does.
+    # always-on master flag — UI doesn't expose it; build_cell_filters()
+    # consults the per-criterion enables below. Default True so a fresh
+    # dataclass matches the runtime contract; loaded settings.npy values
+    # round-trip unchanged.
+    baseline_filter_enabled: bool = True
+    baseline_reject_negative_F0: bool = False
+    baseline_min_F0_abs_enabled: bool = False
+    baseline_min_F0_abs: float = 1.0
+    baseline_min_F0_rel_enabled: bool = False
+    baseline_min_F0_rel: float = 0.0
+
+    # top-level neuropil-correction toggle (lsp pipeline / run_plane /
+    # run_volume kwarg). when False, dF/F is computed from raw F instead
+    # of F - neuropil_coef * Fneu, and trace-quality metrics skip neuropil
+    # subtraction. mirrors `--no-correct-neuropil` on the lsp cli.
+    correct_neuropil: bool = True
+
+    # rastermap stage gate (Skip=0, Run=1, Force=2 — matches the
+    # pipeline-settings popup convention for tri-state stage radios).
+    # Planar / volumetric flags below are only honored when this is
+    # non-zero. Force is treated identically to Run by the underlying
+    # lsp api (it has its own cache-detection); the radio is a UX echo
+    # of the other stage gates, not a separate runtime mode.
+    rastermap_mode: int = 0
+
+    # rastermap mode toggles. Forwarded as `rastermap_kwargs={"planar":
+    # {...}, "volumetric": {...}}` — presence of each key is the on/off
+    # signal per lsp's unified api. Sub-params with sentinel values (0 /
+    # -1) get omitted from the sub-dict so lsp's cell-count-aware defaults
+    # apply to those fields only.
+    rastermap_planar: bool = False
+    rastermap_volumetric: bool = False
+
+    # planar Rastermap() overrides. 0 / -1 = "omit, use lsp default".
+    # lsp defaults derive from cell count: n_clusters = 100 if >=200 else
+    # None; n_PCs = min(128, n_cells-1); locality = 0.0 if >=200 else 0.1.
+    rastermap_planar_n_clusters: int = 0
+    rastermap_planar_n_pcs: int = 0
+    rastermap_planar_locality: float = -1.0
+
+    # volumetric Rastermap() overrides. lsp's defaults: n_clusters=40
+    # (caller-passed), n_PCs = min(200, n_cells-1).
+    rastermap_volumetric_n_clusters: int = 40
+    rastermap_volumetric_n_pcs: int = 0
+
     # mbo-side timepoint / plane selection
     target_timepoints: int = -1
     frames_include: int = -1
 
     # gui-only display
     aspect: float = 1.0
-    report_time: bool = True
 
-    # fork-only registration flags (no upstream equivalent)
-    force_refImg: bool = False
-    pad_fft: bool = False
-    chan2_file: str = ""
-
-    # 1P-specific (fork-only)
-    do_1Preg: bool = False
-    spatial_hp_reg: int = 42
-    pre_smooth: float = 0.0
+    # NOTE: removed dead fields (none read by suite2p>=v1 or lbm pipeline):
+    #   force_refImg, pad_fft  — pre-v1 reg flags, gone from upstream
+    #   do_1Preg, spatial_hp_reg, pre_smooth  — old 1P-specific keys; modern
+    #     advice is to bump smooth_sigma / spatial_taper directly
+    #   report_time           — never consumed; suite2p logs plane_times always
+    #   keep_raw, keep_reg    — supplanted by db.keep_movie_raw / io.delete_bin;
+    #     the run path now derives them from those upstream fields
 
     def to_dict(self) -> dict:
         return {
@@ -774,8 +1290,8 @@ def _init_s2p_selection_state(self):
 
 
 def _draw_s2p_selection_preview(self, max_frames, num_planes, num_channels=1):
-    """Draw compact selection preview with frame/plane/channel counts."""
-    # calculate counts
+    """Draw frame / plane / channel selection counts as one line per field
+    (matches the Current dataset info layout — non-colored, separate rows)."""
     if self._s2p_tp_parsed:
         n_frames = self._s2p_tp_parsed.count
     else:
@@ -784,64 +1300,28 @@ def _draw_s2p_selection_preview(self, max_frames, num_planes, num_channels=1):
     n_planes = len(range(self._s2p_z_start, self._s2p_z_stop + 1, self._s2p_z_step))
     n_channels = len(range(self._s2p_c_start, self._s2p_c_stop + 1, self._s2p_c_step))
 
-    # compact preview line
-    parts = [f"{n_frames} frames"]
-    if num_channels > 1:
-        parts.append(f"{n_channels} channels")
+    imgui.text(f"Frames: {n_frames}")
     if num_planes > 1:
-        parts.append(f"{n_planes} planes")
-    imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), ", ".join(parts))
+        imgui.text(f"Planes: {n_planes}")
+    if num_channels > 1:
+        imgui.text(f"Channels: {n_channels}")
 
 
-def _draw_s2p_selection_popup(self):
-    """Draw selection popup with output path and timepoint/z-plane selection."""
-    from mbo_utilities.arrays.features._slicing import parse_timepoint_selection
+def _draw_s2p_slicing_popup(self):
+    """Slicing popup — pick which timepoints, z-planes, and channels to process."""
+    from mbo_utilities.arrays.features._slicing import parse_timepoint_selection  # noqa: F401
 
-    if getattr(self, "_s2p_selection_open", False):
-        imgui.open_popup("Selection##s2p")
-        self._s2p_selection_open = False
+    if getattr(self, "_s2p_slicing_open", False):
+        imgui.open_popup("Frames & Planes##s2p_slice")
+        self._s2p_slicing_open = False
 
-    imgui.set_next_window_size(imgui.ImVec2(480, 0), imgui.Cond_.first_use_ever)
-    if imgui.begin_popup("Selection##s2p"):
+    imgui.set_next_window_size(imgui.ImVec2(520, 0), imgui.Cond_.first_use_ever)
+    if imgui.begin_popup("Frames & Planes##s2p_slice"):
         max_frames = getattr(self, "_s2p_last_max_tp", 1000)
         num_planes = getattr(self, "_s2p_last_num_planes", 1)
         num_channels = getattr(self, "_s2p_last_num_channels", 1)
 
-        # === OUTPUT PATH ===
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Output")
-        imgui.dummy(imgui.ImVec2(0, 2))
-
-        s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
-
-        imgui.text("Path:")
-        imgui.same_line()
-        display_path = s2p_path if s2p_path else "(not set)"
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
-        if s2p_path:
-            imgui.text_colored(imgui.ImVec4(0.6, 0.8, 1.0, 1.0), display_path)
-        else:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), display_path)
-        imgui.pop_text_wrap_pos()
-
-        imgui.same_line()
-        if imgui.button("Browse##s2p_sel"):
-            default_dir = s2p_path or str(get_last_dir("suite2p_output") or pathlib.Path().home())
-            self._s2p_folder_dialog = pfd.select_folder("Select Suite2p output folder", default_dir)
-
-        # check async folder dialog
-        if self._s2p_folder_dialog is not None and self._s2p_folder_dialog.ready():
-            result = self._s2p_folder_dialog.result()
-            if result:
-                self._s2p_outdir = str(result)
-                set_last_dir("suite2p_output", result)
-            self._s2p_folder_dialog = None
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # === SLICING SECTION ===
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Slicing")
+        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Frames & Planes")
         imgui.same_line()
         imgui.text_disabled("(?)")
         if imgui.is_item_hovered():
@@ -853,10 +1333,9 @@ def _draw_s2p_selection_popup(self):
             )
             imgui.pop_text_wrap_pos()
             imgui.end_tooltip()
-        imgui.dummy(imgui.ImVec2(0, 3))
+        imgui.dummy(imgui.ImVec2(0, 4))
 
-        # draw selection table using shared component
-        tp_parsed, z_start, z_stop, z_step, c_start, c_stop, c_step = draw_selection_table(
+        tp_parsed, *_rest = draw_selection_table(
             self,
             max_frames,
             num_planes,
@@ -867,13 +1346,16 @@ def _draw_s2p_selection_popup(self):
             c_attr="_s2p_c",
         )
 
-        # (logic moved to unconditionally sync in _init_s2p_selection_state)
-
-        # update s2p.target_timepoints from selection
         if tp_parsed:
-            self.s2p_extras.target_timepoints = tp_parsed.count
+            # only record a positive count when the user has actually narrowed
+            # the selection. opening the popup parses the default full-range
+            # selection (1:max_frames) which would otherwise overwrite -1
+            # ("all timepoints") with max_frames and falsely flag this field
+            # as modified in the run-tab summary.
+            self.s2p_extras.target_timepoints = (
+                tp_parsed.count if tp_parsed.count < max_frames else -1
+            )
 
-        imgui.spacing()
         imgui.spacing()
         if imgui.button("Close", imgui.ImVec2(80, 0)):
             imgui.close_current_popup()
@@ -888,14 +1370,8 @@ def _draw_data_options_content(self):
     has_phase_support = getattr(self, "has_raster_scan_support", False)
     nz = getattr(self, "nz", 1)
 
-    # check if data already has z-registration applied
-    already_registered = False
-    arrays = self._get_data_arrays() if hasattr(self, "_get_data_arrays") else []
-    if arrays and hasattr(arrays[0], "metadata"):
-        already_registered = arrays[0].metadata.get("apply_shift", False)
-
     is_raw = getattr(self, "is_mbo_scan", False)
-    has_z_reg = nz > 1 and is_raw and not already_registered
+    has_z_reg = nz > 1 and is_raw
 
     has_any_options = has_phase_support or has_z_reg
 
@@ -907,7 +1383,7 @@ def _draw_data_options_content(self):
 
     # scan-phase correction section
     if has_phase_support:
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction")
+        imgui.text("Scan-Phase Correction")
         imgui.spacing()
 
         # fix phase (uses separate _s2p_* settings, defaults True for s2p runs)
@@ -936,13 +1412,6 @@ def _draw_data_options_content(self):
         if max_offset_changed:
             self.max_offset = max(1, max_offset_val)
 
-        # upsample factor
-        imgui.set_next_item_width(INPUT_WIDTH)
-        upsample_changed, upsample_val = imgui.input_int("Upsample", self.phase_upsample, step=1)
-        set_tooltip("Upsampling factor for sub-pixel alignment")
-        if upsample_changed:
-            self.phase_upsample = max(1, upsample_val)
-
         # show current offset values
         imgui.spacing()
         imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Current offsets:")
@@ -950,13 +1419,13 @@ def _draw_data_options_content(self):
             imgui.text(f"  Array {i + 1}: {ofs:.3f} px")
 
     # axial z-registration - only for raw scanimage data
-    if nz > 1 and is_raw and not already_registered:
+    if has_z_reg:
         if has_phase_support:
             imgui.spacing()
             imgui.separator()
             imgui.spacing()
 
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Axial Registration")
+        imgui.text("Axial Registration")
         imgui.spacing()
 
         if has_z_reg:
@@ -974,7 +1443,7 @@ def _draw_data_options_content(self):
                 if not hasattr(self, "_axial_max_frames"):
                     self._axial_max_frames = 200
                 if not hasattr(self, "_axial_max_reg_xy"):
-                    self._axial_max_reg_xy = 150
+                    self._axial_max_reg_xy = 30
 
                 imgui.indent(16)
                 imgui.set_next_item_width(80)
@@ -995,7 +1464,7 @@ def _draw_data_options_content(self):
                 if _changed:
                     self._axial_max_reg_xy = max(1, _val)
                 set_tooltip(
-                    "Max shift search radius in pixels. Default 150."
+                    "Max shift search radius in pixels. Default 30."
                 )
                 imgui.unindent(16)
         else:
@@ -1011,12 +1480,301 @@ def _draw_data_options_content(self):
         imgui.text_disabled("No available options for this data type.")
 
 
+# soft red used to flag missing-but-required scalar metadata fields
+# (fs / dx / dy / dz) in the Current dataset section.
+_MISSING_COLOR = imgui.ImVec4(1.0, 0.45, 0.45, 1.0)
+
+
+def _format_size(size_bytes: int | None) -> str:
+    """Render a byte count as human-friendly string."""
+    if size_bytes is None or size_bytes < 0:
+        return "—"
+    units = ("B", "KB", "MB", "GB", "TB")
+    n = float(size_bytes)
+    i = 0
+    while n >= 1024 and i < len(units) - 1:
+        n /= 1024
+        i += 1
+    if i == 0:
+        return f"{int(n)} {units[i]}"
+    return f"{n:.2f} {units[i]}"
+
+
+def _dataset_size_bytes(self, filenames: list) -> int | None:
+    """Sum file sizes for `filenames`, cached on `self` keyed by the
+    file-list tuple. We don't poll for on-disk changes since input
+    files are read-only during a run."""
+    if not filenames:
+        return None
+    key = tuple(str(f) for f in filenames)
+    cache = getattr(self, "_dataset_size_cache", None)
+    if cache is not None and cache[0] == key:
+        return cache[1]
+    total = 0
+    for f in filenames:
+        try:
+            total += Path(f).stat().st_size
+        except OSError:
+            continue
+    self._dataset_size_cache = (key, total)
+    return total
+
+
+def _truncate_to_width(text: str, max_width: float) -> str:
+    """Front-truncate `text` (drop chars from the start, replace with …)
+    so its rendered width fits within `max_width`. Keeps the tail of the
+    string intact, which is what you want for paths (filename stays
+    visible). Returns the original string when it already fits."""
+    if max_width <= 0:
+        return ""
+    if imgui.calc_text_size(text).x <= max_width:
+        return text
+    ellipsis = "…"
+    if imgui.calc_text_size(ellipsis).x >= max_width:
+        return ""
+    # binary search for the largest tail that still fits with leading …
+    lo, hi = 0, len(text)
+    best = ellipsis
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        cand = ellipsis + text[-mid:] if mid > 0 else ellipsis
+        if imgui.calc_text_size(cand).x <= max_width:
+            best = cand
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _draw_md_field(label: str, value, unit: str = "") -> None:
+    """Render `label: value unit` on its own line. If value is None,
+    render in red and attach a 'press Shift+M' tooltip."""
+    if value is None:
+        imgui.text_colored(_MISSING_COLOR, f"{label}: —")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                f"{label} not detected. Press Shift+M to set metadata."
+            )
+        return
+    if isinstance(value, float):
+        text = f"{label}: {value:.3f}".rstrip("0").rstrip(".")
+    else:
+        text = f"{label}: {value}"
+    if unit:
+        text += f" {unit}"
+    imgui.text(text)
+
+
+def _draw_dataset_files_popup(
+    filenames: list, frames_per_file: list[int] | None = None
+) -> None:
+    """Modal popup listing each file in concatenation order.
+
+    When `frames_per_file` is provided and length-matches `filenames`, a
+    "Frames" column is added and the header shows the total frame count.
+    The header row carries a ghost-styled icon button that copies the
+    listing to the clipboard as JSON.
+    """
+    opened = imgui.begin_popup_modal(
+        "Dataset files##current_dataset_files_popup",
+        flags=imgui.WindowFlags_.no_saved_settings
+        | imgui.WindowFlags_.always_auto_resize,
+    )[0]
+    if not opened:
+        return
+
+    has_frames = (
+        isinstance(frames_per_file, (list, tuple))
+        and len(frames_per_file) == len(filenames)
+    )
+
+    # header: count (+ total frames when known), with the copy icon
+    # snapped to the right edge.
+    if has_frames:
+        imgui.text(
+            f"{len(filenames)} files (concatenation order, "
+            f"{sum(frames_per_file)} total frames):"
+        )
+    else:
+        imgui.text(f"{len(filenames)} files (concatenation order):")
+    imgui.same_line()
+    avail = imgui.get_content_region_avail().x
+    btn_w = imgui.get_frame_height()
+    if avail > btn_w + 4:
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + avail - btn_w - 2)
+    with _ghost_button():
+        if imgui.button(
+            f"{fa.ICON_FA_COPY}##dataset_files_copy",
+            imgui.ImVec2(btn_w, btn_w),
+        ):
+            payload: dict = {
+                "num_files": len(filenames),
+                "file_paths": [str(f) for f in filenames],
+            }
+            if has_frames:
+                payload["frames_per_file"] = list(frames_per_file)
+                payload["num_timepoints"] = sum(frames_per_file)
+            imgui.set_clipboard_text(json.dumps(payload, indent=2))
+    set_tooltip(
+        "Copy file list as JSON (file_paths, frames_per_file, totals).",
+        show_mark=False,
+    )
+
+    imgui.separator()
+
+    if imgui.begin_child(
+        "##current_dataset_files_list",
+        imgui.ImVec2(640, 300),
+        imgui.ChildFlags_.borders,
+    ):
+        n_cols = 3 if has_frames else 2
+        if imgui.begin_table(
+            "##dataset_files_table",
+            n_cols,
+            imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.borders_inner_h
+            | imgui.TableFlags_.sizing_stretch_prop,
+        ):
+            imgui.table_setup_column(
+                "#", imgui.TableColumnFlags_.width_fixed, 40
+            )
+            imgui.table_setup_column("File")
+            if has_frames:
+                imgui.table_setup_column(
+                    "Frames", imgui.TableColumnFlags_.width_fixed, 80
+                )
+            imgui.table_headers_row()
+
+            for i, f in enumerate(filenames):
+                imgui.table_next_row()
+                imgui.table_set_column_index(0)
+                imgui.text(f"{i + 1}")
+                imgui.table_set_column_index(1)
+                imgui.text_unformatted(str(f))
+                if has_frames:
+                    imgui.table_set_column_index(2)
+                    imgui.text(f"{frames_per_file[i]}")
+
+            imgui.end_table()
+        imgui.end_child()
+
+    imgui.separator()
+    if imgui.button("Close", imgui.ImVec2(80, 0)):
+        imgui.close_current_popup()
+    imgui.end_popup()
+
+
+def _draw_current_dataset_section(self) -> None:
+    """Draw the 'Current dataset' info block at the top of the run tab.
+
+    Shows source path, a Files (N) button that opens a popup with the
+    concatenation order, the array shape, total bytes on disk, plane /
+    frame / channel counts, frame rate, and dx / dy / dz. Missing scalar
+    metadata fields are tinted red with a Shift+M hint.
+    """
+    # local import — get_param lives in metadata, not worth a top-level import
+    from mbo_utilities.metadata import get_param
+
+    arr = None
+    try:
+        arr = self.image_widget.data[0]
+    except (IndexError, AttributeError):
+        pass
+
+    imgui.text_colored(_SUBSECTION_COLOR, "Current dataset")
+    if arr is None:
+        imgui.text_disabled("(no file loaded)")
+        imgui.spacing()
+        imgui.spacing()
+        return
+
+    # path — front-truncate so the filename stays visible and we never
+    # blow past the right edge of the side panel.
+    if isinstance(self.fpath, (list, tuple)):
+        path_str = str(self.fpath[0]) if self.fpath else ""
+    else:
+        path_str = str(self.fpath) if self.fpath else ""
+    avail_x = imgui.get_content_region_avail().x
+    display_path = _truncate_to_width(path_str or "(in-memory)", avail_x)
+    imgui.text_unformatted(display_path)
+    if display_path != (path_str or "(in-memory)") and imgui.is_item_hovered():
+        imgui.set_tooltip(path_str)
+
+    # filenames in concat order
+    filenames = list(getattr(arr, "filenames", []) or [])
+    if not filenames:
+        if isinstance(self.fpath, (list, tuple)):
+            filenames = list(self.fpath)
+        elif self.fpath:
+            filenames = [self.fpath]
+
+    # metadata; user-overrides win over array.metadata (mirrors task_suite2p)
+    md = dict(getattr(arr, "metadata", {}) or {})
+    custom = getattr(self, "_custom_metadata", None) or {}
+
+    def _resolve(key):
+        v = custom.get(key)
+        if v is not None:
+            return v
+        return get_param(md, key)
+
+    fs = _resolve("fs")
+    dx = _resolve("dx")
+    dy = _resolve("dy")
+    dz = _resolve("dz")
+
+    # dimensions
+    shape = tuple(arr.shape)
+    try:
+        from mbo_utilities.arrays.features import get_dims as _get_dims
+        _dims = _get_dims(arr)
+    except Exception:
+        _dims = None
+
+    size_bytes = _dataset_size_bytes(self, filenames)
+
+    # files button on its own line; size on disk on the next.
+    # avoiding same_line() here so neither piece can spill past the right edge.
+    n_files = len(filenames)
+    if imgui.button(f"Files ({n_files})##current_dataset_files"):
+        imgui.open_popup("Dataset files##current_dataset_files_popup")
+    imgui.text(f"Size on disk: {_format_size(size_bytes)}")
+
+    # surface frames_per_file from metadata when present and length-aligned;
+    # otherwise the popup falls back to the 2-column (#, File) layout.
+    fpf = md.get("frames_per_file")
+    if not (isinstance(fpf, (list, tuple)) and len(fpf) == n_files):
+        fpf = None
+    _draw_dataset_files_popup(filenames, fpf)
+
+    # shape with bracketed dim labels (e.g. "1024 × 4 × 256 × 256 [T,Z,Y,X]").
+    # push wrap_pos so long shape strings wrap rather than clip on narrow panels.
+    shape_text = " × ".join(str(s) for s in shape)
+    if _dims and len(_dims) == len(shape):
+        shape_text = f"{shape_text} [{','.join(_dims)}]"
+    imgui.push_text_wrap_pos(0.0)
+    try:
+        imgui.text(f"Shape: {shape_text}")
+    finally:
+        imgui.pop_text_wrap_pos()
+
+    # frame rate / pixel size — one field per line so the inline-`same_line`
+    # chain can't overflow, and per-field red highlight stays intact.
+    _draw_md_field("Frame rate", fs, "Hz")
+    _draw_md_field("dx", dx, "µm")
+    _draw_md_field("dy", dy, "µm")
+    _draw_md_field("dz", dz, "µm")
+
+    imgui.spacing()
+    imgui.spacing()
+
+
 def draw_section_suite2p(self):
     """Draw Suite2p configuration UI with button-based popups."""
     imgui.spacing()
 
     # consistent input width
-    INPUT_WIDTH = 120
+    INPUT_WIDTH = 80
 
     # set proper padding and spacing using context manager for safety
     with imgui_ctx.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(8, 4)):
@@ -1026,7 +1784,72 @@ def draw_section_suite2p(self):
 
 def _draw_section_suite2p_content(self):
     """inner content for suite2p section (called within style context)."""
-    INPUT_WIDTH = 120
+    INPUT_WIDTH = 80
+
+    # Local `_hi` shadows the module-level one to drop the font-push
+    # behavior. Emphasis (bold + box) now lives in `_emp_label` so only
+    # the parameter name (e.g. "Tau (s)") gets emphasized — not the
+    # input value (e.g. "1.00"). Call sites for fields in
+    # _IMPORTANT_FIELDS use the pattern:
+    #
+    #   imgui.set_next_item_width(INPUT_WIDTH)
+    #   with _hi("tau", self.s2p.tau):
+    #       _, self.s2p.tau = imgui.input_float("##tau", self.s2p.tau)
+    #   imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+    #   _emp_label("tau", self.s2p.tau, "Tau (s)")
+    #   set_tooltip(...)
+    #
+    # `_hi` still wraps the widget so the modified-color tint applies to
+    # the value; `_emp_label` separately tints + emphasizes the label.
+    _bold_font = getattr(self, "_bold_font", None)
+
+    @contextmanager
+    def _hi(field: str, value):  # noqa: F811 — intentional local shadow
+        push_color = not _is_default(field, value)
+        if push_color:
+            imgui.push_style_color(imgui.Col_.text, _MODIFIED_COLOR)
+        try:
+            yield
+        finally:
+            if push_color:
+                imgui.pop_style_color()
+
+    @contextmanager
+    def _hi_extras(name: str, value):
+        """Like _hi but for MboSuite2pExtras fields — compares against the
+        dataclass default. Tints the widget orange when modified.
+        """
+        try:
+            default = MboSuite2pExtras.__dataclass_fields__[name].default
+        except KeyError:
+            default = None
+        push_color = default is not None and value != default
+        if push_color:
+            imgui.push_style_color(imgui.Col_.text, _MODIFIED_COLOR)
+        try:
+            yield
+        finally:
+            if push_color:
+                imgui.pop_style_color()
+
+    def _emp_label(field: str, value, text: str) -> None:
+        """Render an external label for a widget — wrapped in a thin box
+        with a bold font when `field` is in _IMPORTANT_FIELDS, plain text
+        otherwise. Modified-color tint applies when `value` differs from
+        the upstream default. Pair with `imgui.<widget>("##field", ...)`
+        + `imgui.same_line(0, item_inner_spacing.x)` to replicate imgui's
+        default inline-label placement.
+        """
+        push_color = not _is_default(field, value)
+        is_important = field in _IMPORTANT_FIELDS
+        if push_color:
+            imgui.push_style_color(imgui.Col_.text, _MODIFIED_COLOR)
+        if is_important:
+            draw_boxed_label(text, font=_bold_font)
+        else:
+            imgui.text(text)
+        if push_color:
+            imgui.pop_style_color()
 
     # self.s2p is a lazy property: returns None when HAS_SUITE2P is False
     # or when the lazy import failed. bail early so the later rows
@@ -1051,92 +1874,456 @@ def _draw_section_suite2p_content(self):
     s2p_path = getattr(self, "_s2p_outdir", "") or getattr(self, "_saveas_outdir", "")
     has_save_path = bool(s2p_path)
 
-    # === SELECTION BUTTON + PREVIEW ===
+    # button-width constants:
+    #   _RUN_W: full-width green Run Suite2p button at the bottom
+    #   _BTN_W: small "Open" / "Set slice" entry buttons next to titles
+    _RUN_W = 220
+    _BTN_W = 90
+
+    # === CURRENT DATASET ===
+    _draw_current_dataset_section(self)
+
+    # === OUTPUT FOLDER ===
+    # Section title + small folder-icon Browse button + full-width
+    # editable path. The text input below is fully editable — typing or
+    # pasting works the same as picking via the dialog. Both write to
+    # self._s2p_outdir.
+    #
+    # NOTE: the "Metadata" button was removed — the metadata editor is
+    # now accessible only via File menu → "Set Metadata" or Shift+M.
     imgui.spacing()
-    if imgui.button("Selection"):
-        self._s2p_selection_open = True
-    set_tooltip("Output path and frame/plane selection")
+    imgui.separator()
+    imgui.spacing()
+    imgui.text_colored(_SUBSECTION_COLOR, "Select output data folder")
+    set_tooltip(
+        "Where Suite2p output is written. Each run creates a `suite2p` "
+        "subfolder here with one `plane*` directory per z-plane. Type or "
+        "paste a path, or click the folder icon to browse.",
+        align="right",
+    )
+    imgui.spacing()
+    if imgui.button(f"{fa.ICON_FA_FOLDER_OPEN}##s2p_browse"):
+        default_dir = s2p_path or str(
+            get_last_dir("suite2p_output") or pathlib.Path().home()
+        )
+        self._s2p_folder_dialog = pfd.select_folder(
+            "Select Suite2p output folder", default_dir
+        )
+    imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+    # editable path field — fills the rest of the row
+    imgui.set_next_item_width(-1)
+    _path_changed, _new_path = imgui.input_text(
+        "##s2p_outdir", self._s2p_outdir or ""
+    )
+    if _path_changed:
+        self._s2p_outdir = _new_path
+        s2p_path = _new_path
+        has_save_path = bool(_new_path)
 
-    imgui.same_line()
-    if imgui.button("Metadata"):
-        self._saveas_popup_open = True
-        self._saveas_select_metadata_tab = True
-    set_tooltip("Edit dataset metadata prior to processing")
+    # consume async folder-dialog result on the frame it becomes ready
+    if (
+        getattr(self, "_s2p_folder_dialog", None) is not None
+        and self._s2p_folder_dialog.ready()
+    ):
+        result = self._s2p_folder_dialog.result()
+        if result:
+            self._s2p_outdir = str(result)
+            set_last_dir("suite2p_output", result)
+        self._s2p_folder_dialog = None
 
-    # draw the selection popup
-    _draw_s2p_selection_popup(self)
+    imgui.spacing()
+    imgui.spacing()
+    imgui.separator()
+    imgui.spacing()
 
-    # selection preview info underneath
-    imgui.indent(8)
+    # === DATA SLICING ===
+    imgui.text_colored(_SUBSECTION_COLOR, "Data slicing")
+    set_tooltip(
+        "Restrict which timepoints, z-planes, and channels feed the run. "
+        "Click Set slice to define ranges using start:stop[:step] syntax — "
+        "e.g. 1:1000:2 selects the first 1000 frames in steps of 2. The "
+        "summary line below the button shows the resulting counts.",
+        align="right",
+    )
+    imgui.spacing()
+    if imgui.button("Set slice", imgui.ImVec2(_BTN_W, 0)):
+        self._s2p_slicing_open = True
+    # frame / plane / channel preview on its own line below the button
     _draw_s2p_selection_preview(self, max_frames, num_planes, num_channels)
-    # show output path
-    if s2p_path:
-        # truncate long paths
-        display_path = s2p_path
-        if len(display_path) > 50:
-            display_path = "..." + display_path[-47:]
-        imgui.text_colored(imgui.ImVec4(0.5, 0.7, 0.9, 1.0), display_path)
-    else:
-        imgui.text_colored(imgui.ImVec4(1.0, 0.6, 0.4, 1.0), "(output path not set)")
-    imgui.unindent(8)
+
+    _draw_s2p_slicing_popup(self)
 
     imgui.spacing()
-
-    # === RUN SUITE2P BUTTON (centered) ===
-    imgui.spacing()
-    avail_width = imgui.get_content_region_avail().x
-    button_width = 120
-    imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + (avail_width - button_width) / 2)
-
-    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
-    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
-    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
-
-    if not has_save_path:
-        imgui.begin_disabled()
-
-    button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(button_width, 0))
-
-    if not has_save_path:
-        imgui.end_disabled()
-
-    imgui.pop_style_color(3)
-
-    if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-        imgui.set_tooltip("Set output path via Selection button")
-
-    # handle run button click
-    if button_clicked and has_save_path:
-        run_process(self)
-
-    if self._install_error:
-        if self._show_red_text:
-            imgui.text_colored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), "Error: lbm_suite2p_python is not installed.")
-        if self._show_green_text:
-            imgui.text_colored(imgui.ImVec4(0.0, 1.0, 0.0, 1.0), "lbm_suite2p_python install success.")
-        if self._show_install_button and imgui.button("Install"):
-            import subprocess
-            self.logger.log("info", "Installing lbm_suite2p_python...")
-            try:
-                subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
-                self.logger.log("info", "Installation complete.")
-                self._install_error = False
-                self._show_red_text = False
-                self._show_green_text = True
-                self._show_install_button = False
-            except Exception as e:
-                self.logger.log("error", f"Installation failed: {e}")
-
     imgui.spacing()
 
-    # === PIPELINE SETTINGS ===
-    imgui.separator_text("Processing Pipeline Settings")
+    # NOTE: the Run Suite2p button moved to underneath the Pipeline
+    # Settings / Data Options buttons (after the closures are defined and
+    # the popups have been declared). The closures need `_hi`, `_BTN_W`,
+    # and `self.s2p` to all be in scope, which they already are.
 
-    # --- Main settings (closure, drawn inside the popup block below
-    # alongside Registration / ROI Detection / etc., so it follows the
-    # same begin_popup_modal lifecycle as every other settings panel) ---
+    # --- Main settings (closure, drawn inside the unified pipeline-settings
+    # popup alongside Registration / ROI Detection / etc.) ---
+    #
+    # Layout: two bordered child boxes stacked vertically.
+    #   1. LBM-Suite2p-Python Settings — knobs honored by the lbm pipeline
+    #      (forwarded to lbm_suite2p_python.pipeline / plot_zplane_figures).
+    #   2. Suite2p Main Settings — vanilla suite2p top-level params
+    #      (torch_device, tau, fs).
+    # Each box auto-resizes to its content height.
     def draw_main_settings():
-        # --- Torch device (top-level upstream setting) ----------------------
+        _box_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
+
+        # ============ Box 1: LBM-Suite2p-Python Settings ============
+        # knobs honored by the lbm pipeline (forwarded to
+        # lbm_suite2p_python.pipeline / plot_zplane_figures). title is
+        # green so individual widgets don't need _mbo() tinting; the title
+        # alone signals "this group is mbo/lsp-specific".
+        imgui.begin_child("##lsp_box", imgui.ImVec2(-1, 0), _box_flags)
+        imgui.text_colored(_MBO_ONLY_COLOR, "LBM-Suite2p-Python Settings")
+        imgui.spacing()
+
+        # Top-level lsp knobs (no subsection header — they belong directly
+        # under the section title). Run-in-background lives here because
+        # it controls how the lsp pipeline is launched, not a suite2p
+        # setting.
+        if not hasattr(self, "_s2p_background"):
+            self._s2p_background = True
+        _, self._s2p_background = imgui.checkbox(
+            "Run in background", self._s2p_background
+        )
+        set_tooltip(
+            "Run as a separate process that continues after closing the GUI."
+        )
+        with _hi_extras("save_json", self.s2p_extras.save_json):
+            _, self.s2p_extras.save_json = imgui.checkbox(
+                "Save ops.json", self.s2p_extras.save_json
+            )
+        set_tooltip(
+            "Write a human-readable ops.json sibling next to ops.npy. "
+            "Wired to lbm_suite2p_python.pipeline(save_json=...)."
+        )
+        with _hi_extras("accept_all_cells", self.s2p_extras.accept_all_cells):
+            _, self.s2p_extras.accept_all_cells = imgui.checkbox(
+                "Accept all cells", self.s2p_extras.accept_all_cells
+            )
+        set_tooltip(
+            "Keep every detected ROI regardless of classifier output. "
+            "Forwarded to lbm_suite2p_python.pipeline(accept_all_cells=...)."
+        )
+
+        imgui.spacing()
+        imgui.spacing()
+
+        # --- Cell Filters ---
+        # Each bound is a (checkbox, value) pair. value=0 OR checkbox-off
+        # both disable that bound. When the checkbox is off the spinner is
+        # greyed out via begin_disabled. build_cell_filters() at run time
+        # composes these into lsp's `cell_filters=[{"name": "max_diameter",
+        # "min_diameter_um": ..., "max_diameter_um": ...}]` shape.
+        imgui.text_colored(_SUBSECTION_COLOR, "Cell Filters")
+        for _attr, _label, _tip in (
+            (
+                "min_diameter_um",
+                "Min diameter (um)",
+                "Drop ROIs whose fitted diameter is BELOW this in microns.",
+            ),
+            (
+                "max_diameter_um",
+                "Max diameter (um)",
+                "Drop ROIs whose fitted diameter is ABOVE this in microns.",
+            ),
+        ):
+            _enabled_attr = f"{_attr}_enabled"
+            _enabled = getattr(self.s2p_extras, _enabled_attr)
+            with _hi_extras(_enabled_attr, _enabled):
+                _changed_e, _enabled = imgui.checkbox(f"##{_attr}_en", _enabled)
+            if _changed_e:
+                setattr(self.s2p_extras, _enabled_attr, _enabled)
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            imgui.begin_disabled(not _enabled)
+            imgui.set_next_item_width(INPUT_WIDTH)
+            _val = getattr(self.s2p_extras, _attr)
+            with _hi_extras(_attr, _val):
+                _changed_v, _new_v = imgui.input_float(
+                    f"{_label}##{_attr}", _val, 0.0, 0.0, "%.1f"
+                )
+            imgui.end_disabled()
+            if _changed_v:
+                _new_v = max(0.0, _new_v)
+                setattr(self.s2p_extras, _attr, _new_v)
+                # auto-uncheck when the user types 0 — both 0 and off mean
+                # "ignore this bound", so keep the two signals consistent.
+                if _new_v == 0.0:
+                    setattr(self.s2p_extras, _enabled_attr, False)
+            set_tooltip(_tip)
+
+        # baseline filter — section title (matches "Cell Filters" style).
+        # Three independent rejection criteria below; each has its own
+        # enable flag, no master gate. Inherits dff window/percentile
+        # and correct_neuropil at run time so the filter scores the same
+        # trace as the dF/F plot.
+        imgui.spacing()
+        imgui.spacing()
+        imgui.text_colored(_SUBSECTION_COLOR, "Baseline Filter")
+
+        with _hi_extras("baseline_reject_negative_F0", self.s2p_extras.baseline_reject_negative_F0):
+            _, self.s2p_extras.baseline_reject_negative_F0 = imgui.checkbox(
+                "Reject negative F0", self.s2p_extras.baseline_reject_negative_F0
+            )
+        set_tooltip(
+            "Drop cells whose baseline ever goes below zero — strongest "
+            "single predictor of catastrophic dF/F outliers."
+        )
+
+        for _attr, _label, _fmt, _tip in (
+            (
+                "baseline_min_F0_abs",
+                "Min F0 (photons)",
+                "%.2f",
+                "Drop cells whose median baseline falls below this absolute "
+                "fluorescence value. Default 1.0; typical 0.5-5.0.",
+            ),
+            (
+                "baseline_min_F0_rel",
+                "Min F0 (frac of median)",
+                "%.3f",
+                "Drop cells whose minimum baseline falls below this fraction "
+                "of the population median. Range 0.0-1.0; typical 0.01-0.1; "
+                "default 0 = off.",
+            ),
+        ):
+            _enabled_attr = f"{_attr}_enabled"
+            _enabled = getattr(self.s2p_extras, _enabled_attr)
+            with _hi_extras(_enabled_attr, _enabled):
+                _changed_e, _enabled = imgui.checkbox(f"##{_attr}_en", _enabled)
+            if _changed_e:
+                setattr(self.s2p_extras, _enabled_attr, _enabled)
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            imgui.begin_disabled(not _enabled)
+            imgui.set_next_item_width(INPUT_WIDTH)
+            _val = getattr(self.s2p_extras, _attr)
+            with _hi_extras(_attr, _val):
+                _changed_v, _new_v = imgui.input_float(
+                    f"{_label}##{_attr}", _val, 0.0, 0.0, _fmt
+                )
+            imgui.end_disabled()
+            if _changed_v:
+                _new_v = max(0.0, _new_v)
+                setattr(self.s2p_extras, _attr, _new_v)
+                if _new_v == 0.0:
+                    setattr(self.s2p_extras, _enabled_attr, False)
+            set_tooltip(_tip)
+
+        imgui.spacing()
+        imgui.spacing()
+
+        # --- dF/F ---
+        # mbo-only post-processing (not in upstream suite2p). Forwarded to
+        # lsp.pipeline(dff_window_size=..., dff_percentile=..., dff_smooth_window=...).
+        imgui.text_colored(_SUBSECTION_COLOR, "dF/F")
+        with _hi_extras("correct_neuropil", self.s2p_extras.correct_neuropil):
+            _, self.s2p_extras.correct_neuropil = imgui.checkbox(
+                "Correct neuropil", self.s2p_extras.correct_neuropil
+            )
+        set_tooltip(
+            "Use F - coef*Fneu in dF/F (default on). Off uses raw F. "
+            "Shared with the baseline cell filter so both score the same trace."
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi_extras("dff_window_size", self.s2p_extras.dff_window_size):
+            _, self.s2p_extras.dff_window_size = imgui.input_int(
+                "Window", self.s2p_extras.dff_window_size
+            )
+        set_tooltip("Frames for rolling percentile baseline (default: 300).")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi_extras("dff_percentile", self.s2p_extras.dff_percentile):
+            _, self.s2p_extras.dff_percentile = imgui.input_int(
+                "Percentile", self.s2p_extras.dff_percentile
+            )
+        set_tooltip("Percentile for baseline F0 estimation (default: 20).")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi_extras("dff_smooth_window", self.s2p_extras.dff_smooth_window):
+            _, self.s2p_extras.dff_smooth_window = imgui.input_int(
+                "Smooth", self.s2p_extras.dff_smooth_window
+            )
+        set_tooltip("Smooth dF/F trace with rolling window (0 = disabled).")
+
+        imgui.spacing()
+        imgui.spacing()
+
+        # --- Rastermap ---
+        # Tri-state stage gate (Skip/Run/Force) on the title row, matching
+        # the pipeline-step radio convention used for Registration / ROI
+        # Detection. When Run/Force, the Planar and Volumetric checkboxes
+        # become editable; their sub-params only render when the parent
+        # checkbox is on. build_rastermap_kwargs() composes the unified
+        # lsp dict from this state at run time.
+        imgui.text_colored(_SUBSECTION_COLOR, "Rastermap")
+        imgui.same_line()
+        _rm_mode = self.s2p_extras.rastermap_mode
+        if imgui.radio_button("Skip##rastermap_mode", _rm_mode == 0):
+            # transitioning to Skip greys out the Planar/Volumetric
+            # checkboxes below — also clear them so they don't pop back
+            # on if the user later flips Run/Force on again.
+            self.s2p_extras.rastermap_mode = 0
+            self.s2p_extras.rastermap_planar = False
+            self.s2p_extras.rastermap_volumetric = False
+        imgui.same_line()
+        if imgui.radio_button("Run##rastermap_mode", _rm_mode == 1):
+            self.s2p_extras.rastermap_mode = 1
+            _kick_rastermap_install_check()
+        imgui.same_line()
+        if imgui.radio_button("Force##rastermap_mode", _rm_mode == 2):
+            self.s2p_extras.rastermap_mode = 2
+            _kick_rastermap_install_check()
+
+        _rm_active = self.s2p_extras.rastermap_mode > 0
+
+        # install indicator — only renders when Run/Force is selected.
+        # green dot = rastermap importable (tooltip shows version).
+        # red dot = ImportError (tooltip shows install instruction).
+        # gray dot = probe in flight.
+        if _rm_active:
+            _kick_rastermap_install_check()  # idempotent; covers state restored from disk
+            imgui.same_line()
+            with _rm_install_lock:
+                _rm_status, _rm_version = _rm_install
+            if _rm_status == "ok":
+                imgui.text_colored(imgui.ImVec4(0.4, 0.85, 0.4, 1.0), "[ok]")
+                set_tooltip(f"rastermap v{_rm_version} installed", show_mark=False)
+            elif _rm_status == "missing":
+                imgui.text_colored(imgui.ImVec4(0.95, 0.4, 0.4, 1.0), "[!]")
+                set_tooltip(
+                    "Rastermap not installed.\n"
+                    "Install with `pip install rastermap` to run activity clustering.",
+                    show_mark=False,
+                )
+            else:
+                imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "[...]")
+                set_tooltip("Checking rastermap installation...", show_mark=False)
+
+        # cache-reuse hint as a (?) at the END of the title row so it
+        # never displaces the Skip/Run/Force radios in narrow panels.
+        # attaches to whichever item ended the row (last radio or the
+        # install indicator); hovering the (?) shows the tooltip.
+        set_tooltip(
+            "Sorts cells so similar activity is adjacent in the figure "
+            "(bands = ensembles, diagonals = sequences). "
+            "Run reuses cached model.npy when params match; Force always recomputes."
+        )
+
+        imgui.begin_disabled(not _rm_active)
+
+        # Planar (per-plane) — runs inside lsp's plot_zplane_figures
+        # after each plane finishes detection. Writes 12_rastermap.png +
+        # rastermap_model.npy in each plane dir.
+        with _hi_extras("rastermap_planar", self.s2p_extras.rastermap_planar):
+            _, self.s2p_extras.rastermap_planar = imgui.checkbox(
+                "Planar (per-plane)", self.s2p_extras.rastermap_planar
+            )
+        set_tooltip(
+            "One rastermap per plane (12_rastermap.png each). "
+            "Requires `rastermap` installed."
+        )
+        if self.s2p_extras.rastermap_planar:
+            imgui.indent(16)
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi_extras(
+                "rastermap_planar_n_clusters",
+                self.s2p_extras.rastermap_planar_n_clusters,
+            ):
+                _, self.s2p_extras.rastermap_planar_n_clusters = imgui.input_int(
+                    "n_clusters##rm_planar",
+                    self.s2p_extras.rastermap_planar_n_clusters,
+                )
+            set_tooltip(
+                "Superclusters; each row averages ~n_cells/n_clusters neurons. "
+                "Default 0 = adaptive (None for <200 cells, 100 otherwise)."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi_extras(
+                "rastermap_planar_n_pcs",
+                self.s2p_extras.rastermap_planar_n_pcs,
+            ):
+                _, self.s2p_extras.rastermap_planar_n_pcs = imgui.input_int(
+                    "n_PCs##rm_planar",
+                    self.s2p_extras.rastermap_planar_n_pcs,
+                )
+            set_tooltip(
+                "Principal components for similarity. Default 0 = min(128, "
+                "n_cells - 1). Lower (16-32) for <50 cells; rarely needs tuning."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi_extras(
+                "rastermap_planar_locality",
+                self.s2p_extras.rastermap_planar_locality,
+            ):
+                _, self.s2p_extras.rastermap_planar_locality = imgui.input_float(
+                    "locality##rm_planar",
+                    self.s2p_extras.rastermap_planar_locality,
+                    0.0, 0.0, "%.2f",
+                )
+            set_tooltip(
+                "How time-local the sort is. 0 = global match anywhere, "
+                "1 = strict same-time match. Range 0.0-1.0; "
+                "default -1 = adaptive (0.0 for >=200 cells, 0.1 otherwise)."
+            )
+            imgui.unindent(16)
+
+        # Volumetric — runs once per volume after run_volume() finishes
+        # all planes. Calls plot_3d_rastermap_clusters and writes
+        # rastermap_3d.png alongside the volume plots.
+        with _hi_extras("rastermap_volumetric", self.s2p_extras.rastermap_volumetric):
+            _, self.s2p_extras.rastermap_volumetric = imgui.checkbox(
+                "Volumetric", self.s2p_extras.rastermap_volumetric
+            )
+        set_tooltip(
+            "One rastermap pooling cells across all planes "
+            "(rastermap_3d.png). Each row can now span multiple z-planes."
+        )
+        if self.s2p_extras.rastermap_volumetric:
+            imgui.indent(16)
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi_extras(
+                "rastermap_volumetric_n_clusters",
+                self.s2p_extras.rastermap_volumetric_n_clusters,
+            ):
+                _, self.s2p_extras.rastermap_volumetric_n_clusters = imgui.input_int(
+                    "n_clusters##rm_vol",
+                    self.s2p_extras.rastermap_volumetric_n_clusters,
+                )
+            set_tooltip(
+                "Superclusters across the whole volume. Default 40; "
+                "drop to 10-20 for <200 cells, raise to 60-100 for >2000."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi_extras(
+                "rastermap_volumetric_n_pcs",
+                self.s2p_extras.rastermap_volumetric_n_pcs,
+            ):
+                _, self.s2p_extras.rastermap_volumetric_n_pcs = imgui.input_int(
+                    "n_PCs##rm_vol",
+                    self.s2p_extras.rastermap_volumetric_n_pcs,
+                )
+            set_tooltip(
+                "Principal components for similarity. Default 0 = min(200, "
+                "n_cells - 1). Only lower with <100 total cells."
+            )
+            imgui.unindent(16)
+
+        imgui.end_disabled()
+        imgui.end_child()  # close LBM box
+
+        imgui.spacing()
+        imgui.spacing()
+
+        # ============ Box 2: Suite2p Main Settings ============
+        # vanilla suite2p top-level params: torch_device, tau, fs.
+        imgui.begin_child("##s2p_main_box", imgui.ImVec2(-1, 0), _box_flags)
+        imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p Main Settings")
+        imgui.spacing()
+
+        # torch device (top-level upstream setting)
         device_options = ["cuda", "cpu", "mps"]
         current_device_idx = (
             device_options.index(self.s2p.torch_device)
@@ -1144,9 +2331,10 @@ def _draw_section_suite2p_content(self):
             else 0
         )
         imgui.set_next_item_width(INPUT_WIDTH)
-        device_changed, selected_device_idx = imgui.combo(
-            "Torch Device", current_device_idx, device_options
-        )
+        with _hi("torch_device", self.s2p.torch_device):
+            device_changed, selected_device_idx = imgui.combo(
+                "Torch Device", current_device_idx, device_options
+            )
         if device_changed:
             self.s2p.torch_device = device_options[selected_device_idx]
         set_tooltip(
@@ -1155,231 +2343,121 @@ def _draw_section_suite2p_content(self):
         )
 
         imgui.spacing()
-        imgui.separator()
         imgui.spacing()
 
-        # Tau / fs / denoise
+        # tau / fs
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
+        with _hi("tau", self.s2p.tau):
+            _, self.s2p.tau = imgui.input_float("##tau", self.s2p.tau)
+        imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+        _emp_label("tau", self.s2p.tau, "Tau (s)")
         set_tooltip(
             "Calcium indicator decay timescale in seconds.\n"
             "GCaMP6f=0.7, GCaMP6m=1.0-1.3 (LBM default), GCaMP6s=1.25-1.5"
         )
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.fs = imgui.input_float("Sampling Rate (Hz)", self.s2p.fs)
+        with _hi("fs", self.s2p.fs):
+            _, self.s2p.fs = imgui.input_float("Sampling Rate (Hz)", self.s2p.fs)
         set_tooltip("Per-plane sampling rate in Hz; drives baseline window sizing.")
-        _, self.s2p.denoise = imgui.checkbox("Denoise Movie", self.s2p.denoise)
-        set_tooltip("Denoise binned movie before cell detection.")
 
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # processing control options
-        # force re-run is governed by the Skip/Run/Force radios inside the
-        # Registration and ROI Detection popups (set radio to Force).
-        _, self.s2p_extras.keep_raw = imgui.checkbox("Keep Raw Binary", self.s2p_extras.keep_raw)
-        set_tooltip("Keep data_raw.bin after processing (uses disk space)")
-        _, self.s2p_extras.keep_reg = imgui.checkbox("Keep Registered Binary", self.s2p_extras.keep_reg)
-        set_tooltip("Keep data.bin after processing (useful for QC)")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # dF/F settings
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "\u0394F/F")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p_extras.dff_window_size = imgui.input_int("Window", self.s2p_extras.dff_window_size)
-        set_tooltip("Frames for rolling percentile baseline (default: 300)")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p_extras.dff_percentile = imgui.input_int("Percentile", self.s2p_extras.dff_percentile)
-        set_tooltip("Percentile for baseline F\u2080 estimation (default: 20)")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p_extras.dff_smooth_window = imgui.input_int("Smooth", self.s2p_extras.dff_smooth_window)
-        set_tooltip("Smooth \u0394F/F trace with rolling window (0 = disabled)")
-
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-        # processing options
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Processing")
-        if not hasattr(self, "_s2p_background"):
-            self._s2p_background = True
-        _, self._s2p_background = imgui.checkbox("Run in background", self._s2p_background)
-        set_tooltip("Run as separate process that continues after closing GUI")
-
-        if not hasattr(self, "_parallel_processing"):
-            self._parallel_processing = False
-        if not hasattr(self, "_max_parallel_jobs"):
-            self._max_parallel_jobs = 2
-
-        # get num_planes from data
-        num_planes_main = 1
-        n_selected_main = 1
-        try:
-            if hasattr(self, "image_widget") and self.image_widget.data:
-                data = self.image_widget.data[0]
-                if hasattr(data, "num_planes"):
-                    num_planes_main = data.num_planes
-                elif data.ndim == 4:
-                    num_planes_main = data.shape[1]
-                elif data.ndim == 5:
-                    num_planes_main = data.shape[2]
-            n_selected_main = len(getattr(self, "_selected_planes", {1}))
-        except Exception:
-            pass
-
-        if num_planes_main > 1 and n_selected_main > 1:
-            _, self._parallel_processing = imgui.checkbox(
-                "Parallel plane processing (experimental)", self._parallel_processing
-            )
-            set_tooltip("Process multiple planes simultaneously (uses more memory)")
-            if self._parallel_processing:
-                imgui.set_next_item_width(INPUT_WIDTH)
-                _, self._max_parallel_jobs = imgui.input_int(
-                    "Max parallel jobs", self._max_parallel_jobs, step=1
-                )
-                self._max_parallel_jobs = max(1, min(self._max_parallel_jobs, n_selected_main))
-
-        # Report timing — grouped with the parallel/background processing
-        # controls since it's a runtime-behaviour toggle, not a pipeline
-        # parameter.
-        _, self.s2p_extras.report_time = imgui.checkbox(
-            "Report Timing", self.s2p_extras.report_time
-        )
-        set_tooltip("Return timing dictionary for each processing stage.")
+        imgui.end_child()  # close Suite2p Main box
 
     # --- Registration ---
+    # body only — Skip/Run/Force is rendered inline on the column title by
+    # the popup loop (drives self.s2p.do_registration 0/1/2; force position
+    # → force_reg=True at run time).
+    #
+    # Field ordering follows suite2p.parameters.SETTINGS["registration"]:
+    # align_by_chan2, nimg_init, maxregshift, do_bidiphase, bidiphase,
+    # batch_size, nonrigid (tree), block_size (tree), smooth_sigma_*,
+    # spatial_taper, th_badframes, norm_frames, snr_thresh (tree),
+    # subpixel, two_step_registration, reg_tif, reg_tif_chan2.
     def draw_registration_settings():
-        # do_registration is int 0/1/2 in upstream: 0=skip, 1=run, 2=force re-run.
-        # Sole governing control for skip/run/force-rerun of registration —
-        # the Force position drives the lbm wrapper's force_reg kwarg, which
-        # is derived at call time from `do_registration == 2`.
-        imgui.text("Run Registration:")
-        imgui.same_line()
-        if imgui.radio_button("Skip##do_reg", self.s2p.do_registration == 0):
-            self.s2p.do_registration = 0
-        imgui.same_line()
-        if imgui.radio_button("Run##do_reg", self.s2p.do_registration == 1):
-            self.s2p.do_registration = 1
-        imgui.same_line()
-        if imgui.radio_button("Force##do_reg", self.s2p.do_registration == 2):
-            self.s2p.do_registration = 2
+        # Output binaries — both upstream suite2p options:
+        #   keep_movie_raw (db)  → keep data_raw.bin  (unregistered movie)
+        #   delete_bin     (io)  → delete data.bin    (registered movie)
+        # "Keep Registered Binary" is the inverse-display of delete_bin so
+        # the two checkboxes read symmetrically. Tracked with _hi() against
+        # upstream defaults (keep_movie_raw=False, delete_bin=False).
+        with _hi("keep_movie_raw", self.s2p_db.keep_movie_raw):
+            _, self.s2p_db.keep_movie_raw = imgui.checkbox(
+                "Keep Raw Binary", self.s2p_db.keep_movie_raw
+            )
         set_tooltip(
-            "Skip = do not register (do_registration=0)\n"
-            "Run = register if not already done (do_registration=1)\n"
-            "Force = re-run registration even if ops.npy reports it done "
-            "(do_registration=2 → force_reg=True at run time)"
+            "Keep data_raw.bin (unregistered) after processing. "
+            "Suite2p db.keep_movie_raw — default False."
+        )
+        _keep_reg = not self.s2p.delete_bin
+        with _hi("delete_bin", self.s2p.delete_bin):
+            _kr_changed, _new_keep_reg = imgui.checkbox(
+                "Keep Registered Binary", _keep_reg
+            )
+        if _kr_changed:
+            self.s2p.delete_bin = not _new_keep_reg
+        set_tooltip(
+            "Keep data.bin (registered) after processing. Inverse of "
+            "suite2p io.delete_bin — Keep Registered = True maps to "
+            "delete_bin=False (the upstream default)."
         )
 
-        imgui.begin_disabled(self.s2p.do_registration == 0)
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
 
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.align_by_chan = imgui.input_int(
-            "Align by Channel", self.s2p.align_by_chan
-        )
+        with _hi("align_by_chan", self.s2p.align_by_chan):
+            _, self.s2p.align_by_chan = imgui.input_int(
+                "Align by chan", self.s2p.align_by_chan
+            )
         set_tooltip("Channel index used for alignment (1-based). "
                     "Serialized to settings['registration']['align_by_chan2'] = (align_by_chan == 2).")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.nimg_init = imgui.input_int("Initial Frames", self.s2p.nimg_init)
-        set_tooltip("Number of frames used to build the reference image.")
+        with _hi("nimg_init", self.s2p.nimg_init):
+            _, self.s2p.nimg_init = imgui.input_int("# refImg frames", self.s2p.nimg_init)
+        set_tooltip("Number of subsampled frames used to build the reference image.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.reg_batch_size = imgui.input_int("Batch Size", self.s2p.reg_batch_size)
-        set_tooltip("Number of frames processed per registration batch.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.maxregshift = imgui.input_float(
-            "Max Shift Fraction", self.s2p.maxregshift
-        )
-        set_tooltip("Maximum allowed shift as a fraction of the image size.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.smooth_sigma = imgui.input_float(
-            "Smooth Sigma", self.s2p.smooth_sigma
-        )
-        set_tooltip("Gaussian smoothing sigma (pixels) before registration.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.smooth_sigma_time = imgui.input_float(
-            "Smooth Sigma Time", self.s2p.smooth_sigma_time
-        )
-        set_tooltip("Temporal smoothing sigma (frames) before registration.")
-        _, self.s2p_db.keep_movie_raw = imgui.checkbox(
-            "Keep Raw Movie", self.s2p_db.keep_movie_raw
-        )
-        set_tooltip("Keep unregistered binary movie after processing.")
-        _, self.s2p.two_step_registration = imgui.checkbox(
-            "Two-Step Registration", self.s2p.two_step_registration
-        )
-        set_tooltip("Perform registration twice for low-SNR data.")
-        _, self.s2p.reg_tif = imgui.checkbox("Export Registered TIFF", self.s2p.reg_tif)
-        set_tooltip("Export registered movie as TIFF files.")
-        _, self.s2p.reg_tif_chan2 = imgui.checkbox(
-            "Export Chan2 TIFF", self.s2p.reg_tif_chan2
-        )
-        set_tooltip("Export registered TIFFs for channel 2.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.subpixel = imgui.input_int("Subpixel Precision", self.s2p.subpixel)
-        set_tooltip("Subpixel precision level (1/subpixel step).")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.th_badframes = imgui.input_float(
-            "Bad Frame Threshold", self.s2p.th_badframes
-        )
-        set_tooltip("Threshold for excluding low-quality frames.")
-        _, self.s2p.norm_frames = imgui.checkbox(
-            "Normalize Frames", self.s2p.norm_frames
-        )
-        set_tooltip("Normalize frames during registration.")
-        _, self.s2p_extras.force_refImg = imgui.checkbox("Force refImg", self.s2p_extras.force_refImg)
-        set_tooltip("Use stored reference image instead of recomputing.")
-        _, self.s2p_extras.pad_fft = imgui.checkbox("Pad FFT", self.s2p_extras.pad_fft)
-        set_tooltip("Pad image for FFT registration to reduce edge artifacts.")
+        with _hi("maxregshift", self.s2p.maxregshift):
+            _, self.s2p.maxregshift = imgui.input_float(
+                "Max reg shift", self.s2p.maxregshift
+            )
+        set_tooltip("Max allowed registration shift, as a fraction of frame max(width, height).")
 
-        imgui.spacing()
-        imgui.text("Channel 2 File:")
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x)
-        imgui.text(self.s2p_extras.chan2_file if self.s2p_extras.chan2_file else "(none)")
-        imgui.pop_text_wrap_pos()
-        if imgui.button("Browse##chan2"):
-            default_dir = str(get_last_dir("suite2p_chan2") or pathlib.Path().home())
-            res = pfd.open_file("Select channel 2 file", default_dir)
-            if res and res.result():
-                self.s2p_extras.chan2_file = res.result()[0]
-                set_last_dir("suite2p_chan2", res.result()[0])
-        set_tooltip("Path to channel 2 binary file for cross-channel registration.")
+        # bidirectional phase offset (2P only). The user-provided offset
+        # is mutually exclusive with auto-compute: when do_bidiphase is on
+        # suite2p ignores the manual value, so we grey the input out to
+        # signal that and prevent stale edits.
+        with _hi("do_bidiphase", self.s2p.do_bidiphase):
+            _, self.s2p.do_bidiphase = imgui.checkbox(
+                "Compute bidiphase", self.s2p.do_bidiphase
+            )
+        set_tooltip(
+            "Auto-compute the bidirectional scan-phase offset and apply it "
+            "to all frames (2P only)."
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        imgui.begin_disabled(self.s2p.do_bidiphase)
+        with _hi("bidiphase", self.s2p.bidiphase):
+            _, self.s2p.bidiphase = imgui.input_float(
+                "Bidiphase offset", self.s2p.bidiphase, 0.0, 0.0, "%.2f"
+            )
+        imgui.end_disabled()
+        set_tooltip(
+            "User-provided bidirectional phase offset; applied to all frames "
+            "when 'Compute bidiphase' is off."
+        )
 
-        if imgui.tree_node("1-Photon Registration"):
-            _, self.s2p_extras.do_1Preg = imgui.checkbox(
-                "Enable 1P Registration", self.s2p_extras.do_1Preg
-            )
-            set_tooltip("Apply high-pass filtering and tapering for 1-photon data.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("reg_batch_size", self.s2p.reg_batch_size):
+            _, self.s2p.reg_batch_size = imgui.input_int("# frames/batch", self.s2p.reg_batch_size)
+        set_tooltip("Frames per registration batch — reduce if running out of GPU memory.")
 
-            imgui.begin_disabled(not self.s2p_extras.do_1Preg)
-            imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p_extras.spatial_hp_reg = imgui.input_int(
-                "Spatial HP Window", self.s2p_extras.spatial_hp_reg
-            )
-            set_tooltip(
-                "Window size for spatial high-pass filtering before registration."
-            )
-            imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p_extras.pre_smooth = imgui.input_float(
-                "Pre-smooth Sigma", self.s2p_extras.pre_smooth
-            )
-            set_tooltip(
-                "Gaussian smoothing stddev before high-pass filtering (0=disabled)."
-            )
-            imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.spatial_taper = imgui.input_float(
-                "Spatial Taper", self.s2p.spatial_taper
-            )
-            set_tooltip(
-                "Pixels to set to zero on edges (important for vignetted windows)."
-            )
-            imgui.end_disabled()
-            imgui.tree_pop()
-
+        # nonrigid block sits here in suite2p's source order (between
+        # batch_size and smooth_sigma_time). kept as a tree for ergonomics
+        # but follows the upstream key order: nonrigid, maxregshiftNR,
+        # block_size, then snr_thresh (which is also a nonrigid knob).
         if imgui.tree_node("Non-rigid Registration"):
-            _, self.s2p.nonrigid = imgui.checkbox("Enable Non-rigid", self.s2p.nonrigid)
+            with _hi("nonrigid", self.s2p.nonrigid):
+                _, self.s2p.nonrigid = imgui.checkbox("Use nonrigid", self.s2p.nonrigid)
             set_tooltip(
                 "Split FOV into blocks and compute registration offsets per block."
             )
@@ -1387,272 +2465,610 @@ def _draw_section_suite2p_content(self):
             imgui.begin_disabled(not self.s2p.nonrigid)
 
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.block_size_y = imgui.input_int(
-                "Block Height", self.s2p.block_size_y
-            )
+            with _hi("maxregshiftNR", self.s2p.maxregshiftNR):
+                _, self.s2p.maxregshiftNR = imgui.input_int(
+                    "NR max shift", self.s2p.maxregshiftNR
+                )
+            set_tooltip("Max pixel shift of block relative to rigid shift.")
+
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("block_size_y", self.s2p.block_size_y):
+                _, self.s2p.block_size_y = imgui.input_int(
+                    "Block height", self.s2p.block_size_y
+                )
             set_tooltip(
-                "Block height for non-rigid registration (power of 2/3 recommended)."
+                "Block height for non-rigid registration (keep multiple of 2/3/5)."
             )
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.block_size_x = imgui.input_int(
-                "Block Width", self.s2p.block_size_x
-            )
+            with _hi("block_size_x", self.s2p.block_size_x):
+                _, self.s2p.block_size_x = imgui.input_int(
+                    "Block width", self.s2p.block_size_x
+                )
             set_tooltip(
-                "Block width for non-rigid registration (power of 2/3 recommended)."
+                "Block width for non-rigid registration (keep multiple of 2/3/5)."
             )
 
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.snr_thresh = imgui.input_float(
-                "SNR Threshold", self.s2p.snr_thresh
+            with _hi("snr_thresh", self.s2p.snr_thresh):
+                _, self.s2p.snr_thresh = imgui.input_float(
+                    "NR SNR thresh", self.s2p.snr_thresh
+                )
+            set_tooltip(
+                "If a nonrigid block falls below this, it gets smoothed until above. "
+                "1.0 = no smoothing; 1.5 recommended for 1P."
             )
-            set_tooltip("Phase correlation peak threshold (1.5 recommended for 1P).")
-            imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.maxregshiftNR = imgui.input_float(
-                "Max NR Shift", self.s2p.maxregshiftNR
-            )
-            set_tooltip("Max pixel shift of block relative to rigid shift.")
 
             imgui.end_disabled()
             imgui.tree_pop()
 
-        imgui.end_disabled()  # closes do_registration == 0 gate
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("smooth_sigma_time", self.s2p.smooth_sigma_time):
+            _, self.s2p.smooth_sigma_time = imgui.input_float(
+                "Time smoothing", self.s2p.smooth_sigma_time
+            )
+        set_tooltip("Gaussian smoothing in time (frames) before computing shifts — useful for low-SNR.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("smooth_sigma", self.s2p.smooth_sigma):
+            _, self.s2p.smooth_sigma = imgui.input_float(
+                "XY smoothing", self.s2p.smooth_sigma
+            )
+        set_tooltip(
+            "Gaussian smoothing sigma (pixels) in XY before registration.\n"
+            "  ~1.0 — 2-photon recordings (default 1.15)\n"
+            "  3-5  — 1-photon recordings"
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("spatial_taper", self.s2p.spatial_taper):
+            _, self.s2p.spatial_taper = imgui.input_float(
+                "Edge taper", self.s2p.spatial_taper
+            )
+        set_tooltip(
+            "Edge tapering width in pixels (zero out edges before FFT) — "
+            "important for vignetted windows. Bump higher for 1-photon "
+            "recordings. Upstream default: 3.45."
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("th_badframes", self.s2p.th_badframes):
+            _, self.s2p.th_badframes = imgui.input_float(
+                "Bad frame thresh", self.s2p.th_badframes
+            )
+        set_tooltip("Threshold for excluding low-quality frames when cropping — smaller excludes more.")
+        with _hi("norm_frames", self.s2p.norm_frames):
+            _, self.s2p.norm_frames = imgui.checkbox(
+                "Normalize frames", self.s2p.norm_frames
+            )
+        set_tooltip("Normalize frames when detecting shifts.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("subpixel", self.s2p.subpixel):
+            _, self.s2p.subpixel = imgui.input_int("Subpixel reg", self.s2p.subpixel)
+        set_tooltip("Subpixel precision level (1/subpixel step).")
+        with _hi("two_step_registration", self.s2p.two_step_registration):
+            _, self.s2p.two_step_registration = imgui.checkbox(
+                "##two_step_registration", self.s2p.two_step_registration
+            )
+        imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+        _emp_label(
+            "two_step_registration",
+            self.s2p.two_step_registration,
+            "Run reg twice",
+        )
+        set_tooltip("Perform registration twice for low-SNR data (set keep_movie_raw=True).")
+        # NOTE: reg_tif / reg_tif_chan2 widgets removed — same reason as
+        # save_mat / save_NWB above. The flags reach settings.registration
+        # correctly, but in practice the export step depends on the inner
+        # registration_wrapper writing to tif_root_align, which isn't
+        # exercised by lbm's run_plane in the current configuration. Dataclass
+        # fields remain so old ops round-trips. Re-add when lbm honors them.
+        with _hi("do_regmetrics", self.s2p.do_regmetrics):
+            _, self.s2p.do_regmetrics = imgui.checkbox(
+                "Compute reg metrics", self.s2p.do_regmetrics
+            )
+        set_tooltip("Compute registration QC metrics (requires ≥1500 frames).")
+
+        # NOTE: the old "1-Photon Registration" tree (do_1Preg, spatial_hp_reg,
+        # pre_smooth) was deleted along with the dataclass fields — those
+        # keys were dead in modern suite2p. Upstream's guidance for 1-photon
+        # data is to raise `smooth_sigma` (3-5) and `spatial_taper` (larger)
+        # directly — both already exposed in the main Registration body.
 
     # --- ROI Detection ---
+    # body only — Skip/Run/Force is rendered inline on the column title by
+    # the popup loop (drives self.s2p.do_detection 0/1/2; force position
+    # → force_detect=True at run time).
+    #
+    # Layout: shared settings on top (apply to every algorithm), then the
+    # algorithm selector, then the matching algorithm-specific block —
+    # only the selected branch (cellpose / sparsery / sourcery) renders.
     def draw_roi_detection_settings():
-        # do_detection is int 0/1/2 (skip/run/force) — mirrors do_registration.
-        # Sole governing control for cell detection. The Force position
-        # drives the lbm wrapper's force_detect kwarg, which is derived at
-        # call time from `do_detection == 2`.
-        imgui.text("Run Detection:")
-        imgui.same_line()
-        if imgui.radio_button("Skip##do_det", self.s2p.do_detection == 0):
-            self.s2p.do_detection = 0
-        imgui.same_line()
-        if imgui.radio_button("Run##do_det", self.s2p.do_detection == 1):
-            self.s2p.do_detection = 1
-        imgui.same_line()
-        if imgui.radio_button("Force##do_det", self.s2p.do_detection == 2):
-            self.s2p.do_detection = 2
+        # shared settings — ordered to match upstream detection top-level
+        # source order (denoise/block_size, nbins, bin_size, highpass_time,
+        # npix_norm_min/max, max_overlap, soma_crop).
+        imgui.text_colored(_SUBSECTION_COLOR, "Shared")
+        imgui.spacing()
+
+        # denoise gates the two block_size inputs. per detect.py:185 in
+        # suite2p v1.0+: `if settings.get("denoise", False): mov =
+        # pca_denoise(mov, block_size=settings["block_size"], ...)`. when
+        # denoise=False (upstream default), block_size is unused, so the
+        # Y/X inputs grey out.
+        with _hi("denoise", self.s2p.denoise):
+            _, self.s2p.denoise = imgui.checkbox(
+                "Denoise", self.s2p.denoise
+            )
         set_tooltip(
-            "Skip = do not detect ROIs (do_detection=0)\n"
-            "Run = detect if stat.npy is missing (do_detection=1)\n"
-            "Force = re-run cellpose even if stat.npy exists "
-            "(do_detection=2 → force_detect=True at run time) — required when "
-            "sweeping cellpose params on a reloaded Suite2p output"
+            "Run PCA denoising on the binned movie before cell detection. "
+            "Suite2p detection.denoise — default False. The block size below "
+            "is only used when this is on."
         )
+        imgui.begin_disabled(not self.s2p.denoise)
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("det_block_size_y", self.s2p.det_block_size_y):
+            _, self.s2p.det_block_size_y = imgui.input_int(
+                "Denoise block Y", self.s2p.det_block_size_y
+            )
+        set_tooltip(
+            "Block height for PCA denoising (settings['detection']['block_size'][0])."
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("det_block_size_x", self.s2p.det_block_size_x):
+            _, self.s2p.det_block_size_x = imgui.input_int(
+                "Denoise block X", self.s2p.det_block_size_x
+            )
+        set_tooltip(
+            "Block width for PCA denoising (settings['detection']['block_size'][1])."
+        )
+        imgui.end_disabled()
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("nbins", self.s2p.nbins):
+            _, self.s2p.nbins = imgui.input_int("Max binned frames", self.s2p.nbins)
+        set_tooltip("Max binned frames for cell detection (reduce if RAM-limited).")
+
+        # bin_size: None signals upstream to use tau*fs at runtime.
+        bin_auto = self.s2p.bin_size is None
+        auto_changed, new_bin_auto = imgui.checkbox(
+            "Auto bin size (tau*fs)", bin_auto
+        )
+        set_tooltip(
+            "When checked, suite2p picks the cell-detection bin size as "
+            "tau*fs at runtime. Uncheck to set an explicit value."
+        )
+        if auto_changed:
+            if new_bin_auto:
+                self.s2p.bin_size = None
+            else:
+                self.s2p.bin_size = max(
+                    1, int(round(self.s2p.tau * self.s2p.fs))
+                )
+        imgui.begin_disabled(self.s2p.bin_size is None)
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _bin_display = (
+            self.s2p.bin_size if self.s2p.bin_size is not None else 0
+        )
+        with _hi("bin_size", self.s2p.bin_size):
+            _bin_changed, _bin_new = imgui.input_int("Bin size", _bin_display)
+        if _bin_changed and self.s2p.bin_size is not None:
+            self.s2p.bin_size = max(1, _bin_new)
+        set_tooltip("settings['detection']['bin_size'] in frames.")
+        imgui.end_disabled()
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("highpass_time", self.s2p.highpass_time):
+            _, self.s2p.highpass_time = imgui.input_int(
+                "##highpass_time", self.s2p.highpass_time
+            )
+        imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+        _emp_label("highpass_time", self.s2p.highpass_time, "Highpass time")
+        set_tooltip(
+            "Running mean subtraction window across bins for temporal high-pass."
+        )
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("npix_norm_min", self.s2p.npix_norm_min):
+            _, self.s2p.npix_norm_min = imgui.input_float(
+                "Min npix norm", self.s2p.npix_norm_min, 0.0, 0.0, "%.2f"
+            )
+        set_tooltip(
+            "Minimum npix_norm filter for ROIs (per-ROI npix normalized "
+            "by the highest-variance ROIs' mean npix). Default 0.0."
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("npix_norm_max", self.s2p.npix_norm_max):
+            _, self.s2p.npix_norm_max = imgui.input_float(
+                "Max npix norm", self.s2p.npix_norm_max, 0.0, 0.0, "%.2f"
+            )
+        set_tooltip("Maximum npix_norm filter for ROIs. Default 100.0.")
+
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("max_overlap", self.s2p.max_overlap):
+            _, self.s2p.max_overlap = imgui.input_float(
+                "Max overlap", self.s2p.max_overlap
+            )
+        set_tooltip("ROIs with more overlap than this fraction are discarded.")
+
+        with _hi("soma_crop", self.s2p.soma_crop):
+            _, self.s2p.soma_crop = imgui.checkbox("Soma crop", self.s2p.soma_crop)
+        set_tooltip("Crop dendrites from ROI to determine npix_norm and compactness.")
 
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
 
-        imgui.begin_disabled(self.s2p.do_detection == 0)
-
-        # determine detection mode for greying out (re-check in popup context)
-        use_anatomical_local = self.s2p.anatomical_only > 0
-
+        # algorithm selector — picks which branch below renders.
+        algo_options = ["cellpose", "sparsery", "sourcery"]
+        if self.s2p.algorithm not in algo_options:
+            self.s2p.algorithm = "cellpose"
+        cur_algo_idx = algo_options.index(self.s2p.algorithm)
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.anatomical_only = imgui.input_int(
-            "Anatomical Only", self.s2p.anatomical_only
-        )
+        with _hi("algorithm", self.s2p.algorithm):
+            algo_changed, new_algo_idx = imgui.combo(
+                "##algorithm", cur_algo_idx, algo_options
+            )
+        imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+        _emp_label("algorithm", self.s2p.algorithm, "Algorithm")
+        if algo_changed:
+            self.s2p.algorithm = algo_options[new_algo_idx]
         set_tooltip(
-            "0=disabled (use functional detection)\n"
-            "1=max_proj / mean_img combined\n"
-            "2=mean_img only\n"
-            "3=enhanced mean_img (LBM default, recommended)\n"
-            "4=max_proj only"
+            "Cell-detection algorithm.\n"
+            "  cellpose: anatomical detection via deep learning (LBM default)\n"
+            "  sparsery: functional detection, sparse activity (upstream default)\n"
+            "  sourcery: functional detection, legacy"
         )
 
-        # Grey out Cellpose settings when anatomical_only = 0
-        imgui.begin_disabled(not use_anatomical_local)
+        imgui.spacing()
 
-        if not use_anatomical_local:
+        if self.s2p.algorithm == "cellpose":
             imgui.text_colored(
-                imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
-                "(Enable anatomical_only to use Cellpose)",
+                _SUBSECTION_COLOR, "Cellpose"
             )
+            imgui.spacing()
 
-        # Diameter is a 2-float list [dy, dx] upstream. Show as two scalars with
-        # a lock that keeps them synced on edit.
-        if not hasattr(self, "_s2p_diameter_lock"):
-            self._s2p_diameter_lock = True
-        imgui.set_next_item_width(INPUT_WIDTH)
-        dy_changed, dy = imgui.input_float("Diameter Y (px)", self.s2p.diameter_y)
-        set_tooltip(
-            "Expected cell diameter (Y axis) in pixels. Passed to Cellpose.\n"
-            "Upstream default: 12."
-        )
-        imgui.set_next_item_width(INPUT_WIDTH)
-        dx_changed, dx = imgui.input_float("Diameter X (px)", self.s2p.diameter_x)
-        set_tooltip(
-            "Expected cell diameter (X axis) in pixels. Passed to Cellpose.\n"
-            "Upstream default: 12."
-        )
-        _, self._s2p_diameter_lock = imgui.checkbox(
-            "Lock Y/X", self._s2p_diameter_lock
-        )
-        set_tooltip("Keep diameter_y and diameter_x in sync when editing either.")
-        if dy_changed:
-            self.s2p.diameter_y = dy
-            if self._s2p_diameter_lock:
-                self.s2p.diameter_x = dy
-        if dx_changed:
-            self.s2p.diameter_x = dx
-            if self._s2p_diameter_lock:
-                self.s2p.diameter_y = dx
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.cellprob_threshold = imgui.input_float(
-            "CellProb Threshold", self.s2p.cellprob_threshold
-        )
-        set_tooltip(
-            "Cell probability threshold for Cellpose. Default: 0.0\n\n"
-            "DECREASE this threshold if:\n"
-            "  - Cellpose is not returning as many masks as expected\n"
-            "  - Masks are too small\n\n"
-            "INCREASE this threshold if:\n"
-            "  - Cellpose is returning too many masks\n"
-            "  - Getting false positives from dull/dim areas\n\n"
-            "LBM default: -6 (very permissive)"
-        )
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.flow_threshold = imgui.input_float(
-            "Flow Threshold", self.s2p.flow_threshold
-        )
-        set_tooltip(
-            "Maximum allowed error of flows for each mask. Default: 0.4\n\n"
-            "INCREASE this threshold if:\n"
-            "  - Cellpose is not returning as many masks as expected\n"
-            "  - Set to 0.0 to turn off flow checking completely\n\n"
-            "DECREASE this threshold if:\n"
-            "  - Cellpose is returning too many ill-shaped masks\n\n"
-            "LBM default: 0 (flow checking disabled)"
-        )
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.highpass_spatial = imgui.input_float(
-            "Spatial HP (Cellpose)", self.s2p.highpass_spatial
-        )
-        set_tooltip(
-            "Spatial high-pass filtering before Cellpose, as a multiple of diameter.\n"
-            "0.5 = LBM default"
-        )
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.cellpose_niter = imgui.input_int(
-            "Cellpose niter", self.s2p.cellpose_niter
-        )
-        set_tooltip(
-            "Cellpose iteration count (forwarded to model.eval(niter=...)).\n"
-            "0 = let Cellpose pick based on diameter (default).\n"
-            "Bump (e.g. 200) for dense or small cells where the default "
-            "doesn't converge fully."
-        )
-
-        imgui.end_disabled()
-
-        # functional detection settings (greyed if using anatomical)
-        if imgui.tree_node("Functional Detection"):
-            imgui.begin_disabled(use_anatomical_local)
-            if use_anatomical_local:
-                imgui.text_colored(
-                    imgui.ImVec4(0.7, 0.7, 0.7, 1.0),
-                    "(Skipped when anatomical_only > 0)",
+            # follows upstream cellpose_settings order:
+            # cellpose_model, img, highpass_spatial, flow_threshold,
+            # cellprob_threshold. diameter is top-level in upstream but
+            # cellpose-specific in practice, so it sits with this branch.
+            cellpose_model_buf = self.s2p.cellpose_model or ""
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("cellpose_model", self.s2p.cellpose_model):
+                _changed, _new_model = imgui.input_text(
+                    "Cellpose model", cellpose_model_buf
                 )
+            if _changed:
+                self.s2p.cellpose_model = _new_model
+            set_tooltip(
+                "Cellpose model name (e.g. 'cpsam', 'cyto3'). Forwarded to "
+                "settings['detection']['cellpose_settings']['cellpose_model']."
+            )
 
+            # cellpose image source — direct upstream string
+            img_options = ["max_proj / meanImg", "meanImg", "max_proj"]
+            if self.s2p.cellpose_img not in img_options:
+                self.s2p.cellpose_img = img_options[0]
+            cur_img_idx = img_options.index(self.s2p.cellpose_img)
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p_db.functional_chan = imgui.input_int(
-                "Functional Channel", self.s2p_db.functional_chan
+            with _hi("cellpose_img", self.s2p.cellpose_img):
+                img_changed, new_img_idx = imgui.combo(
+                    "##cellpose_img", cur_img_idx, img_options
+                )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            _emp_label("cellpose_img", self.s2p.cellpose_img, "Cellpose image")
+            if img_changed:
+                self.s2p.cellpose_img = img_options[new_img_idx]
+            set_tooltip(
+                "Image cellpose runs detection on. Upstream allowed values:\n"
+                "  max_proj / meanImg  (default; combined)\n"
+                "  meanImg             (mean image only)\n"
+                "  max_proj            (max projection only)"
             )
-            set_tooltip("Channel used for functional ROI extraction (1-based).")
-            _, self.s2p.sparse_mode = imgui.checkbox(
-                "Sparse Mode", self.s2p.sparse_mode
-            )
-            set_tooltip("Use sparse detection (recommended for soma).")
+
+            # diameter Y/X with a Y/X lock toggle
+            if not hasattr(self, "_s2p_diameter_lock"):
+                self._s2p_diameter_lock = True
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.spatial_scale = imgui.input_int(
-                "Spatial Scale", self.s2p.spatial_scale
+            with _hi("diameter_y", self.s2p.diameter_y):
+                dy_changed, dy = imgui.input_float(
+                    "Diameter Y", self.s2p.diameter_y
+                )
+            set_tooltip(
+                "Expected cell diameter (Y axis) in pixels. Passed to Cellpose.\n"
+                "Upstream default: 12."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("diameter_x", self.s2p.diameter_x):
+                dx_changed, dx = imgui.input_float(
+                    "Diameter X", self.s2p.diameter_x
+                )
+            set_tooltip(
+                "Expected cell diameter (X axis) in pixels. Passed to Cellpose.\n"
+                "Upstream default: 12."
+            )
+            _, self._s2p_diameter_lock = imgui.checkbox(
+                "Lock Y/X", self._s2p_diameter_lock
             )
             set_tooltip(
-                "ROI size scale: 0=auto, 1=6-pixel cells (LBM default), 2=medium, 3=large, 4=very large."
+                "Keep diameter_y and diameter_x in sync when editing either."
             )
-            _, self.s2p.connected = imgui.checkbox("Connected ROIs", self.s2p.connected)
-            set_tooltip("Require ROIs to be connected regions.")
+            if dy_changed:
+                self.s2p.diameter_y = dy
+                if self._s2p_diameter_lock:
+                    self.s2p.diameter_x = dy
+            if dx_changed:
+                self.s2p.diameter_x = dx
+                if self._s2p_diameter_lock:
+                    self.s2p.diameter_y = dx
+
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.threshold_scaling = imgui.input_float(
-                "Threshold Scaling", self.s2p.threshold_scaling
+            with _hi("highpass_spatial", self.s2p.highpass_spatial):
+                _, self.s2p.highpass_spatial = imgui.input_float(
+                    "Highpass spatial", self.s2p.highpass_spatial
+                )
+            set_tooltip(
+                "Spatial high-pass filtering before Cellpose, as a multiple "
+                "of diameter. 0.5 = LBM default."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("flow_threshold", self.s2p.flow_threshold):
+                _, self.s2p.flow_threshold = imgui.input_float(
+                    "##flow_threshold", self.s2p.flow_threshold
+                )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            _emp_label(
+                "flow_threshold", self.s2p.flow_threshold, "Flow threshold"
+            )
+            set_tooltip(
+                "Max allowed flow error per mask. Default 0.4.\n"
+                "INCREASE (or 0.0 = off) if missing masks.\n"
+                "DECREASE if cellpose returns ill-shaped masks.\n"
+                "LBM default: 0 (flow checking disabled)."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("cellprob_threshold", self.s2p.cellprob_threshold):
+                _, self.s2p.cellprob_threshold = imgui.input_float(
+                    "##cellprob_threshold", self.s2p.cellprob_threshold
+                )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            _emp_label(
+                "cellprob_threshold",
+                self.s2p.cellprob_threshold,
+                "Cellprob threshold",
+            )
+            set_tooltip(
+                "Cell probability threshold for Cellpose. Default: 0.0\n\n"
+                "DECREASE if cellpose is missing masks (or masks too small).\n"
+                "INCREASE if cellpose returns too many masks / false positives.\n\n"
+                "LBM default: -6 (very permissive)."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _mbo():
+                _, self.s2p.cellpose_niter = imgui.input_int(
+                    "Cellpose niter", self.s2p.cellpose_niter
+                )
+            set_tooltip(
+                "Cellpose iteration count (model.eval(niter=...)).\n"
+                "0 = let cellpose pick based on diameter (default).\n"
+                "Bump (e.g. 200) for dense or small cells.\n"
+                "MBO-only — composes into cellpose_settings.params at run time."
+            )
+
+        elif self.s2p.algorithm == "sparsery":
+            imgui.text_colored(
+                _SUBSECTION_COLOR, "Sparsery"
+            )
+            imgui.spacing()
+
+            # functional_chan (mbo extra) + threshold_scaling at top, then
+            # upstream sparsery_settings order: highpass_neuropil, max_ROIs,
+            # spatial_scale, active_percentile.
+            imgui.set_next_item_width(INPUT_WIDTH)
+            _, self.s2p_db.functional_chan = imgui.input_int(
+                "Functional chan", self.s2p_db.functional_chan
+            )
+            set_tooltip("Channel used for functional ROI extraction (1-based).")
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("threshold_scaling", self.s2p.threshold_scaling):
+                _, self.s2p.threshold_scaling = imgui.input_float(
+                    "##threshold_scaling", self.s2p.threshold_scaling
+                )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            _emp_label(
+                "threshold_scaling",
+                self.s2p.threshold_scaling,
+                "Threshold scaling",
             )
             set_tooltip("Scale ROI detection threshold; higher = fewer ROIs.")
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.spatial_hp_detect = imgui.input_int(
-                "Spatial HP Detect", self.s2p.spatial_hp_detect
+            with _hi("highpass_neuropil", self.s2p.highpass_neuropil):
+                _, self.s2p.highpass_neuropil = imgui.input_int(
+                    "Highpass neuropil", self.s2p.highpass_neuropil
+                )
+            set_tooltip(
+                "Highpass filter in pixels on the binned movie to subtract neuropil."
             )
-            set_tooltip("Spatial high-pass filter size for neuropil subtraction.")
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p.max_iterations = imgui.input_int(
-                "Max Iterations", self.s2p.max_iterations
+            with _hi("max_ROIs", self.s2p.max_ROIs):
+                _, self.s2p.max_ROIs = imgui.input_int(
+                    "Max ROIs", self.s2p.max_ROIs
+                )
+            set_tooltip("Hard cap on detected ROIs (sparsery only).")
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("spatial_scale", self.s2p.spatial_scale):
+                _, self.s2p.spatial_scale = imgui.input_int(
+                    "Spatial scale", self.s2p.spatial_scale
+                )
+            set_tooltip(
+                "ROI size scale: 0=auto, 1=6-pixel cells (LBM default), "
+                "2=medium, 3=large, 4=very large."
             )
-            set_tooltip("Maximum number of cell-detection iterations.")
-            imgui.end_disabled()
-            imgui.tree_pop()
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("active_percentile", self.s2p.active_percentile):
+                _, self.s2p.active_percentile = imgui.input_float(
+                    "Active percentile", self.s2p.active_percentile,
+                    0.0, 0.0, "%.2f",
+                )
+            set_tooltip(
+                "Percentile of active pixels in the movie used for thresholding."
+            )
 
-        # shared settings for both detection methods
-        imgui.spacing()
-        imgui.text("Shared Settings:")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.max_overlap = imgui.input_float("Max Overlap", self.s2p.max_overlap)
-        set_tooltip("Maximum allowed fraction of overlapping ROI pixels.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.highpass_time = imgui.input_int("High-Pass Window", self.s2p.highpass_time)
-        set_tooltip("Running mean subtraction window for temporal high-pass filtering.")
-        _, self.s2p.smooth_masks = imgui.checkbox("Smooth Masks", self.s2p.smooth_masks)
-        set_tooltip("Smooth masks in the final ROI detection pass.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.nbins = imgui.input_int("Max Binned Frames", self.s2p.nbins)
-        set_tooltip("Maximum number of binned frames for ROI detection.")
+        elif self.s2p.algorithm == "sourcery":
+            imgui.text_colored(
+                _SUBSECTION_COLOR, "Sourcery"
+            )
+            imgui.spacing()
 
-        # soma_crop lives in settings["detection"] upstream; moved here
-        # from the old Classification popup where it was previously shown.
-        _, self.s2p.soma_crop = imgui.checkbox("Soma Crop", self.s2p.soma_crop)
-        set_tooltip("Crop dendrites for soma-shape classification stats.")
+            # functional_chan (mbo extra) + diameter (top-level upstream,
+            # used by sourcery & cellpose) + threshold_scaling at top, then
+            # upstream sourcery_settings order: connected, max_iterations,
+            # smooth_masks.
+            imgui.set_next_item_width(INPUT_WIDTH)
+            _, self.s2p_db.functional_chan = imgui.input_int(
+                "Functional chan", self.s2p_db.functional_chan
+            )
+            set_tooltip("Channel used for functional ROI extraction (1-based).")
 
-        # Channel 2 (moved here from old Output panel)
-        imgui.spacing()
-        imgui.separator()
-        imgui.text("Channel 2:")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.chan2_threshold = imgui.input_float(
-            "Chan2 Detection Threshold", self.s2p.chan2_threshold
-        )
-        set_tooltip("Threshold for calling an ROI detected on channel 2.")
+            # diameter Y/X (settings.diameter[0/1]) — used by sourcery and
+            # cellpose per upstream's parameters.py.
+            if not hasattr(self, "_s2p_diameter_lock"):
+                self._s2p_diameter_lock = True
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("diameter_y", self.s2p.diameter_y):
+                dy_changed_s, dy_s = imgui.input_float(
+                    "Diameter Y", self.s2p.diameter_y
+                )
+            set_tooltip(
+                "Expected cell diameter (Y axis) in pixels. Used by sourcery "
+                "and cellpose. Upstream default: 12."
+            )
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("diameter_x", self.s2p.diameter_x):
+                dx_changed_s, dx_s = imgui.input_float(
+                    "Diameter X", self.s2p.diameter_x
+                )
+            set_tooltip(
+                "Expected cell diameter (X axis) in pixels. Used by sourcery "
+                "and cellpose. Upstream default: 12."
+            )
+            _, self._s2p_diameter_lock = imgui.checkbox(
+                "Lock Y/X##sourcery", self._s2p_diameter_lock
+            )
+            set_tooltip(
+                "Keep diameter_y and diameter_x in sync when editing either."
+            )
+            if dy_changed_s:
+                self.s2p.diameter_y = dy_s
+                if self._s2p_diameter_lock:
+                    self.s2p.diameter_x = dy_s
+            if dx_changed_s:
+                self.s2p.diameter_x = dx_s
+                if self._s2p_diameter_lock:
+                    self.s2p.diameter_y = dx_s
 
-        imgui.end_disabled()  # closes do_detection==False gate
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("threshold_scaling", self.s2p.threshold_scaling):
+                _, self.s2p.threshold_scaling = imgui.input_float(
+                    "##threshold_scaling", self.s2p.threshold_scaling
+                )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            _emp_label(
+                "threshold_scaling",
+                self.s2p.threshold_scaling,
+                "Threshold scaling",
+            )
+            set_tooltip("Scale ROI detection threshold; higher = fewer ROIs.")
+            with _hi("connected", self.s2p.connected):
+                _, self.s2p.connected = imgui.checkbox(
+                    "Connected", self.s2p.connected
+                )
+            set_tooltip("Keep ROIs fully connected (set False for dendrites).")
+            imgui.set_next_item_width(INPUT_WIDTH)
+            with _hi("max_iterations", self.s2p.max_iterations):
+                _, self.s2p.max_iterations = imgui.input_int(
+                    "Max iterations", self.s2p.max_iterations
+                )
+            set_tooltip("Maximum number of ROI-detection iterations.")
+            with _hi("smooth_masks", self.s2p.smooth_masks):
+                _, self.s2p.smooth_masks = imgui.checkbox(
+                    "Smooth masks", self.s2p.smooth_masks
+                )
+            set_tooltip("Smooth masks in the final ROI detection pass (sourcery).")
+
+        # NOTE: removed the "Channel 2" sub-section (Chan2 Detection Threshold
+        # and Cellpose chan2 checkbox). Their dataclass fields stay so
+        # to_dict() keeps emitting them at upstream defaults; resurface
+        # widgets here if a multi-channel workflow ever needs them again.
 
     # --- Signal Extraction ---
+    # body only — Skip/Run is rendered inline on the column title by the
+    # popup loop (drives bool self.s2p.neuropil_extract). suite2p / lbm
+    # don't expose a force-extract kwarg, so no Force option here.
     def draw_signal_extraction_settings():
-        _, self.s2p.allow_overlap = imgui.checkbox(
-            "Allow Overlap", self.s2p.allow_overlap
+        with _hi("neuropil_extract", self.s2p.neuropil_extract):
+            _, self.s2p.neuropil_extract = imgui.checkbox(
+                "Extract Neuropil", self.s2p.neuropil_extract
+            )
+        set_tooltip(
+            "Compute Fneu from neuropil masks. Default: True.\n\n"
+            "WARNING: setting this to False crashes upstream suite2p — "
+            "create_masks returns neuropil_masks=None but extract_traces "
+            "doesn't handle None and raises 'NoneType is not iterable'. "
+            "Bug is in suite2p/extraction/extract.py:60. Keep this on "
+            "until upstream fixes it."
         )
+        with _hi("allow_overlap", self.s2p.allow_overlap):
+            _, self.s2p.allow_overlap = imgui.checkbox(
+                "Allow Overlap", self.s2p.allow_overlap
+            )
         set_tooltip("Allow overlapping ROI pixels during extraction.")
-        imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.min_neuropil_pixels = imgui.input_int(
-            "Min Neuropil Pixels", self.s2p.min_neuropil_pixels
+        with _hi("circular_neuropil", self.s2p.circular_neuropil):
+            _, self.s2p.circular_neuropil = imgui.checkbox(
+                "Circular Neuropil", self.s2p.circular_neuropil
+            )
+        set_tooltip(
+            "Force neuropil masks to be circular instead of square. Slower."
         )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("min_neuropil_pixels", self.s2p.min_neuropil_pixels):
+            _, self.s2p.min_neuropil_pixels = imgui.input_int(
+                "Min Neuropil Pixels", self.s2p.min_neuropil_pixels
+            )
         set_tooltip("Minimum neuropil pixels per ROI.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.inner_neuropil_radius = imgui.input_int(
-            "Inner Neuropil Radius", self.s2p.inner_neuropil_radius
-        )
+        with _hi("inner_neuropil_radius", self.s2p.inner_neuropil_radius):
+            _, self.s2p.inner_neuropil_radius = imgui.input_int(
+                "Inner Neuropil Radius", self.s2p.inner_neuropil_radius
+            )
         set_tooltip("Pixels to exclude between ROI and neuropil region.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.lam_percentile = imgui.input_int(
-            "Lambda Percentile", self.s2p.lam_percentile
-        )
+        with _hi("lam_percentile", self.s2p.lam_percentile):
+            _, self.s2p.lam_percentile = imgui.input_float(
+                "Lambda Percentile", self.s2p.lam_percentile, 0.0, 0.0, "%.2f"
+            )
         set_tooltip("Percentile of Lambda used for neuropil exclusion.")
-
-    # --- Classification ---
-    # --- Deconv / Classify (combined: spike deconvolution + classification) ---
-    def draw_deconv_classify_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.neuropil_coefficient = imgui.input_float(
-            "Neuropil Coefficient", self.s2p.neuropil_coefficient
+        with _hi("snr_threshold", self.s2p.snr_threshold):
+            _, self.s2p.snr_threshold = imgui.input_float(
+                "SNR Threshold", self.s2p.snr_threshold, 0.0, 0.0, "%.2f"
+            )
+        set_tooltip("settings['extraction']['snr_threshold']. Default 0.0.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("extract_batch_size", self.s2p.extract_batch_size):
+            _, self.s2p.extract_batch_size = imgui.input_int(
+                "Extract Batch Size", self.s2p.extract_batch_size
+            )
+        set_tooltip(
+            "Frames per extraction batch (settings['extraction']['batch_size']). "
+            "Default 500."
         )
+
+    # --- Deconvolution ---
+    # body only — Skip/Run is rendered inline on the column title by the
+    # popup loop (drives bool self.s2p.do_deconvolution). suite2p / lbm
+    # don't expose a force-deconv kwarg, so no Force option here.
+    def draw_deconvolution_settings():
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi("neuropil_coefficient", self.s2p.neuropil_coefficient):
+            _, self.s2p.neuropil_coefficient = imgui.input_float(
+                "Neuropil coefficient", self.s2p.neuropil_coefficient
+            )
         set_tooltip(
             "Neuropil coefficient for all ROIs (F_corrected = F - coeff * F_neu)."
         )
@@ -1675,51 +3091,56 @@ def _draw_section_suite2p_content(self):
             else 0
         )
         imgui.set_next_item_width(INPUT_WIDTH)
-        baseline_changed, selected_baseline_idx = imgui.combo(
-            "Baseline Method", current_baseline_idx, baseline_options
-        )
+        with _hi("baseline", self.s2p.baseline):
+            baseline_changed, selected_baseline_idx = imgui.combo(
+                "Baseline method", current_baseline_idx, baseline_options
+            )
         if baseline_changed:
             self.s2p.baseline = baseline_options[selected_baseline_idx]
         set_tooltip(
             "maximin: moving baseline with min/max filters.\n"
             "constant: minimum of Gaussian-filtered trace.\n"
-            "prctile: percentile of trace (controlled by 'Baseline Percentile')."
+            "prctile: percentile of trace (controlled by 'Baseline percentile')."
         )
 
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.win_baseline = imgui.input_float(
-            "Baseline Window (s)", self.s2p.win_baseline
-        )
+        with _hi("win_baseline", self.s2p.win_baseline):
+            _, self.s2p.win_baseline = imgui.input_float(
+                "Baseline window (s)", self.s2p.win_baseline
+            )
         set_tooltip("Window for maximin filter in seconds.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.sig_baseline = imgui.input_float(
-            "Baseline Sigma (s)", self.s2p.sig_baseline
-        )
+        with _hi("sig_baseline", self.s2p.sig_baseline):
+            _, self.s2p.sig_baseline = imgui.input_float(
+                "Baseline sigma (s)", self.s2p.sig_baseline
+            )
         set_tooltip("Gaussian filter width in seconds for baseline computation.")
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.prctile_baseline = imgui.input_float(
-            "Baseline Percentile", self.s2p.prctile_baseline
-        )
+        with _hi("prctile_baseline", self.s2p.prctile_baseline):
+            _, self.s2p.prctile_baseline = imgui.input_float(
+                "Baseline percentile", self.s2p.prctile_baseline
+            )
         set_tooltip("Percentile of trace for 'prctile' baseline method.")
 
-        # --- Classification (moved here from the old Classification panel) ---
-        imgui.spacing()
-        imgui.separator()
-        imgui.text_colored(imgui.ImVec4(0.7, 0.7, 0.7, 1.0), "Classification")
-        imgui.spacing()
-
+    # --- Classification ---
+    # body only — no skip/run gate (classification always runs alongside
+    # detection upstream; do_detection gates the whole detection→classify
+    # block, do_deconvolution gates only OASIS).
+    def draw_classification_settings():
         imgui.set_next_item_width(INPUT_WIDTH)
-        _, self.s2p.preclassify = imgui.input_float(
-            "Preclassify Threshold", self.s2p.preclassify
-        )
+        with _hi("preclassify", self.s2p.preclassify):
+            _, self.s2p.preclassify = imgui.input_float(
+                "Preclassify threshold", self.s2p.preclassify
+            )
         set_tooltip(
             "Probability threshold to apply classifier before extraction. "
             "0 = skip pre-classification."
         )
 
-        _, self.s2p.use_builtin_classifier = imgui.checkbox(
-            "Use built-in classifier", self.s2p.use_builtin_classifier
-        )
+        with _hi("use_builtin_classifier", self.s2p.use_builtin_classifier):
+            _, self.s2p.use_builtin_classifier = imgui.checkbox(
+                "Use built-in classifier", self.s2p.use_builtin_classifier
+            )
         set_tooltip(
             "Forces the shipped suite2p classifier. Only takes effect when "
             "Classifier Path below is empty AND you have a saved "
@@ -1728,16 +3149,12 @@ def _draw_section_suite2p_content(self):
             "Classification runs either way."
         )
 
-        _, self.s2p_extras.accept_all_cells = imgui.checkbox(
-            "Accept all cells", self.s2p_extras.accept_all_cells
-        )
-        set_tooltip(
-            "When checked, every detected ROI is accepted regardless of "
-            "classifier output."
-        )
+        # NOTE: "Accept all cells" moved to the LBM-Suite2p-Python Settings
+        # section in the Main column (it's a lsp-pipeline kwarg, not a
+        # suite2p classification field — placement matches its real home).
 
         imgui.spacing()
-        imgui.text("Classifier Path:")
+        imgui.text("Classifier path:")
         path_display = self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
         imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
         imgui.text(path_display)
@@ -1766,264 +3183,636 @@ def _draw_section_suite2p_content(self):
                     )
                 self._classifier_dialog = None
 
-    # === PIPELINE SETTINGS TABLE ===
-    # tabular layout: [checkbox/empty] | [label] | [settings button]
-    # wrapped in try/finally: draw_run_tab catches exceptions from
-    # pipeline.draw(), so any attribute error in a row (e.g. self.s2p
-    # returning None) would otherwise leave end_table uncalled and
-    # surface as "Missing EndTable()" on the outer imgui.end().
-    table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
-    if imgui.begin_table("pipeline_settings_table", 3, table_flags):
+    # === ENTRY BUTTONS ===
+    # Each section: light-blue title (matching the Pipeline Settings
+    # popup convention) + small Open button below it. Data Options is
+    # data-specific (scan-phase, axial reg); Pipeline Settings opens the
+    # unified pipeline-step parameters popup. The popup itself is
+    # declared further down once the per-column closures are in scope.
+    imgui.spacing()
+    imgui.separator()
+    imgui.spacing()
+    imgui.text_colored(_SUBSECTION_COLOR, "Data-specific options")
+    set_tooltip(
+        "Toggles for raw scan-phase correction (bidirectional alignment, "
+        "FFT sub-pixel) and axial registration. Available only for raw "
+        "MBO scans with multiple z-planes.",
+        align="right",
+    )
+    imgui.spacing()
+    if imgui.button("Open##data_options_btn", imgui.ImVec2(_BTN_W, 0)):
+        _popup_states["data_options"] = True
+        imgui.open_popup("Data Options##data_options")
+
+    imgui.spacing()
+    imgui.spacing()
+    imgui.separator()
+    imgui.spacing()
+
+    # parameters and settings + modified parameters share the same group —
+    # no separator between them.
+    imgui.text_colored(_SUBSECTION_COLOR, "Parameters and settings")
+    set_tooltip(
+        "All Suite2p and LBM-Suite2p-Python knobs in one popup: Main, "
+        "Registration, ROI Detection, Signal Extraction, Deconvolution, "
+        "and Classification. Modified parameters appear below in this "
+        "panel for a quick at-a-glance summary.",
+        align="right",
+    )
+    imgui.spacing()
+    if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
+        _popup_states["pipeline_settings"] = True
+        self._pipe_settings_just_opened = True
+        imgui.open_popup("Pipeline Settings##pipeline_settings_popup")
+
+    imgui.spacing()
+
+    # === MODIFIED PARAMETERS PREVIEW ===
+    # Shows fields whose current value differs from the upstream suite2p
+    # default. Driven by collect_modified_params() which iterates the
+    # _MBO_TO_S2P / _MBO_DB_TO_S2P maps and uses _is_default() for the
+    # diff check. Useful right after a settings.npy hydration so the
+    # user can see at a glance what's changed.
+    _mods = collect_modified_params(self.s2p, self.s2p_db, self.s2p_extras)
+    _n_mods = len(_mods)
+    imgui.text_colored(_SUBSECTION_COLOR, f"Modified parameters ({_n_mods})")
+    if _mods:
+        # copy-all icon next to the title — emits a Python dict literal
+        # with each field's default + source pipeline annotated as an
+        # inline comment so the snippet is both pasteable and reviewable.
+        # source markers (s2p / lsp) match the in-table param-name color:
+        # s2p → suite2p settings dict; lsp → lbm_suite2p_python pipeline kwargs.
+        imgui.same_line()
+        with _ghost_button():
+            if imgui.small_button(f"{fa.ICON_FA_COPY}##mod_params_copy_all"):
+                _lines = ["{"]
+                for _field, _cur, _def, _src in _mods:
+                    _lines.append(
+                        f"    {_field!r}: {_cur!r},  # {_src}, default: {_def!r}"
+                    )
+                _lines.append("}")
+                imgui.set_clipboard_text("\n".join(_lines))
+        set_tooltip(
+            "Copy all modified params as a Python dict. Each line tags its "
+            "source pipeline (s2p = suite2p settings, lsp = lbm_suite2p_python "
+            "kwarg) and the default value, as inline comments.",
+            align="right",
+            mark_dimmed=False,
+        )
+
+        # bounded scroll region — caps height so this section never
+        # eats the Run Suite2p button's space when many fields differ.
+        _mod_h = min(180, imgui.get_frame_height_with_spacing() * (_n_mods + 2))
+        if imgui.begin_child(
+            "##mod_params",
+            imgui.ImVec2(-1, _mod_h),
+            imgui.ChildFlags_.borders,
+        ):
+            _table_flags = (
+                imgui.TableFlags_.row_bg
+                | imgui.TableFlags_.borders_inner_h
+                | imgui.TableFlags_.sizing_stretch_prop
+            )
+            if imgui.begin_table("##mod_params_tbl", 3, _table_flags):
+                imgui.table_setup_column(
+                    "Parameter", imgui.TableColumnFlags_.width_stretch, 4.0
+                )
+                imgui.table_setup_column(
+                    "Current", imgui.TableColumnFlags_.width_stretch, 2.5
+                )
+                imgui.table_setup_column(
+                    "Default", imgui.TableColumnFlags_.width_stretch, 2.5
+                )
+                imgui.table_headers_row()
+                for _field, _cur, _def, _src in _mods:
+                    _cur_s = (
+                        f"{_cur:.3g}" if isinstance(_cur, float) else str(_cur)
+                    )
+                    _def_s = (
+                        f"{_def:.3g}" if isinstance(_def, float) else str(_def)
+                    )
+                    # name color signals pipeline source: s2p = yellow
+                    # (matches the suite2p column titles), lsp = green
+                    # (matches the LBM-Suite2p-Python section header).
+                    _name_color = (
+                        _S2P_TITLE_COLOR if _src == "s2p" else _MBO_ONLY_COLOR
+                    )
+                    imgui.table_next_row()
+                    imgui.table_set_column_index(0)
+                    imgui.text_colored(_name_color, _field)
+                    imgui.table_set_column_index(1)
+                    imgui.text(_cur_s)
+                    imgui.table_set_column_index(2)
+                    imgui.text_disabled(_def_s)
+                imgui.end_table()
+        imgui.end_child()
+    else:
+        imgui.text_disabled("Run pipeline to view parameters")
+
+    imgui.spacing()
+    imgui.spacing()
+
+    # === RUN SUITE2P BUTTON ===
+    # Wider button than the entry "Open" buttons so it reads as the
+    # primary action. Disabled until an output path is set; green style
+    # signals "this kicks off the work". Centered horizontally.
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
+
+    if not has_save_path:
+        imgui.begin_disabled()
+
+    _run_avail = imgui.get_content_region_avail().x
+    if _run_avail > _RUN_W:
+        imgui.set_cursor_pos_x(
+            imgui.get_cursor_pos_x() + (_run_avail - _RUN_W) * 0.5
+        )
+    button_clicked = imgui.button("Run Suite2p", imgui.ImVec2(_RUN_W, 0))
+
+    if not has_save_path:
+        imgui.end_disabled()
+
+    imgui.pop_style_color(3)
+
+    if not has_save_path and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+        imgui.set_tooltip(
+            "Set the output folder above (folder button or paste a path)"
+        )
+
+    if button_clicked and has_save_path:
+        run_process(self)
+
+    if self._install_error:
+        if self._show_red_text:
+            imgui.text_colored(imgui.ImVec4(1.0, 0.0, 0.0, 1.0), "Error: lbm_suite2p_python is not installed.")
+        if self._show_green_text:
+            imgui.text_colored(imgui.ImVec4(0.0, 1.0, 0.0, 1.0), "lbm_suite2p_python install success.")
+        if self._show_install_button and imgui.button("Install", imgui.ImVec2(_BTN_W, 0)):
+            import subprocess
+            self.logger.log("info", "Installing lbm_suite2p_python...")
+            try:
+                subprocess.check_call(["pip", "install", "lbm_suite2p_python"])
+                self.logger.log("info", "Installation complete.")
+                self._install_error = False
+                self._show_red_text = False
+                self._show_green_text = True
+                self._show_install_button = False
+            except Exception as e:
+                self.logger.log("error", f"Installation failed: {e}")
+
+    # === Unified Pipeline Settings popup ===
+    # two-row layout. row 1 = Main / Registration / ROI Detection (always
+    # expanded). row 2 = Classification / Extraction / Deconvolution
+    # (collapsing-header per column, collapsed by default — these stages
+    # are wired up by the run-time pipeline and rarely need adjusting).
+    # each row's columns flex-share that row's full width every frame so
+    # resizing the popup re-flows them. the popup's min-size constraint
+    # is clamped to the viewport so it can never demand a width larger
+    # than the screen (otherwise imgui flickers between min-size and
+    # screen-clamp).
+    # section schema: (title, draw_fn, mode_kind, mode_attr)
+    #   mode_kind:
+    #     None = no inline control (Main has no skip/run concept)
+    #     "tri"  = Skip/Run/Force, drives an int 0/1/2 on self.s2p
+    #     "bool" = Skip/Run only, drives a bool on self.s2p (no Force —
+    #              suite2p / lbm don't expose force_extract or force_deconv)
+    #   mode_attr: attribute name on self.s2p
+    # mode_kind notes:
+    # - Main: no skip — global params, not a stage gate.
+    # - Registration / ROI Detection: tri-state via int 0/1/2 (force_reg /
+    #   force_detect derived at run time).
+    # - Classification: NO skip — runs alongside detection upstream;
+    #   do_detection gates the whole detect→classify block.
+    # - Extraction: NO skip — upstream pipeline_s2p calls
+    #   extraction_wrapper unconditionally. neuropil_extract is a knob
+    #   inside the body (not a stage gate); setting it False also crashes
+    #   upstream's extract_traces (their bug, not ours).
+    # - Deconvolution: bool — do_deconvolution gates the OASIS step
+    #   cleanly (pipeline_s2p falls through to spks=zeros when False).
+    rows = [
+        [
+            ("Suite2p Main Settings", draw_main_settings, None, None),
+            ("Registration", draw_registration_settings, "tri", "do_registration"),
+            ("ROI Detection", draw_roi_detection_settings, "tri", "do_detection"),
+        ],
+        [
+            ("Classification", draw_classification_settings, None, None),
+            ("Extraction", draw_signal_extraction_settings, None, None),
+            ("Deconvolution", draw_deconvolution_settings, "bool", "do_deconvolution"),
+        ],
+    ]
+    n_rows = len(rows)
+
+    # worst-case (longest) labels in each column — used to compute the
+    # minimum width that fits the input/checkbox + label + a right-aligned
+    # (?) marker without clipping. Add new long labels here if you add
+    # widgets that push past these.
+    _WORST_INPUT_LABEL = {
+        "Suite2p Main Settings": "Min F0 (frac of median)",
+        "Registration": "Smooth Sigma Time",
+        "ROI Detection": "Chan2 Detection Threshold",
+        "Classification": "Preclassify threshold",
+        "Extraction": "Inner Neuropil Radius",
+        "Deconvolution": "Neuropil coefficient",
+    }
+    _WORST_CHECKBOX_LABEL = {
+        "Suite2p Main Settings": "Parallel plane processing (experimental)",
+        "Registration": "Export Registered TIFF",
+        "ROI Detection": "Auto bin size (tau*fs)",
+        "Classification": "Use built-in classifier",
+        "Extraction": "Circular Neuropil",
+        "Deconvolution": "",
+    }
+    # title-line content varies per mode; account for "Title  Skip Run Force"
+    _TITLE_RADIO_LABELS = {
+        "tri": "Skip Run Force",
+        "bool": "Skip Run",
+        None: "",
+    }
+    # columns whose draw_fn already renders its own title(s) — the popup
+    # loop skips the column header + separator for these so the label
+    # doesn't appear twice (e.g. Suite2p Main column draws an inner
+    # bordered "LBM-Suite2p-Python Settings" box and an inner bordered
+    # "Suite2p Main Settings" box, each self-labeled).
+    _SELF_TITLED_COLUMNS = {"Suite2p Main Settings"}
+
+    viewport = imgui.get_main_viewport()
+    style = imgui.get_style()
+    spacing_x = style.item_spacing.x
+    window_pad_x = style.window_padding.x
+    frame_pad_x = style.frame_padding.x
+    qm_w = imgui.calc_text_size("(?)").x
+    cb_w = imgui.get_frame_height()  # checkbox box (square frame)
+
+    def _calc_col_natural_w(title: str, mode_kind) -> float:
+        """Natural minimum width of a column to fit its widest content
+        plus right-aligned (?) marker, without clipping."""
+        # widest body row: max(input row, checkbox row)
+        inp_label_w = imgui.calc_text_size(_WORST_INPUT_LABEL[title]).x
+        cb_label_w = imgui.calc_text_size(_WORST_CHECKBOX_LABEL[title]).x
+        body_inp = INPUT_WIDTH + spacing_x + inp_label_w + spacing_x + qm_w
+        body_cb = cb_w + spacing_x + cb_label_w + spacing_x + qm_w
+        body = max(body_inp, body_cb)
+        # title row: "Title  Skip Run Force" (radio buttons)
+        title_w = imgui.calc_text_size(title).x
+        radios = _TITLE_RADIO_LABELS[mode_kind]
+        if radios:
+            # radio button = circle + spacing + label; approx 3 radios
+            n_radios = len(radios.split())
+            radio_label_w = sum(
+                imgui.calc_text_size(lbl).x for lbl in radios.split()
+            )
+            title_row_w = (
+                title_w
+                + spacing_x
+                + radio_label_w
+                + n_radios * (cb_w + spacing_x)  # circle + gap per radio
+            )
+        else:
+            title_row_w = title_w
+        # account for child window's inner padding (borders + frame_padding)
+        inner_pad = 2 * frame_pad_x
+        return max(body, title_row_w) + inner_pad + 8  # safety margin
+
+    # natural column widths per row — used both for the static popup
+    # width below and for the per-column flex-share inside the row loop.
+    col_naturals_per_row = [
+        [_calc_col_natural_w(t, mk) for (t, _, mk, _) in row]
+        for row in rows
+    ]
+
+    # static popup width — derived from the widest row's natural column
+    # widths + inter-column spacing + window padding. fixed across frames
+    # because column natural widths don't depend on row 2 expansion state.
+    row_natural_totals = [
+        sum(nat) + spacing_x * (len(nat) - 1)
+        for nat in col_naturals_per_row
+    ]
+    _content_w_static = max(row_natural_totals) + 2 * window_pad_x + 16
+    _content_w_static = min(_content_w_static, viewport.size.x * 0.98)
+
+    _just_opened = getattr(self, "_pipe_settings_just_opened", False)
+
+    # center on the viewport's true center; pivot (0.5, 0.5) puts the
+    # popup's center at that point. work_center sits below viewport.center
+    # whenever there's chrome at the top, which visibly pushes the popup
+    # downward — use the full viewport center for a true visual center.
+    _vp_center = viewport.get_center()
+    _vp_size = viewport.size
+
+    if _just_opened:
+        # open at a generous default — tall enough that expanding row 2's
+        # collapsing headers doesn't immediately produce a scrollbar, and
+        # consistent across opens (no snap-to-fit, no cached small size).
+        _open_h = _vp_size.y * 0.85
+        _open_w = min(_content_w_static, _vp_size.x * 0.98)
+        imgui.set_next_window_size(
+            imgui.ImVec2(_open_w, _open_h),
+            imgui.Cond_.always,
+        )
+        imgui.set_next_window_pos(
+            _vp_center, imgui.Cond_.always, pivot=imgui.ImVec2(0.5, 0.5)
+        )
+
+    imgui.set_next_window_size_constraints(
+        imgui.ImVec2(min(_content_w_static, _vp_size.x * 0.98), 200.0),
+        imgui.ImVec2(_vp_size.x * 0.98, _vp_size.y * 0.98),
+    )
+
+    _popup_flags = imgui.WindowFlags_.no_saved_settings
+
+    opened, visible = imgui.begin_popup_modal(
+        "Pipeline Settings##pipeline_settings_popup",
+        p_open=True,
+        flags=_popup_flags,
+    )
+    if opened:
         try:
-            imgui.table_setup_column("checkbox", imgui.TableColumnFlags_.width_fixed, 24)
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, 100)
-            imgui.table_setup_column("button", imgui.TableColumnFlags_.width_stretch)
+            if not visible:
+                _popup_states["pipeline_settings"] = False
+                imgui.close_current_popup()
+            else:
+                # Render rows directly into the popup (no fixed-height
+                # scroll child). This lets the separator + button row
+                # sit immediately below the row 2 boxes; any extra
+                # vertical space the user opens up by resizing the
+                # popup falls below the buttons instead of between
+                # the boxes and the separator.
+                avail = imgui.get_content_region_avail()
 
-            # --- Main settings row (no checkbox) ---
-            imgui.table_next_row()
-            imgui.table_next_column()  # empty checkbox column
-            imgui.table_next_column()
-            imgui.text("Main")
-            imgui.table_next_column()
-            if imgui.button("Settings##main"):
-                _popup_states["main_settings"] = True
-                imgui.open_popup("Main##main_settings")
-            set_tooltip("Main Suite2p parameters (Tau, denoise, dF/F, etc.)")
-
-            # --- Data Options row (no checkbox) - shows available data-specific widgets ---
-            imgui.table_next_row()
-            imgui.table_next_column()  # empty checkbox column
-            imgui.table_next_column()
-            imgui.text("Data Options")
-            imgui.table_next_column()
-            if imgui.button("Settings##data_opts"):
-                _popup_states["data_options"] = True
-                imgui.open_popup("Data Options##data_options")
-            set_tooltip("Data-specific options (scan-phase correction, frame averaging, etc.)")
-
-            # spacer row — visually separates the global configuration
-            # (Main / Data Options) from the per-pipeline-step rows below.
-            imgui.table_next_row()
-            imgui.table_next_column()
-            imgui.dummy(imgui.ImVec2(0, 8))
-            imgui.table_next_column()
-            imgui.table_next_column()
-
-            # --- Registration row (with checkbox) ---
-            # do_registration is int 0/1/2; the table-level control is a
-            # simple on/off toggle that flips between 0 (skip) and 1 (run).
-            # Force re-run (=2) is only reachable through the popup radios.
-            imgui.table_next_row()
-            imgui.table_next_column()
-            _reg_on = self.s2p.do_registration != 0
-            _reg_changed, _reg_on = imgui.checkbox("##reg_cb", _reg_on)
-            if _reg_changed:
-                self.s2p.do_registration = 1 if _reg_on else 0
-            set_tooltip("Enable/disable motion registration (open popup for Skip/Run/Force)")
-            imgui.table_next_column()
-            imgui.text("Registration")
-            imgui.table_next_column()
-            if imgui.button("Settings##reg"):
-                _popup_states["reg_settings"] = True
-                imgui.open_popup("Registration##reg_settings")
-            set_tooltip("Configure motion correction and registration parameters")
-
-            # --- ROI Detection row (with checkbox) ---
-            # Mirrors the Registration row: this top-level toggle flips
-            # between 0 (skip) and 1 (run). Force re-run (=2) is only
-            # reachable through the popup radios.
-            imgui.table_next_row()
-            imgui.table_next_column()
-            _det_on = self.s2p.do_detection != 0
-            _det_changed, _det_on = imgui.checkbox("##roi_cb", _det_on)
-            if _det_changed:
-                self.s2p.do_detection = 1 if _det_on else 0
-            set_tooltip("Enable/disable ROI detection (open popup for Skip/Run/Force)")
-            imgui.table_next_column()
-            imgui.text("ROI Detection")
-            imgui.table_next_column()
-            if imgui.button("Settings##roi"):
-                _popup_states["roi_settings"] = True
-                imgui.open_popup("ROI Detection##roi_settings")
-            set_tooltip("Configure cell detection parameters")
-
-            # --- Signal Extraction row (with checkbox) ---
-            imgui.table_next_row()
-            imgui.table_next_column()
-            _, self.s2p.neuropil_extract = imgui.checkbox("##extract_cb", self.s2p.neuropil_extract)
-            set_tooltip("Enable/disable signal extraction")
-            imgui.table_next_column()
-            imgui.text("Signal Extraction")
-            imgui.table_next_column()
-            if imgui.button("Settings##extract"):
-                _popup_states["extract_settings"] = True
-                imgui.open_popup("Signal Extraction##extract_settings")
-            set_tooltip("Configure signal extraction parameters")
-
-            # --- Deconv / Classify row (with checkbox for spike deconv) ---
-            # Classification always runs regardless of this checkbox;
-            # classifier choice and accept_all_cells live inside the popup.
-            imgui.table_next_row()
-            imgui.table_next_column()
-            _, self.s2p.do_deconvolution = imgui.checkbox(
-                "##spike_cb", self.s2p.do_deconvolution
-            )
-            set_tooltip(
-                "Enable/disable spike deconvolution.\n"
-                "Note: classification always runs at the end of the pipeline — "
-                "this checkbox does NOT turn classification off. It only "
-                "controls whether OASIS spike inference produces spks.npy."
-            )
-            imgui.table_next_column()
-            imgui.text("Deconv/Classify")
-            imgui.table_next_column()
-            if imgui.button("Settings##spike"):
-                _popup_states["spike_settings"] = True
-                imgui.open_popup("Deconv/Classify##spike_settings")
-            set_tooltip("Spike deconvolution + classifier / accept-all-cells controls")
-
-            # --- Draw all popups INSIDE the table/if-block ---
-            # imgui's open_popup → begin_popup_modal chain only fires when
-            # both live under the same parent scope. Moving the popup
-            # begins outside `if imgui.begin_table(...)` makes the open_popup
-            # calls (which happen inside the if) unreachable from the popup
-            # begins (which happen outside), and the modals silently never
-            # appear. Keep them in-scope; imgui handles popup windows as
-            # their own layer regardless of the surrounding table.
-
-            # Main settings popup
-            imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "Main##main_settings",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["main_settings"] = False
-                        imgui.close_current_popup()
+                col_idx = 0
+                for row_i, row in enumerate(rows):
+                    is_row2 = (row_i == n_rows - 1)
+                    cols_in_row = len(row)
+                    nat_widths = col_naturals_per_row[row_i]
+                    nat_sum = sum(nat_widths)
+                    avail_for_cols = (
+                        avail.x - spacing_x * (cols_in_row - 1)
+                    )
+                    # stretch each column proportionally if there's slack;
+                    # never below natural (which is what fits content).
+                    if avail_for_cols > nat_sum:
+                        scale = avail_for_cols / nat_sum
                     else:
-                        draw_main_settings()
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##main", imgui.ImVec2(80, 0)):
-                            _popup_states["main_settings"] = False
-                            imgui.close_current_popup()
-                finally:
+                        scale = 1.0
+                    for ci, (title, draw_fn, mode_kind, mode_attr) in enumerate(row):
+                        if ci > 0:
+                            imgui.same_line()
+                        col_w = max(1.0, nat_widths[ci] * scale)
+                        child_size = imgui.ImVec2(col_w, 0)
+                        child_flags = (
+                            imgui.ChildFlags_.borders
+                            | imgui.ChildFlags_.auto_resize_y
+                        )
+                        if imgui.begin_child(
+                            f"##pipe_col_{col_idx}",
+                            child_size,
+                            child_flags,
+                        ):
+                            # row 2 columns render as collapsing headers
+                            # (collapsed by default each open). row 1
+                            # uses the original title-text path so it's
+                            # always visible.
+                            # columns whose draw_fn renders its own header
+                            # (e.g. one that splits into multiple internally-
+                            # labeled boxes) skip the popup-level title +
+                            # separator so the label doesn't appear twice.
+                            self_titled = title in _SELF_TITLED_COLUMNS
+                            if is_row2:
+                                imgui.set_next_item_open(False, imgui.Cond_.appearing)
+                                imgui.push_style_color(
+                                    imgui.Col_.text, imgui.ImVec4(1.0, 0.85, 0.4, 1.0)
+                                )
+                                expanded = imgui.collapsing_header(
+                                    f"{title}##pipe_col_hdr_{col_idx}"
+                                )
+                                imgui.pop_style_color()
+                            elif self_titled:
+                                expanded = True
+                            else:
+                                # title + inline Skip/Run[/Force] on the same line
+                                imgui.text_colored(
+                                    imgui.ImVec4(1.0, 0.85, 0.4, 1.0), title
+                                )
+                                expanded = True
+                            skip_active = False
+                            if mode_kind == "tri":
+                                cur = getattr(self.s2p, mode_attr)
+                                imgui.same_line()
+                                if imgui.radio_button(
+                                    f"Skip##{mode_attr}_title", cur == 0
+                                ):
+                                    setattr(self.s2p, mode_attr, 0)
+                                imgui.same_line()
+                                if imgui.radio_button(
+                                    f"Run##{mode_attr}_title", cur == 1
+                                ):
+                                    setattr(self.s2p, mode_attr, 1)
+                                imgui.same_line()
+                                if imgui.radio_button(
+                                    f"Force##{mode_attr}_title", cur == 2
+                                ):
+                                    setattr(self.s2p, mode_attr, 2)
+                                skip_active = (
+                                    getattr(self.s2p, mode_attr) == 0
+                                )
+                            elif mode_kind == "bool":
+                                cur = bool(getattr(self.s2p, mode_attr))
+                                imgui.same_line()
+                                if imgui.radio_button(
+                                    f"Skip##{mode_attr}_title", not cur
+                                ):
+                                    setattr(self.s2p, mode_attr, False)
+                                imgui.same_line()
+                                if imgui.radio_button(
+                                    f"Run##{mode_attr}_title", cur
+                                ):
+                                    setattr(self.s2p, mode_attr, True)
+                                skip_active = not bool(
+                                    getattr(self.s2p, mode_attr)
+                                )
+
+                            if expanded:
+                                if not is_row2 and not self_titled:
+                                    imgui.separator()
+                                imgui.spacing()
+                                imgui.begin_disabled(skip_active)
+                                # right-align (?) markers across the whole body
+                                # so all tooltips line up at the column's right
+                                # edge regardless of label length.
+                                with tooltip_marks_right():
+                                    try:
+                                        draw_fn()
+                                    except Exception as e:
+                                        imgui.text_colored(
+                                            imgui.ImVec4(1.0, 0.3, 0.3, 1.0),
+                                            f"Error: {e}",
+                                        )
+                                imgui.end_disabled()
+                        imgui.end_child()
+                        col_idx += 1
+
+                imgui.spacing()
+                imgui.separator()
+                # Bottom button row: Run Suite2p (green, left) | Defaults
+                # (suite2p-yellow, middle) | Close (red, right). Run and
+                # Defaults share one width — sized to the wider of the two
+                # labels so neither button text overflows; Close stays
+                # compact and right-aligned regardless of popup width.
+                _reset_label = "Defaults"
+                _frame_pad_x = imgui.get_style().frame_padding.x
+                _btn_w = imgui.calc_text_size("Run Suite2p").x + 2 * _frame_pad_x
+                _close_w = 60
+                _pad_x = imgui.get_style().window_padding.x
+
+                # Run Suite2p (green) — kicks off the same run_process used
+                # by the column-level button, then dismisses the popup.
+                # Disabled when no output path is set, matching the
+                # column button.
+                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.13, 0.55, 0.13, 1.0))
+                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.18, 0.65, 0.18, 1.0))
+                imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.1, 0.45, 0.1, 1.0))
+                if not has_save_path:
+                    imgui.begin_disabled()
+                _run_clicked = imgui.button("Run Suite2p##pipeline_settings_run", imgui.ImVec2(_btn_w, 0))
+                if not has_save_path:
+                    imgui.end_disabled()
+                imgui.pop_style_color(3)
+                if not has_save_path and imgui.is_item_hovered(
+                    imgui.HoveredFlags_.allow_when_disabled
+                ):
+                    imgui.set_tooltip(
+                        "Set output path via Browse or by typing in the path field"
+                    )
+                if _run_clicked and has_save_path:
+                    run_process(self)
+                    _popup_states["pipeline_settings"] = False
+                    imgui.close_current_popup()
+
+                imgui.same_line()
+
+                # Defaults — suite2p-yellow. Resets BOTH upstream suite2p
+                # fields (Suite2pSettings + Suite2pDB; values pulled live
+                # from suite2p.parameters.SETTINGS via the schema helper)
+                # AND mbo-only fields on MboSuite2pExtras (defaults from
+                # the dataclass spec). Upstream bumps a default → the
+                # button picks it up automatically.
+                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.55, 0.45, 0.15, 1.0))
+                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.70, 0.60, 0.22, 1.0))
+                imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.45, 0.38, 0.12, 1.0))
+                if imgui.button(_reset_label, imgui.ImVec2(_btn_w, 0)):
+                    from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
+                        all_mapped_fields as _all_fields,
+                        get_default as _get_default,
+                    )
+                    for _f in _all_fields():
+                        # field may live on Suite2pSettings OR Suite2pDB
+                        # (e.g. keep_movie_raw is on the db).
+                        if hasattr(self.s2p, _f):
+                            _target = self.s2p
+                        elif hasattr(self.s2p_db, _f):
+                            _target = self.s2p_db
+                        else:
+                            continue
+                        _new = _get_default(_f)
+                        _cur = getattr(_target, _f)
+                        # coerce upstream default to the current field's
+                        # type so widgets (input_int/input_float) don't get
+                        # an unexpected type at the next frame.
+                        if _new is not None and _cur is not None:
+                            _ct = type(_cur)
+                            try:
+                                if _ct is bool and not isinstance(_new, bool):
+                                    _new = bool(_new)
+                                elif _ct is int and isinstance(_new, bool):
+                                    # bool → int (e.g. do_detection: upstream
+                                    # is bool True, mbo stores int 0/1/2)
+                                    _new = int(_new)
+                                elif _ct is int and isinstance(_new, float):
+                                    _new = int(_new)
+                                elif _ct is float and isinstance(_new, int) and not isinstance(_new, bool):
+                                    _new = float(_new)
+                            except (TypeError, ValueError, OverflowError):
+                                continue
+                        setattr(_target, _f, _new)
+                    # mbo-only fields — reset every MboSuite2pExtras field
+                    # to its dataclass default. fields with no default (e.g.
+                    # those defined via field(default_factory=...)) get a
+                    # MISSING sentinel; skip those rather than resetting to
+                    # an arbitrary value.
+                    import dataclasses as _dc
+                    for _ef in _dc.fields(self.s2p_extras):
+                        if _ef.default is _dc.MISSING:
+                            continue
+                        setattr(self.s2p_extras, _ef.name, _ef.default)
+                imgui.pop_style_color(3)
+                set_tooltip(
+                    "Reset every parameter in this popup to its default. "
+                    "Suite2p fields pull from suite2p.parameters.SETTINGS; "
+                    "LBM-Suite2p-Python fields reset to their dataclass "
+                    "defaults. Both groups are tinted orange when modified.",
+                    show_mark=False,
+                )
+
+                # Legend — small button next to Defaults that opens an
+                # explanatory popup describing the color / box conventions
+                # used in the parameter columns. samples the same constants
+                # and draw_boxed_label helper so the legend tracks palette
+                # tweaks automatically.
+                imgui.same_line()
+                if imgui.button("Legend##pipe_legend", imgui.ImVec2(_btn_w, 0)):
+                    imgui.open_popup("Legend##pipe_legend_popup")
+                if imgui.begin_popup("Legend##pipe_legend_popup"):
+                    imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p parameter")
+                    imgui.text_colored(
+                        _MBO_ONLY_COLOR, "LBM-Suite2p-Python parameter"
+                    )
+                    imgui.text_colored(_MODIFIED_COLOR, "Modified from default")
+                    draw_boxed_label("Important parameter")
                     imgui.end_popup()
 
-            # Registration popup
-            imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "Registration##reg_settings",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["reg_settings"] = False
-                        imgui.close_current_popup()
-                    else:
-                        draw_registration_settings()
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##reg", imgui.ImVec2(80, 0)):
-                            _popup_states["reg_settings"] = False
-                            imgui.close_current_popup()
-                finally:
-                    imgui.end_popup()
+                # Close (red) — right-aligned. `set_cursor_pos_x` snaps
+                # to (window_right_edge - button_w - window_padding) so
+                # the button hugs the right side regardless of popup width.
+                imgui.same_line()
+                imgui.set_cursor_pos_x(
+                    imgui.get_window_width() - _close_w - _pad_x
+                )
+                imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.55, 0.13, 0.13, 1.0))
+                imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.65, 0.18, 0.18, 1.0))
+                imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.45, 0.10, 0.10, 1.0))
+                if imgui.button("Close##pipeline_settings", imgui.ImVec2(_close_w, 0)):
+                    _popup_states["pipeline_settings"] = False
+                    imgui.close_current_popup()
+                imgui.pop_style_color(3)
 
-            # ROI Detection popup
-            imgui.set_next_window_size(imgui.ImVec2(450, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "ROI Detection##roi_settings",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["roi_settings"] = False
-                        imgui.close_current_popup()
-                    else:
-                        draw_roi_detection_settings()
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##roi", imgui.ImVec2(80, 0)):
-                            _popup_states["roi_settings"] = False
-                            imgui.close_current_popup()
-                finally:
-                    imgui.end_popup()
-
-            # Signal Extraction popup
-            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "Signal Extraction##extract_settings",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["extract_settings"] = False
-                        imgui.close_current_popup()
-                    else:
-                        draw_signal_extraction_settings()
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##extract", imgui.ImVec2(80, 0)):
-                            _popup_states["extract_settings"] = False
-                            imgui.close_current_popup()
-                finally:
-                    imgui.end_popup()
-
-            # Deconv / Classify popup (combined spike deconv + classification)
-            imgui.set_next_window_size(imgui.ImVec2(400, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "Deconv/Classify##spike_settings",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["spike_settings"] = False
-                        imgui.close_current_popup()
-                    else:
-                        draw_deconv_classify_settings()
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##spike", imgui.ImVec2(80, 0)):
-                            _popup_states["spike_settings"] = False
-                            imgui.close_current_popup()
-                finally:
-                    imgui.end_popup()
-
-            # Data Options popup - shows data settings that affect Suite2p processing
-            imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
-            opened, visible = imgui.begin_popup_modal(
-                "Data Options##data_options",
-                p_open=True,
-                flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
-            )
-            if opened:
-                try:
-                    if not visible:
-                        _popup_states["data_options"] = False
-                        imgui.close_current_popup()
-                    else:
-                        _draw_data_options_content(self)
-                        imgui.spacing()
-                        imgui.separator()
-                        if imgui.button("Close##data_opts", imgui.ImVec2(80, 0)):
-                            _popup_states["data_options"] = False
-                            imgui.close_current_popup()
-                finally:
-                    imgui.end_popup()
+                if _just_opened:
+                    self._pipe_settings_just_opened = False
         finally:
-            imgui.end_table()
+            imgui.end_popup()
+
+    # === Data Options popup (kept separate from pipeline steps) ===
+    imgui.set_next_window_size(imgui.ImVec2(350, 0), imgui.Cond_.first_use_ever)
+    opened, visible = imgui.begin_popup_modal(
+        "Data Options##data_options",
+        p_open=True,
+        flags=imgui.WindowFlags_.no_saved_settings | imgui.WindowFlags_.always_auto_resize,
+    )
+    if opened:
+        try:
+            if not visible:
+                _popup_states["data_options"] = False
+                imgui.close_current_popup()
+            else:
+                _draw_data_options_content(self)
+                imgui.spacing()
+                imgui.separator()
+                if imgui.button("Close##data_opts", imgui.ImVec2(80, 0)):
+                    _popup_states["data_options"] = False
+                    imgui.close_current_popup()
+        finally:
+            imgui.end_popup()
 
 
 def _build_channel_dirname(self, channel: int) -> str:
@@ -2058,12 +3847,18 @@ def run_process(self):
 
     self.logger.debug(f"suite2p settings: {self.s2p}")
     if not _check_lsp_available():
-        self.logger.warning(
-            "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
-            "`uv pip install lbm_suite2p_python`",
-        )
+        # Only emit the warning once until the user does something to retry —
+        # mashing Run on a missing install otherwise spams the log on every
+        # click. The flag is cleared when the install probe finally succeeds.
+        if not getattr(self, "_lsp_missing_warned", False):
+            self.logger.warning(
+                "lbm_suite2p_python is not installed. Please install it to run the Suite2p pipeline."
+                "`uv pip install lbm_suite2p_python`",
+            )
+            self._lsp_missing_warned = True
         self._install_error = True
         return
+    self._lsp_missing_warned = False
 
     if not self._install_error:
         # Get selected planes (1-indexed)
@@ -2158,10 +3953,13 @@ def run_process(self):
                     # axial registration
                     "register_z": getattr(self, "_register_z", False),
                     "max_frames": getattr(self, "_axial_max_frames", 200),
-                    "max_reg_xy": getattr(self, "_axial_max_reg_xy", 150),
+                    "max_reg_xy": getattr(self, "_axial_max_reg_xy", 30),
                     "s2p_settings": {
-                        "keep_raw": self.s2p_extras.keep_raw,
-                        "keep_reg": self.s2p_extras.keep_reg,
+                        # keep_raw / keep_reg are derived from the upstream
+                        # fields (db.keep_movie_raw / io.delete_bin) rather
+                        # than stored as duplicates on MboSuite2pExtras.
+                        "keep_raw": self.s2p_db.keep_movie_raw,
+                        "keep_reg": (not self.s2p.delete_bin),
                         # force_reg / force_detect are derived from the
                         # Skip/Run/Force radios — Force == 2.
                         "force_reg": (self.s2p.do_registration == 2),
@@ -2170,6 +3968,32 @@ def run_process(self):
                         "dff_window_size": self.s2p_extras.dff_window_size,
                         "dff_percentile": self.s2p_extras.dff_percentile,
                         "dff_smooth_window": self.s2p_extras.dff_smooth_window,
+                        "save_json": self.s2p_extras.save_json,
+                        "correct_neuropil": self.s2p_extras.correct_neuropil,
+                        "cell_filters": build_cell_filters(
+                            self.s2p_extras.min_diameter_um_enabled,
+                            self.s2p_extras.min_diameter_um,
+                            self.s2p_extras.max_diameter_um_enabled,
+                            self.s2p_extras.max_diameter_um,
+                            baseline_filter_enabled=self.s2p_extras.baseline_filter_enabled,
+                            baseline_reject_negative_F0=self.s2p_extras.baseline_reject_negative_F0,
+                            baseline_min_F0_abs_enabled=self.s2p_extras.baseline_min_F0_abs_enabled,
+                            baseline_min_F0_abs=self.s2p_extras.baseline_min_F0_abs,
+                            baseline_min_F0_rel_enabled=self.s2p_extras.baseline_min_F0_rel_enabled,
+                            baseline_min_F0_rel=self.s2p_extras.baseline_min_F0_rel,
+                            correct_neuropil=self.s2p_extras.correct_neuropil,
+                        ),
+                        # unified-api dict for pipeline(). may include
+                        # "planar" and/or "volumetric" sub-keys, or be
+                        # None for off.
+                        "rastermap_kwargs": build_rastermap_kwargs(
+                            self.s2p_extras
+                        ),
+                        # rastermap Skip/Run/Force radio. Force == 2 means
+                        # delete cached model.npy in each plane dir before
+                        # the pipeline runs so lsp recomputes from scratch
+                        # (Run reuses the cached model when shape matches).
+                        "force_rastermap": (self.s2p_extras.rastermap_mode == 2),
                     },
                 }
 
@@ -2208,8 +4032,10 @@ def run_process(self):
             s2p_settings_dict = self.s2p.to_dict()
             s2p_db_dict = self.s2p_db.to_dict()
             target_timepoints = self.s2p_extras.target_timepoints
-            keep_raw = self.s2p_extras.keep_raw
-            keep_reg = self.s2p_extras.keep_reg
+            # keep_raw / keep_reg derived from upstream fields, not stored
+            # as duplicates on MboSuite2pExtras.
+            keep_raw = self.s2p_db.keep_movie_raw
+            keep_reg = (not self.s2p.delete_bin)
             # force_reg / force_detect are derived from the Skip/Run/Force
             # radios — Force == 2.
             force_reg = (self.s2p.do_registration == 2)
@@ -2218,6 +4044,31 @@ def run_process(self):
             dff_window_size = self.s2p_extras.dff_window_size
             dff_percentile = self.s2p_extras.dff_percentile
             dff_smooth_window = self.s2p_extras.dff_smooth_window
+            save_json = self.s2p_extras.save_json
+            correct_neuropil = self.s2p_extras.correct_neuropil
+            cell_filters = build_cell_filters(
+                self.s2p_extras.min_diameter_um_enabled,
+                self.s2p_extras.min_diameter_um,
+                self.s2p_extras.max_diameter_um_enabled,
+                self.s2p_extras.max_diameter_um,
+                baseline_filter_enabled=self.s2p_extras.baseline_filter_enabled,
+                baseline_reject_negative_F0=self.s2p_extras.baseline_reject_negative_F0,
+                baseline_min_F0_abs_enabled=self.s2p_extras.baseline_min_F0_abs_enabled,
+                baseline_min_F0_abs=self.s2p_extras.baseline_min_F0_abs,
+                baseline_min_F0_rel_enabled=self.s2p_extras.baseline_min_F0_rel_enabled,
+                baseline_min_F0_rel=self.s2p_extras.baseline_min_F0_rel,
+                correct_neuropil=correct_neuropil,
+            )
+            # daemon-thread path uses run_plane (planar only). pipeline
+            # also accepts the unified dict but we don't have a
+            # volumetric loop here.
+            planar_rastermap_kwargs = build_planar_rastermap_kwargs(
+                self.s2p_extras
+            )
+            # Force == 2 → drop cached model.npy in plane_dir before run_plane
+            # so lsp's plot_zplane_figures recomputes; Run reuses the cached
+            # model when shape matches.
+            force_rastermap = (self.s2p_extras.rastermap_mode == 2)
             fix_phase = getattr(self, "_s2p_fix_phase", False)
             use_fft = getattr(self, "_s2p_use_fft", False)
 
@@ -2287,6 +4138,11 @@ def run_process(self):
                             "dff_window_size": dff_window_size,
                             "dff_percentile": dff_percentile,
                             "dff_smooth_window": dff_smooth_window,
+                            "save_json": save_json,
+                            "correct_neuropil": correct_neuropil,
+                            "cell_filters": cell_filters,
+                            "planar_rastermap_kwargs": planar_rastermap_kwargs,
+                            "force_rastermap": force_rastermap,
                             "fix_phase": fix_phase,
                             "use_fft": use_fft,
                             # User-set metadata (e.g. dz from the metadata
@@ -2594,6 +4450,22 @@ def _run_plane_worker_thread(config):
         f"diameter: {settings_dict.get('diameter')}"
     )
 
+    # Rastermap Force → drop the cached model so lsp recomputes. lsp's
+    # plot_zplane_figures already deletes the rastermap PNG every run,
+    # but reuses model.npy when its isort length matches n_accepted.
+    if config.get("force_rastermap") and config.get("planar_rastermap_kwargs") is not None:
+        cached_model = plane_dir / "model.npy"
+        if cached_model.is_file():
+            try:
+                cached_model.unlink()
+                config["logger"].info(
+                    f"Force rastermap: removed cached {cached_model.name}"
+                )
+            except OSError as _e:
+                config["logger"].warning(
+                    f"Force rastermap: could not remove {cached_model}: {_e}"
+                )
+
     try:
         run_plane(
             input_path=raw_file,
@@ -2609,6 +4481,12 @@ def _run_plane_worker_thread(config):
             dff_window_size=config["dff_window_size"],
             dff_percentile=config["dff_percentile"],
             dff_smooth_window=config["dff_smooth_window"] if config["dff_smooth_window"] > 0 else None,
+            save_json=config.get("save_json", False),
+            correct_neuropil=config.get("correct_neuropil", True),
+            cell_filters=config.get("cell_filters") or None,
+            # run_plane's contract: rastermap_kwargs=None → off, anything
+            # else → on (empty dict = use lsp's built-in defaults).
+            rastermap_kwargs=config.get("planar_rastermap_kwargs"),
         )
         config["logger"].info(
             f"Suite2p processing complete for plane {current_z}, roi {arr_idx}. Results in {plane_dir}"

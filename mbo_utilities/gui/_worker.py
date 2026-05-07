@@ -25,29 +25,31 @@ MAX_STALL_MINUTES = 120
 
 
 def setup_logging(log_file: str | None = None) -> logging.Logger:
-    """Setup logging for worker process."""
-    logger = logging.getLogger("mbo.worker")
-    logger.setLevel(logging.INFO)
+    """Setup logging for worker process.
 
-    # console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
+    routes through mbo_utilities.log so the package's single non-propagating
+    'mbo' handler is the only stdout sink — prevents the duplicate-line
+    pattern caused by adding a second handler on a propagating child logger.
+    """
+    from mbo_utilities import log
 
-    # file handler if explicit log file provided
+    logger = log.get("worker")
+    fmt = logging.Formatter(
+        "%(asctime)s | %(name)-22s | %(levelname)-7s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    # apply the unified format to the package handler too
+    for h in logger.handlers + logging.getLogger("mbo").handlers:
+        h.setFormatter(fmt)
+
     if log_file:
         try:
-            # log file path is providing directly
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            fh = logging.FileHandler(log_path, mode="a") # Append to existing log
-            fh.setLevel(logging.INFO)
-            fh.setFormatter(formatter)
+            fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+            fh.setFormatter(fmt)
             logger.addHandler(fh)
         except Exception as e:
-            # print to stderr so it's captured in the redirect if setup fails
             print(f"Failed to setup file logging: {e}", file=sys.stderr)
 
     return logger
@@ -165,9 +167,12 @@ def _start_watchdog(uuid: str | None, logger: logging.Logger):
 
 def main():
     """Main entry point for worker subprocess."""
-    # force line buffering so print() output appears in logs immediately
-    sys.stdout.reconfigure(line_buffering=True)
-    sys.stderr.reconfigure(line_buffering=True)
+    # force line buffering so print() output appears in logs immediately,
+    # AND force utf-8 stdio so unicode prints from lsp (e.g. `→` U+2192
+    # in run_plane_bin) don't crash on Windows where the default file
+    # encoding for redirected stdio is cp1252.
+    sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+    sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
     # disable tqdm dynamic display for file output (no terminal = no \r updates)
     os.environ["TQDM_DISABLE"] = "1"

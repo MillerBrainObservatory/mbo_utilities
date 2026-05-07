@@ -261,3 +261,67 @@ def draw_metadata_editor_content(parent: Any):
         parent._custom_metadata[parent._custom_key.strip()] = val
         parent._custom_key = ""
         parent._custom_value = ""
+
+
+def draw_metadata_popup(parent: Any) -> None:
+    """Standalone "Set Metadata" popup.
+
+    Driven by `parent._show_metadata_popup` (set True from the File menu
+    or the Shift+M keybind). Draws every frame; opens the modal once when
+    the flag flips on, then resets the flag. The modal stays open until
+    the user closes it via the X button, the Close button, or Escape.
+    """
+    if not hasattr(parent, "_show_metadata_popup"):
+        parent._show_metadata_popup = False
+
+    if parent._show_metadata_popup:
+        imgui.open_popup("Set Metadata##MetadataPopup")
+        parent._show_metadata_popup = False
+
+    # center, sized to comfortable defaults — user can resize.
+    io = imgui.get_io()
+    screen_w, screen_h = io.display_size.x, io.display_size.y
+    win_w = min(560, screen_w * 0.7)
+    win_h = min(620, screen_h * 0.85)
+    imgui.set_next_window_pos(
+        imgui.ImVec2((screen_w - win_w) / 2, (screen_h - win_h) / 2),
+        imgui.Cond_.appearing,
+    )
+    imgui.set_next_window_size(
+        imgui.ImVec2(win_w, win_h), imgui.Cond_.first_use_ever
+    )
+    imgui.set_next_window_size_constraints(
+        imgui.ImVec2(420, 360), imgui.ImVec2(screen_w, screen_h)
+    )
+
+    opened, visible = imgui.begin_popup_modal(
+        "Set Metadata##MetadataPopup",
+        p_open=True,
+        flags=imgui.WindowFlags_.no_saved_settings,
+    )
+    if not opened:
+        return
+    try:
+        if not visible:
+            imgui.close_current_popup()
+            return
+        imgui.dummy(imgui.ImVec2(0, 4))
+        # scrollable content area so the close button stays anchored at
+        # the bottom no matter how many fields the editor renders.
+        avail = imgui.get_content_region_avail()
+        content_h = max(0.0, avail.y - 36.0)
+        if imgui.begin_child(
+            "##MetadataContent",
+            imgui.ImVec2(0, content_h),
+            imgui.ChildFlags_.borders,
+        ):
+            draw_metadata_editor_content(parent)
+        imgui.end_child()
+
+        imgui.spacing()
+        btn_w = 80
+        imgui.set_cursor_pos_x((imgui.get_window_width() - btn_w) * 0.5)
+        if imgui.button("Close", imgui.ImVec2(btn_w, 0)):
+            imgui.close_current_popup()
+    finally:
+        imgui.end_popup()

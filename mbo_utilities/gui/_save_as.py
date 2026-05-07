@@ -13,14 +13,14 @@ from typing import Any
 
 from imgui_bundle import imgui, hello_imgui, portable_file_dialogs as pfd
 
-from mbo_utilities.reader import MBO_SUPPORTED_FTYPES, imread
+from mbo_utilities.reader import MBO_AVAILABLE_FTYPES, imread
 from mbo_utilities.writer import imwrite
 from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_timepoint_selection, TimeSelection
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
 from mbo_utilities.gui._selection_ui import draw_selection_table
-from mbo_utilities.gui._metadata_editor import _check_missing_metadata, draw_metadata_editor_content
+from mbo_utilities.gui._metadata_editor import _check_missing_metadata
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 import contextlib
@@ -80,18 +80,18 @@ def _save_as_worker(path, **imwrite_kwargs):
     # These must be set on the array object for ScanImageArray phase correction
     fix_phase = imwrite_kwargs.pop("fix_phase", False)
     use_fft = imwrite_kwargs.pop("use_fft", False)
-    phase_upsample = imwrite_kwargs.pop("phase_upsample", 10)
     border = imwrite_kwargs.pop("border", 10)
+    max_offset = imwrite_kwargs.pop("max_offset", 4)
     mean_subtraction = imwrite_kwargs.pop("mean_subtraction", False)
 
     if hasattr(data, "fix_phase"):
         data.fix_phase = fix_phase
     if hasattr(data, "use_fft"):
         data.use_fft = use_fft
-    if hasattr(data, "phase_upsample"):
-        data.phase_upsample = phase_upsample
     if hasattr(data, "border"):
         data.border = border
+    if hasattr(data, "max_offset"):
+        data.max_offset = max_offset
     if hasattr(data, "mean_subtraction"):
         data.mean_subtraction = mean_subtraction
 
@@ -156,19 +156,10 @@ def draw_saveas_popup(parent: Any):
     if opened:
         parent._saveas_modal_open = True
 
-        # one-shot tab selection: consume on the frame AFTER open_popup
-        # so imgui has time to create the tab bar first
-        select_meta = getattr(parent, "_saveas_select_metadata_tab", 0)
-        if select_meta is True:
-            # first frame: mark as pending, don't apply yet
-            parent._saveas_select_metadata_tab = 2
-            select_meta = False
-        elif isinstance(select_meta, int) and select_meta > 1:
-            # second frame: apply and clear
-            parent._saveas_select_metadata_tab = False
-            select_meta = True
-        else:
-            select_meta = False
+        # NOTE: the "Metadata" tab was removed — the metadata editor is now
+        # its own standalone popup (see gui/_metadata_editor.draw_metadata_popup),
+        # opened from File menu → "Set Metadata" or the Shift+M shortcut.
+        # The legacy `_saveas_select_metadata_tab` flag is unused.
 
         if imgui.begin_tab_bar("SaveAsTabBar"):
 
@@ -203,8 +194,13 @@ def draw_saveas_popup(parent: Any):
 
                 # Extension
                 imgui.set_next_item_width(hello_imgui.em_size(25))
-                _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_SUPPORTED_FTYPES)
-                parent._ext = MBO_SUPPORTED_FTYPES[parent._ext_idx]
+                # combo bounds-check — if the persisted index points past the
+                # filtered list (e.g. user previously selected an ext whose
+                # backing pkg is no longer installed), clamp to .tiff.
+                if parent._ext_idx >= len(MBO_AVAILABLE_FTYPES):
+                    parent._ext_idx = MBO_AVAILABLE_FTYPES.index(".tiff")
+                _, parent._ext_idx = imgui.combo("Ext", parent._ext_idx, MBO_AVAILABLE_FTYPES)
+                parent._ext = MBO_AVAILABLE_FTYPES[parent._ext_idx]
 
                 # H5-specific: let the user pick the internal dataset name.
                 # only meaningful when saving .h5. uses the same 2-arg
@@ -239,13 +235,6 @@ def draw_saveas_popup(parent: Any):
                 # Options popup (opened by button in _draw_save_button)
                 _draw_options_popup(parent)
 
-                imgui.end_tab_item()
-
-            # === Metadata tab ===
-            meta_flags = imgui.TabItemFlags_.set_selected if select_meta else 0
-            if imgui.begin_tab_item("Metadata", flags=meta_flags)[0]:
-                imgui.dummy(imgui.ImVec2(0, 5))
-                draw_metadata_editor_content(parent)
                 imgui.end_tab_item()
 
             imgui.end_tab_bar()
@@ -306,7 +295,20 @@ def _draw_options_popup(parent: Any):
         # mark that we need to reset defaults on next frame when popup actually opens
         parent._saveas_options_needs_reset = True
 
-    imgui.set_next_window_size(imgui.ImVec2(350, 400), imgui.Cond_.first_use_ever)
+    # explicit size + centered position. imgui's default popup placement
+    # anchors at the click site, which puts the popup near the bottom of the
+    # screen when the Options button is at the bottom of the Save As dialog
+    # — and tall content (video options) then gets clipped. centering on the
+    # viewport sidesteps both problems.
+    is_video = parent._ext in (".mp4", ".avi", ".mov")
+    viewport = imgui.get_main_viewport()
+    default_h = min(720 if is_video else 420, int(viewport.size.y * 0.9))
+    center = imgui.ImVec2(
+        viewport.pos.x + viewport.size.x * 0.5,
+        viewport.pos.y + viewport.size.y * 0.5,
+    )
+    imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
+    imgui.set_next_window_size(imgui.ImVec2(420, default_h), imgui.Cond_.appearing)
     if imgui.begin_popup("Save Options"):
         # reset defaults on first frame popup is actually visible
         if getattr(parent, "_saveas_options_needs_reset", False):
@@ -505,11 +507,116 @@ def _draw_options_popup(parent: Any):
                             imgui.set_item_default_focus()
                     imgui.end_combo()
 
+        if parent._ext in (".mp4", ".avi", ".mov"):
+            _draw_video_options(parent)
+
         imgui.spacing()
         if imgui.button("Close", imgui.ImVec2(80, 0)):
             imgui.close_current_popup()
 
         imgui.end_popup()
+
+
+_VIDEO_CMAPS = ["grayscale", "viridis", "magma", "inferno", "gray", "hot", "plasma", "cividis"]
+_VIDEO_CODECS = ["libx264", "mpeg4", "rawvideo"]
+
+
+def _draw_video_options(parent: Any):
+    """Video-specific options shown when ext is .mp4/.avi/.mov."""
+    imgui.spacing()
+    imgui.separator()
+    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Video Options")
+    imgui.dummy(imgui.ImVec2(0, 5))
+
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._saveas_video_fps = imgui.drag_int(
+        "FPS", parent._saveas_video_fps, v_speed=1, v_min=1, v_max=120
+    )
+    set_tooltip("Base frame rate of the recording.")
+
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._saveas_video_speed_factor = imgui.drag_float(
+        "Speed", parent._saveas_video_speed_factor, v_speed=0.1, v_min=0.1, v_max=100.0
+    )
+    set_tooltip(
+        "Playback speed multiplier. 10x plays 10x faster (all frames included, "
+        "just faster playback). Output FPS = FPS * Speed."
+    )
+
+    imgui.spacing()
+    _, parent._saveas_video_auto = imgui.checkbox(
+        "Auto contrast", parent._saveas_video_auto
+    )
+    set_tooltip("Use percentile-based intensity scaling instead of explicit vmin/vmax.")
+
+    if parent._saveas_video_auto:
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        _, parent._saveas_video_vmin_pct = imgui.drag_float(
+            "vmin %", parent._saveas_video_vmin_pct, v_speed=0.1, v_min=0.0, v_max=10.0
+        )
+        set_tooltip("Percentile for auto vmin. Lower = darker blacks.")
+
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        _, parent._saveas_video_vmax_pct = imgui.drag_float(
+            "vmax %", parent._saveas_video_vmax_pct, v_speed=0.1, v_min=90.0, v_max=100.0
+        )
+        set_tooltip("Percentile for auto vmax. Lower = brighter highlights.")
+    else:
+        imgui.set_next_item_width(hello_imgui.em_size(10))
+        _, parent._saveas_video_vmin = imgui.drag_float(
+            "vmin", parent._saveas_video_vmin, v_speed=1.0
+        )
+        set_tooltip("Min intensity value (clipped to black).")
+
+        imgui.set_next_item_width(hello_imgui.em_size(10))
+        _, parent._saveas_video_vmax = imgui.drag_float(
+            "vmax", parent._saveas_video_vmax, v_speed=1.0
+        )
+        set_tooltip("Max intensity value (clipped to white).")
+
+    imgui.spacing()
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._saveas_video_temporal_smooth = imgui.drag_int(
+        "Temporal smooth",
+        parent._saveas_video_temporal_smooth,
+        v_speed=1, v_min=0, v_max=30,
+    )
+    set_tooltip(
+        "Rolling-mean window size in frames. 0 = off, 3-7 = subtle, 10+ = heavy."
+    )
+
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._saveas_video_spatial_smooth = imgui.drag_float(
+        "Spatial smooth",
+        parent._saveas_video_spatial_smooth,
+        v_speed=0.1, v_min=0.0, v_max=5.0,
+    )
+    set_tooltip("Gaussian blur sigma in pixels. 0 = off.")
+
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._saveas_video_gamma = imgui.drag_float(
+        "Gamma", parent._saveas_video_gamma, v_speed=0.05, v_min=0.3, v_max=3.0
+    )
+    set_tooltip("Gamma correction. <1 brightens midtones, >1 darkens them.")
+
+    imgui.spacing()
+    imgui.set_next_item_width(hello_imgui.em_size(12))
+    _, parent._saveas_video_cmap_idx = imgui.combo(
+        "Colormap", parent._saveas_video_cmap_idx, _VIDEO_CMAPS
+    )
+    set_tooltip("Matplotlib colormap. 'grayscale' writes single-channel video.")
+
+    imgui.set_next_item_width(hello_imgui.em_size(8))
+    _, parent._saveas_video_quality = imgui.slider_int(
+        "Quality", parent._saveas_video_quality, 1, 10
+    )
+    set_tooltip("Video quality 1-10. Higher = larger file, better fidelity. 9 is web-friendly.")
+
+    imgui.set_next_item_width(hello_imgui.em_size(12))
+    _, parent._saveas_video_codec_idx = imgui.combo(
+        "Codec", parent._saveas_video_codec_idx, _VIDEO_CODECS
+    )
+    set_tooltip("Video codec. libx264 is best for browser playback.")
 
 
 def _draw_selection_section(parent: Any):
@@ -669,10 +776,12 @@ def _draw_selection_section(parent: Any):
 
     # build filename preview
     ext = getattr(parent, "_ext", ".tiff").lstrip(".")
+    is_video = f".{ext}" in (".mp4", ".avi", ".mov")
     tags = []
 
     # timepoint tag from parsed selection
     tp_parsed = parent._saveas_tp_parsed
+    t_tag = None
     if tp_parsed:
         final_indices = tp_parsed.final_indices
         if final_indices:
@@ -694,44 +803,55 @@ def _draw_selection_section(parent: Any):
                     stop=tp_stop_1,
                     step=tp_step if tp_step != 1 else 1,
                 )
-            tags.append(t_tag)
         n_frames = tp_parsed.count
     else:
-        # fallback if no valid selection
         n_frames = 0
 
-    # channel tag - include if multi-channel
-    if num_channels > 1:
-        if c_start == c_stop:
-            c_tag = DimensionTag(TAG_REGISTRY["C"], start=c_start, stop=None, step=1)
-        else:
-            c_tag = DimensionTag(
-                TAG_REGISTRY["C"],
-                start=c_start,
-                stop=c_stop,
-                step=c_step if c_step != 1 else 1,
-            )
-        tags.append(c_tag)
-
-    # z-plane tag - always include if multi-plane
     z_start = getattr(parent, "_saveas_z_start", 1)
     z_stop = getattr(parent, "_saveas_z_stop", 1)
     z_step = getattr(parent, "_saveas_z_step", 1)
-    if num_planes > 1:
-        if z_start == z_stop:
-            z_tag = DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=None, step=1)
-        else:
-            z_tag = DimensionTag(
-                TAG_REGISTRY["Z"],
-                start=z_start,
-                stop=z_stop,
-                step=z_step if z_step != 1 else 1,
-            )
+
+    if is_video:
+        # video writes one file per (z, channel). Preview shows the first
+        # such file (z_start, c_start) with order zplane_ch_tp.
+        z_tag = DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=None, step=1)
+        c_tag = DimensionTag(TAG_REGISTRY["C"], start=c_start, stop=None, step=1)
         tags.append(z_tag)
+        tags.append(c_tag)
+        if t_tag is not None:
+            tags.append(t_tag)
+    else:
+        # other formats: T, C (multi-channel only), Z (multi-plane only)
+        if t_tag is not None:
+            tags.append(t_tag)
+        if num_channels > 1:
+            if c_start == c_stop:
+                c_tag = DimensionTag(TAG_REGISTRY["C"], start=c_start, stop=None, step=1)
+            else:
+                c_tag = DimensionTag(
+                    TAG_REGISTRY["C"],
+                    start=c_start,
+                    stop=c_stop,
+                    step=c_step if c_step != 1 else 1,
+                )
+            tags.append(c_tag)
+        if num_planes > 1:
+            if z_start == z_stop:
+                z_tag = DimensionTag(TAG_REGISTRY["Z"], start=z_start, stop=None, step=1)
+            else:
+                z_tag = DimensionTag(
+                    TAG_REGISTRY["Z"],
+                    start=z_start,
+                    stop=z_stop,
+                    step=z_step if z_step != 1 else 1,
+                )
+            tags.append(z_tag)
 
     # build filename
     suffix = getattr(parent, "_saveas_output_suffix", "")
     sanitized_suffix = _sanitize_suffix(suffix).lstrip("_") if suffix else ""
+    if is_video and not sanitized_suffix:
+        sanitized_suffix = "movie"
     if tags:
         dim_parts = "_".join(tag.to_string() for tag in tags)
         if sanitized_suffix:
@@ -764,8 +884,11 @@ def _draw_selection_section(parent: Any):
             pass  # keep defaults
 
     # estimate file size (raw data size, compression varies)
-    # for multi-channel data, n_channels_out replaces n_planes_out in size calc
-    if num_channels > 1:
+    if is_video:
+        # video: one (T, Y, X) file per (z, c). codec compresses heavily;
+        # raw uncompressed size is an upper-bound proxy.
+        raw_bytes = n_frames * Ly * Lx * dtype_size
+    elif num_channels > 1:
         raw_bytes = n_frames * n_channels_out * Ly * Lx * dtype_size
     else:
         raw_bytes = n_frames * n_planes_out * Ly * Lx * dtype_size
@@ -776,8 +899,17 @@ def _draw_selection_section(parent: Any):
     else:
         size_str = f"~{raw_bytes / 1e3:.0f} KB"
 
+    n_video_files = n_planes_out * n_channels_out if is_video else 0
+    if is_video and n_video_files > 1:
+        size_str = f"{size_str} per file (uncompressed) × {n_video_files} files"
+    elif is_video:
+        size_str = f"{size_str} (uncompressed)"
+
     # output shape string
-    if num_planes > 1:
+    if is_video:
+        shape_str = f"({n_frames}, {Ly}, {Lx})"
+        dims_str = "TYX per file"
+    elif num_planes > 1:
         shape_str = f"({n_frames}, {n_planes_out}, {Ly}, {Lx})"
         dims_str = "TZYX"
     elif num_channels > 1:
@@ -941,8 +1073,8 @@ def _draw_save_button(parent: Any):
                     # scan-phase correction settings (separate from display)
                     "fix_phase": parent._saveas_fix_phase,
                     "use_fft": parent._saveas_use_fft,
-                    "phase_upsample": parent.phase_upsample,
                     "border": parent.border,
+                    "max_offset": parent.max_offset,
                     "register_z": parent._register_z,
                     "max_frames": parent._axial_max_frames,
                     "max_reg_xy": parent._axial_max_reg_xy,
@@ -968,6 +1100,26 @@ def _draw_save_button(parent: Any):
                 if parent._ext == ".h5":
                     save_kwargs["dataset_name"] = parent._h5_dataset_name
 
+                # Video options (.mp4/.avi/.mov)
+                if parent._ext in (".mp4", ".avi", ".mov"):
+                    cmap_name = _VIDEO_CMAPS[parent._saveas_video_cmap_idx]
+                    save_kwargs["fps"] = parent._saveas_video_fps
+                    save_kwargs["speed_factor"] = parent._saveas_video_speed_factor
+                    if parent._saveas_video_auto:
+                        save_kwargs["vmin"] = None
+                        save_kwargs["vmax"] = None
+                    else:
+                        save_kwargs["vmin"] = parent._saveas_video_vmin
+                        save_kwargs["vmax"] = parent._saveas_video_vmax
+                    save_kwargs["vmin_percentile"] = parent._saveas_video_vmin_pct
+                    save_kwargs["vmax_percentile"] = parent._saveas_video_vmax_pct
+                    save_kwargs["temporal_smooth"] = parent._saveas_video_temporal_smooth
+                    save_kwargs["spatial_smooth"] = parent._saveas_video_spatial_smooth
+                    save_kwargs["gamma"] = parent._saveas_video_gamma
+                    save_kwargs["cmap"] = None if cmap_name == "grayscale" else cmap_name
+                    save_kwargs["quality"] = parent._saveas_video_quality
+                    save_kwargs["codec"] = _VIDEO_CODECS[parent._saveas_video_codec_idx]
+
                 n_frames = len(frames) if frames else max_timepoints
                 # build frames message from parsed selection
                 if tp_parsed and tp_parsed.exclude_str:
@@ -990,6 +1142,25 @@ def _draw_save_button(parent: Any):
                     src = Path(parent.fpath) if parent.fpath else None
                     input_path = str(src) if src else ""
                     fname = (src.name or "data") if src else "data"
+                    is_video = parent._ext in (".mp4", ".avi", ".mov")
+                    video_kwargs = {}
+                    if is_video:
+                        cmap_name = _VIDEO_CMAPS[parent._saveas_video_cmap_idx]
+                        video_kwargs = {
+                            "fps": parent._saveas_video_fps,
+                            "speed_factor": parent._saveas_video_speed_factor,
+                            "vmin": None if parent._saveas_video_auto else parent._saveas_video_vmin,
+                            "vmax": None if parent._saveas_video_auto else parent._saveas_video_vmax,
+                            "vmin_percentile": parent._saveas_video_vmin_pct,
+                            "vmax_percentile": parent._saveas_video_vmax_pct,
+                            "temporal_smooth": parent._saveas_video_temporal_smooth,
+                            "spatial_smooth": parent._saveas_video_spatial_smooth,
+                            "gamma": parent._saveas_video_gamma,
+                            "cmap": None if cmap_name == "grayscale" else cmap_name,
+                            "quality": parent._saveas_video_quality,
+                            "codec": _VIDEO_CODECS[parent._saveas_video_codec_idx],
+                        }
+
                     worker_args = {
                         "input_path": input_path,
                         "output_path": str(parent._saveas_outdir),
@@ -1013,6 +1184,7 @@ def _draw_save_button(parent: Any):
                             "pyramid_method": parent._zarr_pyramid_method if parent._ext == ".zarr" and parent._zarr_pyramid else "mean",
                             # h5: dataset name inside the .h5 file (default "mov")
                             **({"dataset_name": parent._h5_dataset_name} if parent._ext == ".h5" else {}),
+                            **video_kwargs,
                         }
                     }
                     pid = pm.spawn(

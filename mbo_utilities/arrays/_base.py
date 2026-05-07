@@ -415,7 +415,7 @@ def _imwrite_base(
         from mbo_utilities import log
         _logger = log.get("writers")
         _n_shifts = len(md.get("plane_shifts", [])) if "plane_shifts" in md else 0
-        _logger.info(f"_imwrite_base: apply_shift={md.get('apply_shift')}, plane_shifts={_n_shifts} planes")
+        _logger.info(f"_imwrite_base: plane_shifts={_n_shifts} planes")
 
     if "metadata_overrides" in kwargs:
         overrides = kwargs.pop("metadata_overrides", None)
@@ -463,8 +463,13 @@ def _imwrite_base(
     if ext_clean == "zarr":
         output_suffix = kwargs.pop("output_suffix", None)
         sharded = kwargs.pop("sharded", True)
-        compression_level = kwargs.pop("compression_level", 1)
-        compressor = kwargs.pop("compressor", "gzip")
+        # default to no compression — scrubbing decompresses one chunk
+        # per frame, so gzip-1 added ~5 ms/frame of CPU work to
+        # interactive viewing for ~60% storage savings. for imaging data
+        # the trade is the wrong way; users who want compression can pass
+        # `compressor="gzip"|"blosc-lz4"|"zstd"` and `compression_level`.
+        compression_level = kwargs.pop("compression_level", 0)
+        compressor = kwargs.pop("compressor", "none")
         shuffle = kwargs.pop("shuffle", None)
         result = _write_volumetric_zarr(
             arr,
@@ -514,6 +519,37 @@ def _imwrite_base(
             compression_level=h5_compression_level,
         )
         return result
+
+    # video: one file per (z, channel) via to_video.
+    if ext_clean in ("mp4", "avi", "mov"):
+        from mbo_utilities._writers import _write_volumetric_video
+
+        output_suffix = kwargs.pop("output_suffix", None)
+        return _write_volumetric_video(
+            arr,
+            outpath,
+            metadata=md,
+            planes=planes_list,
+            frames=frames_list,
+            channels=channels_list,
+            ext=ext_clean,
+            overwrite=overwrite,
+            output_suffix=output_suffix,
+            progress_callback=progress_callback,
+            show_progress=show_progress,
+            fps=int(kwargs.pop("fps", 30)),
+            speed_factor=float(kwargs.pop("speed_factor", 1.0)),
+            vmin=kwargs.pop("vmin", None),
+            vmax=kwargs.pop("vmax", None),
+            vmin_percentile=float(kwargs.pop("vmin_percentile", 1.0)),
+            vmax_percentile=float(kwargs.pop("vmax_percentile", 99.5)),
+            temporal_smooth=int(kwargs.pop("temporal_smooth", 0)),
+            spatial_smooth=float(kwargs.pop("spatial_smooth", 0.0)),
+            gamma=float(kwargs.pop("gamma", 1.0)),
+            cmap=kwargs.pop("cmap", None),
+            quality=int(kwargs.pop("quality", 9)),
+            codec=str(kwargs.pop("codec", "libx264")),
+        )
 
     # other formats: use per-plane streaming writer (bin, npy)
     # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
@@ -654,6 +690,7 @@ def _imwrite_base(
                 dshape=(nframes, Ly, Lx),
                 plane_index=plane_idx,
                 channel_index=c_idx,
+                frames=frames_list,
                 **kwargs,
             )
 

@@ -8,18 +8,93 @@ This module contains:
 - Value formatting utilities
 """
 
+from contextlib import contextmanager
+
 from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 
 __all__ = [
     "begin_popup_size",
     "checkbox_with_tooltip",
+    "draw_boxed_label",
     "draw_checkbox_grid",
     "fmt_multivalue",
     "fmt_value",
     "set_tooltip",
     "settings_row_with_popup",
+    "style_imgui_opaque",
     "style_seaborn_dark",
+    "tooltip_marks_right",
 ]
+
+
+def draw_boxed_label(
+    text: str,
+    *,
+    font=None,
+    pad_x: float = 4.0,
+    pad_y: float = 2.0,
+    rounding: float = 3.0,
+    thickness: float = 1.0,
+) -> None:
+    """Render `text` as a label surrounded by a thin rectangle.
+
+    Border and text use the current `Col_.text` color, so any pushed text
+    color (e.g. a "modified value" tint) flows through to both. Layout
+    space is claimed via `imgui.dummy`, so a following `same_line()` /
+    `set_tooltip` (?) marker positions correctly.
+
+    If `font` is provided it's pushed for the size measurement, dummy
+    sizing, and text rendering — pass a bold font here for "bold + box"
+    emphasis.
+    """
+    if font is not None:
+        imgui.push_font(font, font.legacy_size)
+    try:
+        text_size = imgui.calc_text_size(text)
+        origin = imgui.get_cursor_screen_pos()
+        box_w = text_size.x + 2 * pad_x
+        box_h = text_size.y + 2 * pad_y
+        imgui.dummy(ImVec2(box_w, box_h))
+        draw_list = imgui.get_window_draw_list()
+        col = imgui.get_color_u32(imgui.Col_.text)
+        draw_list.add_rect(
+            origin,
+            ImVec2(origin.x + box_w, origin.y + box_h),
+            col,
+            rounding,
+            0,
+            thickness,
+        )
+        draw_list.add_text(
+            ImVec2(origin.x + pad_x, origin.y + pad_y), col, text
+        )
+    finally:
+        if font is not None:
+            imgui.pop_font()
+
+_IMGUI_OPAQUE_APPLIED = False
+
+
+# stack of override modes for set_tooltip's mark alignment.
+# when populated, the top of the stack overrides the per-call `align` arg.
+# entered via the `tooltip_marks_right()` context manager — used by the
+# unified pipeline-settings popup to right-align (?) markers inside each
+# column-child without affecting set_tooltip's default behavior elsewhere.
+_TOOLTIP_ALIGN_STACK: list[str] = []
+
+
+@contextmanager
+def tooltip_marks_right():
+    """Right-align the (?) marker for any set_tooltip call inside this block.
+
+    Use sparingly — pairs only with set_tooltip calls that happen inside a
+    bounded child window (column / panel) so the right edge is meaningful.
+    """
+    _TOOLTIP_ALIGN_STACK.append("right")
+    try:
+        yield
+    finally:
+        _TOOLTIP_ALIGN_STACK.pop()
 
 
 # =============================================================================
@@ -42,6 +117,56 @@ def begin_popup_size():
     h = min(max(h, 20), 60)
 
     return hello_imgui.em_to_vec2(w, h)
+
+
+# =============================================================================
+# ImGui global styling
+# =============================================================================
+
+
+def style_imgui_opaque():
+    """Force fully opaque popups, modals, child windows, and frames.
+
+    idempotent — safe to call from any per-frame entry point. only mutates
+    the live imgui context the first time it's called.
+    """
+    global _IMGUI_OPAQUE_APPLIED
+    if _IMGUI_OPAQUE_APPLIED:
+        return
+    if imgui.get_current_context() is None:
+        return
+    _IMGUI_OPAQUE_APPLIED = True
+
+    style = imgui.get_style()
+
+    # global alpha — full opacity for everything except disabled widgets
+    style.alpha = 1.0
+    style.disabled_alpha = 0.6
+
+    # window/popup/child backgrounds — fully opaque
+    style.set_color_(imgui.Col_.window_bg.value, ImVec4(0.07, 0.08, 0.10, 1.00))
+    style.set_color_(imgui.Col_.child_bg.value, ImVec4(0.07, 0.08, 0.10, 1.00))
+    style.set_color_(imgui.Col_.popup_bg.value, ImVec4(0.07, 0.08, 0.10, 1.00))
+    style.set_color_(imgui.Col_.menu_bar_bg.value, ImVec4(0.10, 0.11, 0.13, 1.00))
+
+    # frame backgrounds (inputs, sliders, checkboxes) — opaque so they
+    # don't bleed through the popup they sit in
+    style.set_color_(imgui.Col_.frame_bg.value, ImVec4(0.13, 0.15, 0.18, 1.00))
+    style.set_color_(imgui.Col_.frame_bg_hovered.value, ImVec4(0.18, 0.20, 0.24, 1.00))
+    style.set_color_(imgui.Col_.frame_bg_active.value, ImVec4(0.22, 0.25, 0.30, 1.00))
+
+    # title bars
+    style.set_color_(imgui.Col_.title_bg.value, ImVec4(0.05, 0.06, 0.08, 1.00))
+    style.set_color_(imgui.Col_.title_bg_active.value, ImVec4(0.10, 0.12, 0.16, 1.00))
+    style.set_color_(imgui.Col_.title_bg_collapsed.value, ImVec4(0.05, 0.06, 0.08, 1.00))
+
+    # borders — solid
+    style.set_color_(imgui.Col_.border.value, ImVec4(0.30, 0.32, 0.36, 1.00))
+    style.set_color_(imgui.Col_.border_shadow.value, ImVec4(0.00, 0.00, 0.00, 0.00))
+
+    # dim overlay drawn behind a modal — strong dark to hide app contents
+    style.set_color_(imgui.Col_.modal_window_dim_bg.value, ImVec4(0.0, 0.0, 0.0, 0.85))
+    style.set_color_(imgui.Col_.nav_windowing_dim_bg.value, ImVec4(0.0, 0.0, 0.0, 0.85))
 
 
 # =============================================================================
@@ -129,11 +254,39 @@ def checkbox_with_tooltip(label: str, value: bool, tooltip: str) -> bool:
     return value
 
 
-def set_tooltip(tooltip: str, show_mark: bool = True) -> None:
-    """Set a tooltip on the previous item, optionally with a (?) marker."""
+def set_tooltip(
+    tooltip: str,
+    show_mark: bool = True,
+    align: str = "left",
+    mark_dimmed: bool = True,
+) -> None:
+    """Set a tooltip on the previous item, optionally with a (?) marker.
+
+    `align` controls (?) placement: "left" (default, immediately after the
+    previous item) or "right" (snapped to the right edge of the current
+    window/column). The active `tooltip_marks_right()` context manager, if
+    any, overrides `align`.
+
+    `mark_dimmed` controls (?) color: True (default) uses the disabled-text
+    color so the marker reads as a soft hint; False renders it in normal
+    text color when the marker should stand out.
+    """
     if show_mark:
         imgui.same_line()
-        imgui.text_disabled("(?)")
+        effective_align = (
+            _TOOLTIP_ALIGN_STACK[-1] if _TOOLTIP_ALIGN_STACK else align
+        )
+        if effective_align == "right":
+            avail = imgui.get_content_region_avail().x
+            qm = imgui.calc_text_size("(?)").x
+            if avail > qm + 4:
+                imgui.set_cursor_pos_x(
+                    imgui.get_cursor_pos_x() + avail - qm - 4
+                )
+        if mark_dimmed:
+            imgui.text_disabled("(?)")
+        else:
+            imgui.text("(?)")
     if imgui.is_item_hovered():
         imgui.begin_tooltip()
         imgui.push_text_wrap_pos(imgui.get_font_size() * 35.0)

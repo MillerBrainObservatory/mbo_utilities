@@ -68,7 +68,10 @@ class TimeSeriesViewer(BaseViewer):
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
                 try:
                     from mbo_utilities.gui.widgets.pipelines import draw_run_tab
-                    draw_run_tab(self.parent)
+                    with imgui_ctx.begin_child(
+                        "##RunContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none
+                    ):
+                        draw_run_tab(self.parent)
                 finally:
                     imgui.pop_style_var(2)
                 imgui.end_tab_item()

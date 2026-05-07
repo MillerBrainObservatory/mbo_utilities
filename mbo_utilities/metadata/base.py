@@ -471,10 +471,8 @@ _PER_FRAME_VECTORS = (
 
 _MBO_ADDITIONS = (
     "plane_shifts", "plane_shifts_params",
-    "_pad_yrange", "_pad_xrange",
-    "padded_shape", "original_shape",
     "processing_history", "_metadata_provenance",
-    "apply_shift", "roi_mode",
+    "roi_mode",
 )
 
 _SUITE2P_GEOMETRY = (

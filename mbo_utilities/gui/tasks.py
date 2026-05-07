@@ -17,7 +17,7 @@ import os
 import traceback
 from pathlib import Path
 
-from mbo_utilities import imread
+from mbo_utilities import imread, log
 from mbo_utilities.writer import imwrite
 from mbo_utilities.arrays._registration import (
     compute_axial_shifts,
@@ -25,7 +25,7 @@ from mbo_utilities.arrays._registration import (
 )
 from mbo_utilities.metadata import get_param
 
-logger = logging.getLogger("mbo.worker.tasks")
+logger = log.get("worker.tasks")
 
 
 class _ChannelView:
@@ -96,6 +96,8 @@ class _ChannelView:
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
+        if len(key) == 5:
+            return self._arr[(key[0], self._ch, key[2], key[3], key[4])]
         key = key + (slice(None),) * (4 - len(key))
         return self._arr[(key[0], self._ch, key[1], key[2], key[3])]
 
@@ -215,7 +217,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
         # axial registration knobs (optional; gui can set via task args)
         axial_max_frames = int(args.get("max_frames", 200))
         axial_chunk_frames = int(args.get("chunk_frames", 10))
-        axial_max_reg_xy = int(args.get("max_reg_xy", 150))
+        axial_max_reg_xy = int(args.get("max_reg_xy", 30))
 
         def _reg_cb(progress, msg=""):
             monitor.update(0.05 + 0.05 * progress, f"Registration: {msg}")
@@ -226,7 +228,6 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
         if validate_axial_shifts(combined_meta, num_planes):
             logger.info("using plane_shifts already present in metadata.")
             metadata["plane_shifts"] = list(combined_meta["plane_shifts"])
-            metadata["apply_shift"] = True
             monitor.update(0.1, "Z-registration ready (cached).")
         else:
             logger.info("computing axial plane shifts...")
@@ -245,19 +246,16 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
             if reg_error is None and validate_axial_shifts(combined_meta, num_planes):
                 metadata["plane_shifts"] = list(combined_meta["plane_shifts"])
                 metadata["plane_shifts_params"] = combined_meta.get("plane_shifts_params")
-                metadata["apply_shift"] = True
                 monitor.update(0.1, "Z-registration ready.")
             else:
                 if reg_error is not None:
                     logger.warning(
-                        f"Z-registration failed: {reg_error}. proceeding without axial shift."
+                        f"Z-registration failed: {reg_error}."
                     )
                 else:
                     logger.warning(
-                        "axial registration produced no valid plane_shifts. "
-                        "proceeding without axial shift."
+                        "axial registration produced no valid plane_shifts."
                     )
-                metadata["apply_shift"] = False
 
     monitor.update(0.1, f"Saving to {output_path.name}...")
 
@@ -528,37 +526,11 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     logger.info(f"Output: {output_dir}")
     logger.info(f"Planes: {planes}")
 
-    # axial registration: produce per-plane offsets and plumb them into
-    # ops so lsp's run_plane can pass them through to mbo's _write_plane
-    # as shift_vector. the shift_vector path bypasses _write_plane's
-    # data_raw.bin guard, so the suite2p binary gets written with each
-    # plane translated to its globally-aligned y/x.
-    #
-    # sources for shifts (priority order):
-    #   1. source metadata already carries plane_shifts (computed earlier)
-    #   2. compute fresh via compute_axial_shifts on the source array
-    #
-    # Branch A: if the source file was saved with axial shifts already
-    # baked into pixel data, it carries `_pad_yrange`/`_pad_xrange` in its
-    # metadata. Propagate them into ops so lsp's cellpose clip uses the
-    # valid region, and disable register_z so we don't re-shift already-
-    # aligned pixels.
+    # axial registration: compute per-plane offsets and store in
+    # ops["plane_shifts"]. shifts are not applied to the bin pixels —
+    # downstream viewers consume the metadata to align planes at render
+    # time (see AxiallyAlignedView).
     register_z = args.get("register_z", False)
-    if "_pad_yrange" in src_meta and "_pad_xrange" in src_meta:
-        ops["_pad_yrange"] = list(src_meta["_pad_yrange"])
-        ops["_pad_xrange"] = list(src_meta["_pad_xrange"])
-        if register_z:
-            logger.info(
-                "task_suite2p: source has baked-in axial shifts; "
-                "skipping register_z to avoid double-application."
-            )
-            register_z = False
-        else:
-            logger.info(
-                "task_suite2p: detected baked-in axial shifts from source "
-                f"metadata (_pad_yrange={ops['_pad_yrange']}, "
-                f"_pad_xrange={ops['_pad_xrange']})."
-            )
 
     if register_z:
         # reuse the array already loaded at the top of the task
@@ -595,7 +567,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                         metadata=combined_meta,
                         max_frames=int(args.get("max_frames", 200)),
                         chunk_frames=int(args.get("chunk_frames", 10)),
-                        max_reg_xy=int(args.get("max_reg_xy", 150)),
+                        max_reg_xy=int(args.get("max_reg_xy", 30)),
                     )
                 except Exception as e:
                     logger.warning(
@@ -604,16 +576,14 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                     )
 
             if validate_axial_shifts(combined_meta, num_planes_reg):
-                ops["apply_shift"] = True
                 ops["plane_shifts"] = list(combined_meta["plane_shifts"])
                 logger.info(
-                    f"task_suite2p: axial shifts wired into ops "
-                    f"(apply_shift=True, {num_planes_reg} planes)"
+                    f"task_suite2p: axial shifts stored in ops "
+                    f"({num_planes_reg} planes)"
                 )
             else:
                 logger.warning(
-                    "task_suite2p: no valid plane_shifts produced; "
-                    "binaries will be written without axial shift."
+                    "task_suite2p: no valid plane_shifts produced."
                 )
 
     # seed nframes into ops so lsp's generate_plane_dirname always has a
@@ -648,6 +618,24 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         "use_fft": args.get("use_fft", True),
     }
 
+    # Rastermap Force → drop cached model.npy in every plane subdir under
+    # output_dir before pipeline runs. lsp's plot_zplane_figures already
+    # deletes the rastermap PNG every run, but reuses model.npy when its
+    # isort length matches n_accepted. Force == "recompute from scratch".
+    if s2p_settings.get("force_rastermap") and s2p_settings.get("rastermap_kwargs") is not None:
+        try:
+            removed = 0
+            for cached in Path(output_dir).glob("plane*/model.npy"):
+                try:
+                    cached.unlink()
+                    removed += 1
+                except OSError as _e:
+                    logger.warning(f"force_rastermap: could not remove {cached}: {_e}")
+            if removed:
+                logger.info(f"force_rastermap: removed {removed} cached model.npy file(s)")
+        except Exception as _e:
+            logger.warning(f"force_rastermap pre-clean failed: {_e}")
+
     try:
         monitor.update(0.1, "Running Suite2p...")
 
@@ -665,6 +653,15 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             frac = base + offsets.get(step, 0)
             monitor.update(min(frac, 0.95), message)
 
+        if tp_indices:
+            logger.info(
+                f"task_suite2p: frame_indices len={len(tp_indices)}, "
+                f"first={tp_indices[0]}, last={tp_indices[-1]} "
+                f"(expected dirname tp{tp_indices[0] + 1:05d}-{tp_indices[-1] + 1:05d})"
+            )
+        else:
+            logger.info("task_suite2p: frame_indices=None (no slice — full range will be used)")
+
         pipeline(
             pipeline_input,
             save_path=str(output_dir),
@@ -680,6 +677,14 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             dff_window_size=s2p_settings.get("dff_window_size", 300),
             dff_percentile=s2p_settings.get("dff_percentile", 20),
             dff_smooth_window=s2p_settings.get("dff_smooth_window"),
+            save_json=s2p_settings.get("save_json", False),
+            correct_neuropil=s2p_settings.get("correct_neuropil", True),
+            cell_filters=s2p_settings.get("cell_filters") or None,
+            # unified rastermap api: dict keyed by mode ("planar" /
+            # "volumetric"). presence-of-key = mode on; empty sub-dict
+            # = use lsp's built-in defaults; None overall = both off.
+            # built gui-side by build_rastermap_kwargs() in settings.py.
+            rastermap_kwargs=s2p_settings.get("rastermap_kwargs"),
             writer_kwargs=writer_kwargs,
             progress_callback=_progress,
         )
