@@ -922,8 +922,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         Phase correction method ("mean", "median", "max").
     border : int or tuple, default 3
         Border pixels to exclude from phase estimation.
-    upsample : int, default 5
-        Upsampling factor for subpixel phase estimation.
     max_offset : int, default 4
         Maximum phase offset to search.
     use_fft : bool, default False
@@ -1056,7 +1054,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         fix_phase: bool = True,
         phasecorr_method: str = "mean",
         border: int | tuple[int, int, int, int] = 3,
-        upsample: int = 5,
         max_offset: int = 4,
         use_fft: bool = True,
         metadata: dict | None = None,
@@ -1117,7 +1114,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
             method=phasecorr_method,
             shift=None,  # auto-compute by default
             use_fft=use_fft,
-            upsample=upsample,
             border=border if isinstance(border, int) else 3,  # feature checks int
             max_offset=max_offset,
         )
@@ -1185,7 +1181,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 "phasecorr_method": self.phasecorr_method,
                 "offset": self.offset,
                 "border": self.border,
-                "upsample": self.upsample,
                 "max_offset": self.max_offset,
                 "nframes": self.num_frames,
                 "num_frames": self.num_frames,
@@ -1324,7 +1319,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                     corrected, offset = bidir_phasecorr(
                         chunk,
                         method=self.phasecorr_method,
-                        upsample=self.upsample,
                         max_offset=self.max_offset,
                         border=self.border,
                         use_fft=self.use_fft,
@@ -1464,8 +1458,8 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
     def _invalidate_offset_cache(self) -> None:
         """Drop every cached offset.
 
-        Called when phase-correction settings (border, max_offset, upsample,
-        method, use_fft) change — those parameters affect the result of
+        Called when phase-correction settings (border, max_offset, method,
+        use_fft) change — those parameters affect the result of
         bidir_phasecorr, so previously cached values are no longer valid.
         """
         if hasattr(self, "_offset_cache"):

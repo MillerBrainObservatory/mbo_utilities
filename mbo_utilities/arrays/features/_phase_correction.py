@@ -71,8 +71,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         fixed shift value (None for auto-compute)
     use_fft : bool
         use FFT-based subpixel correction
-    upsample : int
-        upsampling factor for subpixel phase estimation
     border : int
         border pixels to exclude from phase estimation
     max_offset : int
@@ -93,7 +91,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         method: PhaseCorrMethod | str = PhaseCorrMethod.mean,
         shift: float | None = None,
         use_fft: bool = False,
-        upsample: int = 10,
         border: int = 10,
         max_offset: int = 4,
         property_name: str = "phase_correction",
@@ -108,7 +105,6 @@ class PhaseCorrectionFeature(ArrayFeature):
 
         self._shift = shift
         self._use_fft = use_fft
-        self._upsample = upsample
         self._border = border
         self._max_offset = max_offset
 
@@ -120,7 +116,6 @@ class PhaseCorrectionFeature(ArrayFeature):
             "method": self._method.value,
             "shift": self.effective_shift,
             "use_fft": self._use_fft,
-            "upsample": self._upsample,
             "border": self._border,
             "max_offset": self._max_offset,
         }
@@ -181,16 +176,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         self._use_fft = bool(value)
 
     @property
-    def upsample(self) -> int:
-        """Upsampling factor for subpixel phase estimation."""
-        return self._upsample
-
-    @upsample.setter
-    def upsample(self, value: int) -> None:
-        """Set upsampling factor."""
-        self._upsample = max(1, int(value))
-
-    @property
     def border(self) -> int:
         """Border pixels to exclude from phase estimation."""
         return self._border
@@ -243,8 +228,6 @@ class PhaseCorrectionFeature(ArrayFeature):
                 self._shift = value["shift"]
             if "use_fft" in value:
                 self._use_fft = bool(value["use_fft"])
-            if "upsample" in value:
-                self._upsample = max(1, int(value["upsample"]))
             if "border" in value:
                 self._border = max(0, int(value["border"]))
             if "max_offset" in value:
@@ -329,7 +312,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         self._method = PhaseCorrMethod.mean
         self._shift = None
         self._use_fft = False
-        self._upsample = 10
         self._border = 10
         self._max_offset = 4
 
@@ -371,8 +353,6 @@ class PhaseCorrectionMixin:
             Current correction method name
         border : int
             Border pixels to exclude
-        upsample : int
-            Upsampling factor
         max_offset : int
             Maximum phase offset to search
         offset : float | None
@@ -454,22 +434,6 @@ class PhaseCorrectionMixin:
         pc = getattr(self, "phase_correction", None)
         if pc is not None:
             pc.border = value
-            self._invalidate_phase_offset_cache()
-
-    @property
-    def upsample(self) -> int:
-        """Upsampling factor for subpixel phase estimation."""
-        pc = getattr(self, "phase_correction", None)
-        if pc is not None:
-            return pc.upsample
-        return 1
-
-    @upsample.setter
-    def upsample(self, value: int):
-        """Set upsampling factor."""
-        pc = getattr(self, "phase_correction", None)
-        if pc is not None:
-            pc.upsample = value
             self._invalidate_phase_offset_cache()
 
     @property

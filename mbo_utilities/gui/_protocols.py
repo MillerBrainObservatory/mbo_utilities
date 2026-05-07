@@ -49,15 +49,6 @@ class SupportsRasterScan(Protocol):
     def max_offset(self, value: int) -> None:
         ...
 
-    @property
-    def phase_upsample(self) -> int:
-        """Upsampling factor for subpixel phase correlation."""
-        ...
-
-    @phase_upsample.setter
-    def phase_upsample(self, value: int) -> None:
-        ...
-
 
 @runtime_checkable
 class SupportsMetadata(Protocol):

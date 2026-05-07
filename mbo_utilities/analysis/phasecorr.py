@@ -17,11 +17,10 @@ ALL_PHASECORR_METHODS = set(TWO_DIM_PHASECORR_METHODS) | set(THREE_DIM_PHASECORR
 logger = log.get("phasecorr")
 
 
-def _phase_corr_2d(frame, upsample=4, border=0, max_offset=4, use_fft=True):
+def _phase_corr_2d(frame, border=0, max_offset=4, use_fft=True):
     """Estimate horizontal shift between odd and even rows via 1D rFFT phase
     correlation along x. Parabolic peak refinement gives ~0.05 px precision.
-    `use_fft=False` returns the integer-rounded result. `upsample` is ignored
-    (kept for API stability)."""
+    `use_fft=False` returns the integer-rounded result."""
     if frame.ndim != 2:
         raise ValueError(f"Expected 2D frame, got shape {frame.shape}")
 
@@ -81,7 +80,7 @@ def _apply_offset(img, offset, use_fft=False):
 
 
 def bidir_phasecorr(
-    arr, *, method="mean", use_fft=False, upsample=4, max_offset=10, border=4, offset=None
+    arr, *, method="mean", use_fft=False, max_offset=10, border=4, offset=None
 ):
     """Correct bidirectional scan offset on a 2D or 3D array.
 
@@ -94,16 +93,16 @@ def bidir_phasecorr(
         return _apply_offset(arr.copy(), off, use_fft), off
 
     if arr.ndim == 2:
-        offs = _phase_corr_2d(arr, upsample, border, max_offset, use_fft)
+        offs = _phase_corr_2d(arr, border, max_offset, use_fft)
     else:
         flat = arr.reshape(arr.shape[0], *arr.shape[-2:])
         if method == "frame":
             offs = np.array([
-                _phase_corr_2d(f, upsample, border, max_offset, use_fft) for f in flat
+                _phase_corr_2d(f, border, max_offset, use_fft) for f in flat
             ])
         elif method in MBO_WINDOW_METHODS:
             offs = _phase_corr_2d(
-                MBO_WINDOW_METHODS[method](flat), upsample, border, max_offset, use_fft
+                MBO_WINDOW_METHODS[method](flat), border, max_offset, use_fft
             )
         else:
             raise ValueError(f"unknown method {method}")

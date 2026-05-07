@@ -236,14 +236,14 @@ class ScanPhaseAnalyzer:
         yslice = self.roi_yslices[roi_idx]
         return frame[yslice, :]
 
-    def _compute_offset(self, frame, upsample=10, border=4, max_offset=10):
+    def _compute_offset(self, frame, border=4, max_offset=10):
         """Compute offset for a 2D frame, averaging across rois."""
         roi_offsets = []
         for roi_idx in range(self.num_rois):
             roi_frame = self._get_roi_frame(frame, roi_idx)
             try:
                 offset = _phase_corr_2d(
-                    roi_frame, upsample=upsample, border=border,
+                    roi_frame, border=border,
                     max_offset=max_offset, use_fft=True
                 )
                 roi_offsets.append(offset)
@@ -251,7 +251,7 @@ class ScanPhaseAnalyzer:
                 pass
         return np.mean(roi_offsets) if roi_offsets else np.nan
 
-    def analyze_per_frame(self, upsample=10, border=4, max_offset=10):
+    def analyze_per_frame(self, border=4, max_offset=10):
         """
         Compute offset for each frame.
 
@@ -260,14 +260,14 @@ class ScanPhaseAnalyzer:
         offsets = []
         for i in tqdm(range(self.num_frames), desc="per-frame", leave=False):
             frame = self._get_frame(i)
-            offsets.append(self._compute_offset(frame, upsample, border, max_offset))
+            offsets.append(self._compute_offset(frame, border, max_offset))
 
         self.results.offsets_fft = np.array(offsets)
         stats = self.results.compute_stats(self.results.offsets_fft)
         logger.info(f"per-frame: mean={stats['mean']:.3f}, std={stats['std']:.3f}")
         return self.results.offsets_fft
 
-    def analyze_window_sizes(self, upsample=10, border=4, max_offset=10, num_samples=5,
+    def analyze_window_sizes(self, border=4, max_offset=10, num_samples=5,
                               target_windows=None):
         """
         Analyze how offset estimate varies with temporal window size.
@@ -316,7 +316,7 @@ class ScanPhaseAnalyzer:
                 indices = range(start, min(start + ws, self.num_frames))
                 frames = [self._get_frame(i) for i in indices]
                 mean_frame = np.mean(frames, axis=0)
-                offset = self._compute_offset(mean_frame, upsample, border, max_offset)
+                offset = self._compute_offset(mean_frame, border, max_offset)
                 if not np.isnan(offset):
                     sample_offsets.append(offset)
 
@@ -331,7 +331,7 @@ class ScanPhaseAnalyzer:
         self.results.window_stds = np.array(window_stds)
         logger.info(f"window sizes: {len(sizes)} sizes tested")
 
-    def analyze_spatial_grid(self, patch_sizes=(32, 64), upsample=10, max_offset=10, num_frames=100):
+    def analyze_spatial_grid(self, patch_sizes=(32, 64), max_offset=10, num_frames=100):
         """
         Compute offset in a grid of patches across the fov.
 
@@ -378,7 +378,7 @@ class ScanPhaseAnalyzer:
 
                     try:
                         offset = _phase_corr_2d(
-                            combined, upsample=upsample, border=0,
+                            combined, border=0,
                             max_offset=max_offset, use_fft=True
                         )
                         offsets[row, col] = offset
@@ -394,7 +394,7 @@ class ScanPhaseAnalyzer:
                 stats = self.results.compute_stats(offsets[valid])
                 logger.info(f"grid {patch_size}px: {n_valid} patches, mean={stats['mean']:.3f}")
 
-    def analyze_z_planes(self, upsample=10, border=4, max_offset=10, num_frames=100):
+    def analyze_z_planes(self, border=4, max_offset=10, num_frames=100):
         """
         Compute offset for each z-plane.
 
@@ -409,7 +409,7 @@ class ScanPhaseAnalyzer:
         for plane in tqdm(range(self.num_planes), desc="z-planes", leave=False):
             frames = [self._get_frame(i, plane=plane) for i in sample_indices]
             mean_frame = np.mean(frames, axis=0)
-            offset = self._compute_offset(mean_frame, upsample, border, max_offset)
+            offset = self._compute_offset(mean_frame, border, max_offset)
             plane_offsets.append(offset)
 
         self.results.plane_offsets = np.array(plane_offsets)
@@ -421,7 +421,7 @@ class ScanPhaseAnalyzer:
 
         logger.info(f"z-planes: {self.num_planes} planes")
 
-    def analyze_parameters(self, upsample=10, border=4, max_offset=10, num_frames=50):
+    def analyze_parameters(self, border=4, max_offset=10, num_frames=50):
         """
         Analyze offset reliability vs signal intensity.
 
@@ -464,7 +464,7 @@ class ScanPhaseAnalyzer:
 
                     try:
                         offset = _phase_corr_2d(
-                            combined, upsample=upsample, border=0,
+                            combined, border=0,
                             max_offset=max_offset, use_fft=True
                         )
                         offsets.append(abs(offset))
@@ -497,7 +497,7 @@ class ScanPhaseAnalyzer:
         self.results.offset_std_by_intensity = np.array(bin_stds)
         logger.info(f"parameters: {len(offsets)} patches")
 
-    def analyze_horizontal_tiles(self, upsample=10, max_offset=10, num_frames=100, n_bins=16):
+    def analyze_horizontal_tiles(self, max_offset=10, num_frames=100, n_bins=16):
         """
         Analyze offset variation across horizontal (x) position.
 
@@ -555,7 +555,7 @@ class ScanPhaseAnalyzer:
 
                 try:
                     offset = _phase_corr_2d(
-                        combined, upsample=upsample, border=0,
+                        combined, border=0,
                         max_offset=max_offset, use_fft=True
                     )
                     patch_offsets.append(offset)
@@ -572,7 +572,7 @@ class ScanPhaseAnalyzer:
         self.results.horizontal_stds = np.array(stds)
         logger.info(f"horizontal tiles: {len(positions)} bins")
 
-    def analyze_vertical_tiles(self, upsample=10, max_offset=10, num_frames=100, n_bins=16):
+    def analyze_vertical_tiles(self, max_offset=10, num_frames=100, n_bins=16):
         """
         Analyze offset variation across vertical (y) position.
 
@@ -629,7 +629,7 @@ class ScanPhaseAnalyzer:
 
                 try:
                     offset = _phase_corr_2d(
-                        combined, upsample=upsample, border=0,
+                        combined, border=0,
                         max_offset=max_offset, use_fft=True
                     )
                     patch_offsets.append(offset)
@@ -646,7 +646,7 @@ class ScanPhaseAnalyzer:
         self.results.vertical_stds = np.array(stds)
         logger.info(f"vertical tiles: {len(positions)} bins")
 
-    def analyze_temporal_spatial(self, upsample=10, max_offset=10, n_time_bins=20, n_spatial_bins=8):
+    def analyze_temporal_spatial(self, max_offset=10, n_time_bins=20, n_spatial_bins=8):
         """
         Analyze offset variation over both time and spatial position.
 
@@ -697,7 +697,7 @@ class ScanPhaseAnalyzer:
 
                 try:
                     offset = _phase_corr_2d(
-                        combined, upsample=upsample, border=0,
+                        combined, border=0,
                         max_offset=max_offset, use_fft=True
                     )
                     heatmap[t_idx, s_idx] = offset
@@ -709,31 +709,31 @@ class ScanPhaseAnalyzer:
         self.results.spatial_bins = np.linspace(0, self.frame_width, n_spatial_bins + 1)[:-1] + self.frame_width / (2 * n_spatial_bins)
         logger.info(f"temporal-spatial: {n_time_bins}x{n_spatial_bins} grid")
 
-    def run(self, upsample=10, border=4, max_offset=10):
+    def run(self, border=4, max_offset=10):
         """Run full analysis."""
         start = time.perf_counter()
 
         steps = [
             ("per-frame", lambda: self.analyze_per_frame(
-                upsample=upsample, border=border, max_offset=max_offset)),
+                border=border, max_offset=max_offset)),
             ("window sizes", lambda: self.analyze_window_sizes(
-                upsample=upsample, border=border, max_offset=max_offset,
+                border=border, max_offset=max_offset,
                 target_windows=[1, 100, 200, 500])),
             ("spatial grid", lambda: self.analyze_spatial_grid(
-                patch_sizes=(32, 64), upsample=upsample, max_offset=max_offset)),
+                patch_sizes=(32, 64), max_offset=max_offset)),
             ("horizontal tiles", lambda: self.analyze_horizontal_tiles(
-                upsample=upsample, max_offset=max_offset)),
+                max_offset=max_offset)),
             ("vertical tiles", lambda: self.analyze_vertical_tiles(
-                upsample=upsample, max_offset=max_offset)),
+                max_offset=max_offset)),
             ("temporal-spatial", lambda: self.analyze_temporal_spatial(
-                upsample=upsample, max_offset=max_offset)),
+                max_offset=max_offset)),
             ("parameters", lambda: self.analyze_parameters(
-                upsample=upsample, border=border, max_offset=max_offset)),
+                border=border, max_offset=max_offset)),
         ]
 
         if self.num_planes > 1:
             steps.append(("z-planes", lambda: self.analyze_z_planes(
-                upsample=upsample, border=border, max_offset=max_offset)))
+                border=border, max_offset=max_offset)))
 
         for _name, func in tqdm(steps, desc="scan-phase analysis"):
             func()
