@@ -690,6 +690,7 @@ def _imwrite_base(
                 dshape=(nframes, Ly, Lx),
                 plane_index=plane_idx,
                 channel_index=c_idx,
+                frames=frames_list,
                 **kwargs,
             )
 

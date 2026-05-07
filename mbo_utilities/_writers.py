@@ -271,6 +271,7 @@ def _write_plane(
     dshape=None,
     plane_index=None,
     channel_index=None,
+    frames=None,
     **kwargs,
 ):
     if dshape is None:
@@ -283,12 +284,17 @@ def _write_plane(
             raise TypeError(f"plane_index must be an integer, got {type(plane_index)}")
         metadata["plane"] = int(plane_index) + 1
 
-    nframes_target = (
-        kwargs.get("nframes")
-        or kwargs.get("num_frames")
-        or metadata.get("nframes")
-        or metadata.get("num_frames")
-    )
+    if frames is not None:
+        frames_0 = [int(f) - 1 for f in frames]
+        nframes_target = len(frames_0)
+    else:
+        frames_0 = None
+        nframes_target = (
+            kwargs.get("nframes")
+            or kwargs.get("num_frames")
+            or metadata.get("nframes")
+            or metadata.get("num_frames")
+        )
 
     if nframes_target is None or nframes_target <= 0:
         nframes_target = data.shape[0]
@@ -336,7 +342,16 @@ def _write_plane(
 
         c_idx = channel_index if channel_index is not None else 0
         z_idx = plane_index if plane_index is not None else 0
-        chunk = data[start:end, c_idx, z_idx, :, :]
+        if frames_0 is not None:
+            sel = frames_0[start:end]
+            if sel and sel == list(range(sel[0], sel[-1] + 1)):
+                chunk = data[sel[0]:sel[-1] + 1, c_idx, z_idx, :, :]
+            else:
+                chunk = np.stack(
+                    [np.asarray(data[fi, c_idx, z_idx, :, :]) for fi in sel]
+                )
+        else:
+            chunk = data[start:end, c_idx, z_idx, :, :]
 
         if hasattr(chunk, "compute"):
             chunk = chunk.compute()

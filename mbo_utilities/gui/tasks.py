@@ -96,6 +96,8 @@ class _ChannelView:
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)
+        if len(key) == 5:
+            return self._arr[(key[0], self._ch, key[2], key[3], key[4])]
         key = key + (slice(None),) * (4 - len(key))
         return self._arr[(key[0], self._ch, key[1], key[2], key[3])]
 
@@ -650,6 +652,15 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             }
             frac = base + offsets.get(step, 0)
             monitor.update(min(frac, 0.95), message)
+
+        if tp_indices:
+            logger.info(
+                f"task_suite2p: frame_indices len={len(tp_indices)}, "
+                f"first={tp_indices[0]}, last={tp_indices[-1]} "
+                f"(expected dirname tp{tp_indices[0] + 1:05d}-{tp_indices[-1] + 1:05d})"
+            )
+        else:
+            logger.info("task_suite2p: frame_indices=None (no slice — full range will be used)")
 
         pipeline(
             pipeline_input,
