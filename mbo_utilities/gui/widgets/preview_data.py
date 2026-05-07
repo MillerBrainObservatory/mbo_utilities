@@ -43,7 +43,7 @@ from scipy.ndimage import gaussian_filter
 from imgui_bundle import imgui, hello_imgui, imgui_ctx, implot
 
 from mbo_utilities.preferences import get_mbo_dirs
-from mbo_utilities.reader import MBO_SUPPORTED_FTYPES
+from mbo_utilities.reader import MBO_AVAILABLE_FTYPES
 from mbo_utilities.arrays.features import PhaseCorrectionFeature
 from mbo_utilities.preferences import get_last_dir
 from mbo_utilities.arrays import ScanImageArray
@@ -74,6 +74,27 @@ __all__ = ["PreviewDataWidget"]
 import re as _re
 
 _PLANE_DIR_RE = _re.compile(r"^plane\d+$", _re.IGNORECASE)
+
+
+def _outdir_from_fpath(fpath) -> str | None:
+    """Default output dir from a loaded fpath: the parent folder when fpath
+    is a file, or the folder itself when fpath IS a directory. Used to
+    seed the Run-tab output field so re-runs land alongside the source
+    data unless the user explicitly browses elsewhere.
+    """
+    if fpath is None:
+        return None
+    if isinstance(fpath, (list, tuple)):
+        if not fpath:
+            return None
+        fpath = fpath[0]
+    try:
+        p = Path(str(fpath))
+    except (TypeError, ValueError):
+        return None
+    if not p.exists():
+        return None
+    return str(p if p.is_dir() else p.parent)
 
 
 def _derive_suite2p_output_dir(fpath) -> str | None:
@@ -475,7 +496,7 @@ class PreviewDataWidget(EdgeWindow):
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
         self._ext = ".tiff"
-        self._ext_idx = MBO_SUPPORTED_FTYPES.index(".tiff")
+        self._ext_idx = MBO_AVAILABLE_FTYPES.index(".tiff")
         self._overwrite = True
         self._debug = False
         self._saveas_chunk_mb = 100
@@ -508,14 +529,22 @@ class PreviewDataWidget(EdgeWindow):
         # Directories
         save_as_dir = get_last_dir("save_as")
         self._saveas_outdir = str(save_as_dir) if save_as_dir else ""
-        s2p_output_dir = get_last_dir("suite2p_output")
-        self._s2p_outdir = str(s2p_output_dir) if s2p_output_dir else ""
 
-        # Auto-detect: if the loaded data lives inside a suite2p output
-        # tree (data.bin in plane*/, ops.npy / stat.npy / etc.), or is a
-        # volumetric root containing plane*/, point _s2p_outdir at that
-        # root so a re-run lands in the same place. Wins over the cached
-        # last-used dir from prefs since the user just opened this dataset.
+        # Default suite2p output dir = the loaded path's parent (file) or
+        # the folder itself (directory). Most intuitive default — re-runs
+        # land next to the source data. Falls back to the cached last-used
+        # dir only when nothing is loaded yet.
+        _loaded_outdir = _outdir_from_fpath(self.fpath)
+        if _loaded_outdir:
+            self._s2p_outdir = _loaded_outdir
+        else:
+            s2p_output_dir = get_last_dir("suite2p_output")
+            self._s2p_outdir = str(s2p_output_dir) if s2p_output_dir else ""
+
+        # If the loaded data lives inside a suite2p output tree (data.bin
+        # in plane*/, ops.npy / stat.npy / etc.), or is a volumetric root
+        # containing plane*/, point _s2p_outdir at that root so a re-run
+        # lands in the same place. Wins over the parent-folder default.
         _derived_s2p_dir = _derive_suite2p_output_dir(self.fpath)
         if _derived_s2p_dir:
             self._s2p_outdir = _derived_s2p_dir
@@ -542,6 +571,21 @@ class PreviewDataWidget(EdgeWindow):
         # defaults to True for save operations
         self._saveas_fix_phase = True
         self._saveas_use_fft = True
+
+        # Video export options (active when ext is .mp4/.avi/.mov)
+        self._saveas_video_fps = 30
+        self._saveas_video_speed_factor = 1.0
+        self._saveas_video_auto = True
+        self._saveas_video_vmin = 0.0
+        self._saveas_video_vmax = 1000.0
+        self._saveas_video_vmin_pct = 1.0
+        self._saveas_video_vmax_pct = 99.5
+        self._saveas_video_temporal_smooth = 0
+        self._saveas_video_spatial_smooth = 0.0
+        self._saveas_video_gamma = 1.0
+        self._saveas_video_cmap_idx = 0  # 0 = grayscale (None)
+        self._saveas_video_quality = 9
+        self._saveas_video_codec_idx = 0  # 0 = libx264
 
     def _init_viewer(self):
         """Initialize the viewer based on data type."""
@@ -806,24 +850,6 @@ class PreviewDataWidget(EdgeWindow):
             return
         per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
         self._set_processor_attr("window_sizes", per_processor_sizes)
-
-    @property
-    def phase_upsample(self) -> int:
-        """Upsampling factor for subpixel phase correlation."""
-        if not self.has_raster_scan_support:
-            return 5
-        arrays = self._get_data_arrays()
-        return getattr(arrays[0], "upsample", 5) if arrays else 5
-
-    @phase_upsample.setter
-    def phase_upsample(self, value: int):
-        if not self.has_raster_scan_support:
-            return
-        self.logger.info(f"Setting phase_upsample to {value}.")
-        for arr in self._get_data_arrays():
-            if hasattr(arr, "upsample"):
-                arr.upsample = value
-        self._refresh_image_widget()
 
     # === Internal methods ===
 
