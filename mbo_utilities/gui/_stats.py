@@ -18,6 +18,27 @@ from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 from mbo_utilities.reader import imread
 
 
+# accent color for the currently-active z-plane in tables and plots.
+# matches the idle "Run" button green so the highlight is consistent with
+# the rest of the GUI's run-state palette.
+_ACTIVE_Z_COLOR = (0.13, 0.55, 0.13, 1.00)
+
+
+def _active_z(parent: Any) -> int | None:
+    """Return the 1-based z-index currently displayed by the image widget,
+    or None when the dataset is single-plane / has no z slider.
+
+    Z lives at indices[1] for the canonical TZYX 4D layout (T is at index 0).
+    """
+    iw = getattr(parent, "image_widget", None)
+    if iw is None or getattr(iw, "n_sliders", 0) < 2:
+        return None
+    try:
+        return int(iw.indices[1]) + 1
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
 def _has_time_dim(arr: Any) -> bool:
     """Check if array has a time dimension."""
     dims = getattr(arr, "dims", None)
@@ -470,15 +491,25 @@ def _draw_array_stats(
         else:
             _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx)
     else:
-        # Multi-z-plane: show table and line plot
-        _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx)
+        # Multi-z-plane: show table and line plot. The currently displayed
+        # z-plane (1-based) drives both the table-row highlight and the
+        # in-plot accent line / bracketed tick label / inlay annotation.
+        active_z = _active_z(parent)
+        _draw_zplane_stats_table(
+            z_vals, mean_vals, std_vals, snr_vals, array_idx, active_z=active_z
+        )
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
         if is_combined:
-            _draw_combined_zplane_plot(parent, z_vals, stats_list)
+            _draw_combined_zplane_plot(
+                parent, z_vals, stats_list, active_z=active_z
+            )
         else:
-            _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx)
+            _draw_zplane_signal_plot(
+                z_vals, mean_vals, std_vals, array_idx,
+                active_z=active_z, parent=parent,
+            )
 
 
 SNR_TOOLTIP = "SNR = (mean_foreground - mean_background) / std_background, foreground = top 20% brightest pixels, background = bottom 50%"
@@ -543,8 +574,16 @@ def _draw_simple_stats_table(mean_vals, std_vals, snr_vals, is_dual_zplane, arra
         imgui.end_table()
 
 
-def _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx=None):
-    """Draw z-plane stats table for multi-z data."""
+def _draw_zplane_stats_table(
+    z_vals, mean_vals, std_vals, snr_vals, array_idx=None, *, active_z=None
+):
+    """Draw z-plane stats table for multi-z data.
+
+    When `active_z` matches a row's z value, that row is tinted with the
+    accent color and its cells are rendered in the accent for emphasis,
+    plus a small marker glyph in the Z column so the active plane reads
+    even on a quick glance.
+    """
     table_id = f"zstats{array_idx}" if array_idx is not None else "Stats, averaged over graphics"
 
     if imgui.begin_table(
@@ -560,11 +599,36 @@ def _draw_zplane_stats_table(z_vals, mean_vals, std_vals, snr_vals, array_idx=No
             imgui.begin_tooltip()
             imgui.text(SNR_TOOLTIP)
             imgui.end_tooltip()
+
+        # green tint for the active row — green is darker than white so
+        # bump alpha to ~25% to keep the highlight readable.
+        row_bg = imgui.color_convert_float4_to_u32(
+            imgui.ImVec4(_ACTIVE_Z_COLOR[0], _ACTIVE_Z_COLOR[1],
+                         _ACTIVE_Z_COLOR[2], 0.25)
+        )
+        # text in the active row stays pure white. Pushing the green
+        # accent here (which is what we did initially) makes the digits
+        # disappear into the green tint — white-on-green-tint is the
+        # readable combination.
+        active_text = imgui.ImVec4(1.0, 1.0, 1.0, 1.0)
+
         for i in range(len(z_vals)):
             imgui.table_next_row()
-            for val in (z_vals[i], mean_vals[i], std_vals[i], snr_vals[i]):
+            is_active = active_z is not None and int(z_vals[i]) == active_z
+            if is_active:
+                imgui.table_set_bg_color(
+                    imgui.TableBgTarget_.row_bg0, row_bg
+                )
+                imgui.push_style_color(imgui.Col_.text, active_text)
+            # Z renders as a plain integer (planes are 1, 2, 3 — never 1.50);
+            # numeric stats keep two-decimal precision.
+            imgui.table_next_column()
+            imgui.text(f"{int(z_vals[i])}")
+            for val in (mean_vals[i], std_vals[i], snr_vals[i]):
                 imgui.table_next_column()
                 imgui.text(f"{val:.2f}")
+            if is_active:
+                imgui.pop_style_color()
         imgui.end_table()
 
 
@@ -764,12 +828,19 @@ def _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, ar
             implot.end_plot()
 
 
-def _draw_combined_zplane_plot(parent, z_vals, stats_list):
-    """Draw combined z-plane signal plot."""
+def _draw_combined_zplane_plot(parent, z_vals, stats_list, *, active_z=None):
+    """Draw combined z-plane signal plot.
+
+    When `active_z` is provided, an orange vertical line marks that plane
+    on the x-axis, the corresponding tick label is rendered in brackets
+    ("[N]") so it stands out visually, and an inlay annotation labels the
+    active plane.
+    """
     imgui.text("Z-plane Signal: Combined")
     set_tooltip(
         "Gray = per-ROI z-profiles (mean over frames)."
         " Blue shade = across-ROI mean ± std; blue line = mean."
+        " Orange line = currently displayed plane."
         " Hover gray lines for values.",
         True,
     )
@@ -789,10 +860,20 @@ def _draw_combined_zplane_plot(parent, z_vals, stats_list):
     lower = mean_vals - std_vals
     upper = mean_vals + std_vals
 
-    # Use available width to prevent cutoff
     plot_width = imgui.get_content_region_avail().x
+    # bold the plot's axis tick labels (and any other in-plot text) when a
+    # bold font was loaded — implot doesn't support per-tick font styling,
+    # so this is the cleanest way to render the bracketed active label
+    # `[N]` in bold along with the rest of the axis.
+    bold = getattr(parent, "_bold_font", None)
+    pushed_bold = False
+    if bold is not None:
+        imgui.push_font(bold, bold.legacy_size)
+        pushed_bold = True
     if implot.begin_plot(
-        "Z-Plane Plot (Combined)", imgui.ImVec2(plot_width, 300)
+        "Z-Plane Plot (Combined)",
+        imgui.ImVec2(plot_width, 350),
+        implot.Flags_.no_legend.value,
     ):
         try:
             style_seaborn_dark()
@@ -806,38 +887,107 @@ def _draw_combined_zplane_plot(parent, z_vals, stats_list):
             implot.setup_axis_limits(
                 implot.ImAxis_.x1.value, float(z[0]), float(z[-1])
             )
-            implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+            # custom ticks so the active plane's label can be bracketed.
+            # only swap to custom labels when there are <= 32 z-planes;
+            # past that, integer auto-ticks read better than a forced label
+            # at every z.
+            if len(z) <= 32:
+                tick_vals = z.tolist()
+                tick_labels = [
+                    (f"[{int(v)}]" if active_z is not None and int(v) == active_z
+                     else f"{int(v)}")
+                    for v in z
+                ]
+                implot.setup_axis_ticks(
+                    implot.ImAxis_.x1.value, tick_vals, tick_labels, False
+                )
+            else:
+                implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
 
+            # per-ROI traces — slightly more saturated than before so they
+            # don't disappear into the dark background.
             for i, ys in enumerate(graphic_series):
                 label = f"ROI {i + 1}##roi{i}"
                 implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
                 implot.push_style_color(
-                    implot.Col_.line.value, (0.6, 0.6, 0.6, 0.35)
+                    implot.Col_.line.value, (0.65, 0.70, 0.78, 0.55)
                 )
                 implot.plot_line(label, z, ys)
                 implot.pop_style_color()
                 implot.pop_style_var()
 
+            # shaded mean±std band
             implot.push_style_color(
-                implot.Col_.fill.value, (0.2, 0.4, 0.8, 0.25)
+                implot.Col_.fill.value, (0.30, 0.55, 0.95, 0.28)
             )
             implot.plot_shaded("Mean ± Std##band", z, lower, upper)
             implot.pop_style_color()
 
-            implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
+            # mean line — heavier and brighter, with circle markers when the
+            # plane count is small enough that markers don't clutter.
+            implot.push_style_var(implot.StyleVar_.line_weight.value, 2.5)
+            implot.push_style_color(
+                implot.Col_.line.value, (0.40, 0.75, 1.00, 1.00)
+            )
+            if len(z) <= 24:
+                implot.set_next_marker_style(
+                    implot.Marker_.circle.value, 4,
+                    imgui.ImVec4(0.40, 0.75, 1.00, 1.00), 1.5,
+                    imgui.ImVec4(0.13, 0.15, 0.18, 1.00),
+                )
             implot.plot_line("Mean##line", z, mean_vals)
+            implot.pop_style_color()
             implot.pop_style_var()
+
+            # accent line + annotation for the active z-plane
+            if active_z is not None and z[0] <= active_z <= z[-1]:
+                implot.push_style_var(implot.StyleVar_.line_weight.value, 2.0)
+                implot.push_style_color(
+                    implot.Col_.line.value, _ACTIVE_Z_COLOR
+                )
+                implot.plot_inf_lines(
+                    "Active plane##active_z",
+                    np.array([float(active_z)], dtype=np.float64),
+                )
+                implot.pop_style_color()
+                implot.pop_style_var()
+                # find y for annotation — clamp to series so the label
+                # sits on the curve rather than floating in the void.
+                _idx = int(min(max(active_z - 1, 0), len(mean_vals) - 1))
+                implot.annotation(
+                    float(active_z), float(mean_vals[_idx]),
+                    imgui.ImVec4(*_ACTIVE_Z_COLOR),
+                    imgui.ImVec2(0, -18), True, f"Z = {active_z}",
+                )
         finally:
             implot.end_plot()
+    if pushed_bold:
+        imgui.pop_font()
 
 
-def _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx):
-    """Draw z-plane signal plot with error bars."""
+def _draw_zplane_signal_plot(
+    z_vals, mean_vals, std_vals, array_idx, *, active_z=None, parent=None
+):
+    """Draw z-plane signal plot with error bars.
+
+    Same active-plane treatment as the combined plot: green vertical
+    accent line, bracketed tick label (when <= 32 planes), and an inlay
+    annotation tagging "Z = N". When `parent` is provided and a bold
+    font is loaded, axis tick labels render in bold so the bracketed
+    active label `[N]` reads with extra visual weight.
+    """
     style_seaborn_dark()
     imgui.text("Z-plane Signal: Mean ± Std")
     plot_width = imgui.get_content_region_avail().x
+    bold = getattr(parent, "_bold_font", None) if parent is not None else None
+    pushed_bold = False
+    if bold is not None:
+        imgui.push_font(bold, bold.legacy_size)
+        pushed_bold = True
     if implot.begin_plot(
-        f"Z-Plane Signal {array_idx}", imgui.ImVec2(plot_width, 300)
+        f"Z-Plane Signal {array_idx}",
+        imgui.ImVec2(plot_width, 350),
+        implot.Flags_.no_legend.value,
     ):
         try:
             implot.setup_axes(
@@ -846,10 +996,64 @@ def _draw_zplane_signal_plot(z_vals, mean_vals, std_vals, array_idx):
                 implot.AxisFlags_.auto_fit.value,
                 implot.AxisFlags_.auto_fit.value,
             )
-            implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+
+            z = np.asarray(z_vals, float)
+            if len(z) <= 32:
+                tick_vals = z.tolist()
+                tick_labels = [
+                    (f"[{int(v)}]" if active_z is not None and int(v) == active_z
+                     else f"{int(v)}")
+                    for v in z
+                ]
+                implot.setup_axis_ticks(
+                    implot.ImAxis_.x1.value, tick_vals, tick_labels, False
+                )
+            else:
+                implot.setup_axis_format(implot.ImAxis_.x1.value, "%g")
+
             implot.plot_error_bars(
                 f"Mean ± Std {array_idx}", z_vals, mean_vals, std_vals
             )
+
+            # mean line — match the combined plot palette (sky-blue, heavier)
+            # so both plots feel like the same family.
+            implot.push_style_var(implot.StyleVar_.line_weight.value, 2.5)
+            implot.push_style_color(
+                implot.Col_.line.value, (0.40, 0.75, 1.00, 1.00)
+            )
+            if len(z) <= 24:
+                implot.set_next_marker_style(
+                    implot.Marker_.circle.value, 4,
+                    imgui.ImVec4(0.40, 0.75, 1.00, 1.00), 1.5,
+                    imgui.ImVec4(0.13, 0.15, 0.18, 1.00),
+                )
             implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
+            implot.pop_style_color()
+            implot.pop_style_var()
+
+            # accent line + annotation for the active z-plane
+            if (
+                active_z is not None
+                and len(z) > 0
+                and float(z[0]) <= active_z <= float(z[-1])
+            ):
+                implot.push_style_var(implot.StyleVar_.line_weight.value, 2.0)
+                implot.push_style_color(
+                    implot.Col_.line.value, _ACTIVE_Z_COLOR
+                )
+                implot.plot_inf_lines(
+                    f"Active plane##active_z_{array_idx}",
+                    np.array([float(active_z)], dtype=np.float64),
+                )
+                implot.pop_style_color()
+                implot.pop_style_var()
+                _idx = int(min(max(active_z - 1, 0), len(mean_vals) - 1))
+                implot.annotation(
+                    float(active_z), float(mean_vals[_idx]),
+                    imgui.ImVec4(*_ACTIVE_Z_COLOR),
+                    imgui.ImVec2(0, -18), True, f"Z = {active_z}",
+                )
         finally:
             implot.end_plot()
+    if pushed_bold:
+        imgui.pop_font()
