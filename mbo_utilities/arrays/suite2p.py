@@ -328,11 +328,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         self.filenames = [p.active_file for p in self._planes]
 
         # Trust ops.npy's `dz` / `_metadata_provenance` as the authoritative
-        # stride-aware record — they were stamped by the writer. Inferring
-        # a stride from directory names and multiplying here would double-
-        # scale whenever ops.dz is already the effective (post-stride)
-        # value (which is true for every mbo-authored ops.npy).
-        #
+        # stride-aware record — they were stamped by the writer.
         # Flag the legacy case: stride-suggesting dir names + no
         # provenance marker => the writer that produced this dir may
         # pre-date provenance tracking. We don't mutate dz — we leave it
@@ -418,6 +414,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
     def __getitem__(self, key):
         key = _normalize_key(key, 5)
         key = key + (slice(None),) * (5 - len(key))
+
         t_key, c_key, z_key, y_key, x_key = key
 
         # normalize t_key
