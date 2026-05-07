@@ -7,6 +7,7 @@ various file formats as lazy arrays.
 
 from __future__ import annotations
 
+import importlib.util
 import inspect
 from functools import lru_cache
 from pathlib import Path
@@ -47,9 +48,20 @@ if TYPE_CHECKING:
 logger = log.get("reader")
 
 # UI dropdown shows these formats (excludes .tif to avoid duplication)
-MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".npy", ".klb"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".klb", ".mp4", ".avi", ".mov"]
 # reading accepts .tif as alias for .tiff
 MBO_READABLE_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy", ".klb"]
+
+# extensions that require an optional third-party package. when the package
+# isn't importable we drop the extension from the GUI dropdown so the user
+# can't pick a format that would fail at write time.
+_OPTIONAL_PKG_BY_EXT = {".klb": "pyklb"}
+
+MBO_AVAILABLE_FTYPES = [
+    ext for ext in MBO_SUPPORTED_FTYPES
+    if _OPTIONAL_PKG_BY_EXT.get(ext) is None
+    or importlib.util.find_spec(_OPTIONAL_PKG_BY_EXT[ext]) is not None
+]
 
 # Re-export PIPELINE_TAGS for backward compatibility (canonical location is file_io.py)
 

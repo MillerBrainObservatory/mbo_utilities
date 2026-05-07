@@ -520,6 +520,37 @@ def _imwrite_base(
         )
         return result
 
+    # video: one file per (z, channel) via to_video.
+    if ext_clean in ("mp4", "avi", "mov"):
+        from mbo_utilities._writers import _write_volumetric_video
+
+        output_suffix = kwargs.pop("output_suffix", None)
+        return _write_volumetric_video(
+            arr,
+            outpath,
+            metadata=md,
+            planes=planes_list,
+            frames=frames_list,
+            channels=channels_list,
+            ext=ext_clean,
+            overwrite=overwrite,
+            output_suffix=output_suffix,
+            progress_callback=progress_callback,
+            show_progress=show_progress,
+            fps=int(kwargs.pop("fps", 30)),
+            speed_factor=float(kwargs.pop("speed_factor", 1.0)),
+            vmin=kwargs.pop("vmin", None),
+            vmax=kwargs.pop("vmax", None),
+            vmin_percentile=float(kwargs.pop("vmin_percentile", 1.0)),
+            vmax_percentile=float(kwargs.pop("vmax_percentile", 99.5)),
+            temporal_smooth=int(kwargs.pop("temporal_smooth", 0)),
+            spatial_smooth=float(kwargs.pop("spatial_smooth", 0.0)),
+            gamma=float(kwargs.pop("gamma", 1.0)),
+            cmap=kwargs.pop("cmap", None),
+            quality=int(kwargs.pop("quality", 9)),
+            codec=str(kwargs.pop("codec", "libx264")),
+        )
+
     # other formats: use per-plane streaming writer (bin, npy)
     # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
     # correct T/Z sizes (arr.shape[0] is T for 4D, but Y for 2D natural).

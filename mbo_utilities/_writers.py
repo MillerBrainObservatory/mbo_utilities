@@ -2337,3 +2337,111 @@ def to_video(
     file_size_mb = output_path.stat().st_size / 1024 / 1024
     logger.info(f"Video saved to {output_path} ({file_size_mb:.1f} MB)")
     return output_path
+
+
+def _write_volumetric_video(
+    arr,
+    outpath: Path,
+    metadata: dict | None = None,
+    planes: list | None = None,
+    frames: list | None = None,
+    channels: list | None = None,
+    ext: str = "mp4",
+    overwrite: bool = False,
+    output_suffix: str | None = None,
+    progress_callback=None,
+    show_progress: bool = True,
+    fps: int = 30,
+    speed_factor: float = 1.0,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    vmin_percentile: float = 1.0,
+    vmax_percentile: float = 99.5,
+    temporal_smooth: int = 0,
+    spatial_smooth: float = 0.0,
+    gamma: float = 1.0,
+    cmap: str | None = None,
+    quality: int = 9,
+    codec: str = "libx264",
+):
+    """
+    Write one video file per (z-plane, channel).
+
+    Filename pattern: zplaneNN_tpN-tpN_chNN_<suffix>.<ext> — Z first because
+    each file is a single plane; channel suffix is always present.
+    """
+    from mbo_utilities.arrays.features import (
+        OutputFilename,
+        DimensionTag,
+        TAG_REGISTRY,
+    )
+
+    outpath = Path(outpath)
+    outpath.mkdir(parents=True, exist_ok=True)
+    ext_clean = ext.lower().lstrip(".")
+
+    num_planes = arr.shape5d[2]
+    num_channels = getattr(arr, "num_color_channels", arr.shape5d[1])
+    nframes_total = arr.shape5d[0]
+
+    planes_0idx = [p - 1 for p in planes] if planes else list(range(num_planes))
+    channels_0idx = [c - 1 for c in channels] if channels else list(range(num_channels))
+
+    if frames:
+        frame_indices_0 = [f - 1 for f in frames]
+    else:
+        frame_indices_0 = None
+
+    suffix = output_suffix.lstrip("_") if output_suffix else "movie"
+
+    t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes_total, frames)
+
+    total_files = len(planes_0idx) * len(channels_0idx)
+    file_idx = 0
+
+    for plane_idx in planes_0idx:
+        for c_idx in channels_0idx:
+            z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
+            c_tag = DimensionTag.from_dim_size(TAG_REGISTRY["C"], num_channels, [c_idx + 1])
+
+            filename = OutputFilename([z_tag, c_tag, t_tag], suffix=suffix).build(f".{ext_clean}")
+            target = outpath / filename
+
+            if target.exists() and not overwrite:
+                logger.warning(f"File {target} exists. Skipping write.")
+                file_idx += 1
+                continue
+
+            sliced = arr[:, c_idx, plane_idx]
+            if frame_indices_0 is not None:
+                sliced = np.asarray(sliced)[frame_indices_0]
+
+            logger.info(
+                f"Writing video {file_idx + 1}/{total_files}: {target.name}"
+            )
+            to_video(
+                sliced,
+                target,
+                fps=fps,
+                speed_factor=speed_factor,
+                plane=None,
+                vmin=vmin,
+                vmax=vmax,
+                vmin_percentile=vmin_percentile,
+                vmax_percentile=vmax_percentile,
+                temporal_smooth=temporal_smooth,
+                spatial_smooth=spatial_smooth,
+                gamma=gamma,
+                cmap=cmap,
+                quality=quality,
+                codec=codec,
+            )
+
+            file_idx += 1
+            if progress_callback:
+                progress_callback(file_idx / total_files, target.name)
+
+    if progress_callback:
+        progress_callback(1.0, "Complete")
+
+    return outpath
