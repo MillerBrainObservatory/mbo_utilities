@@ -671,6 +671,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             ops=ops,
             planes=planes,
             num_timepoints=num_timepoints,
+            frame_indices=tp_indices,
             keep_raw=s2p_settings.get("keep_raw", False),
             keep_reg=s2p_settings.get("keep_reg", True),
             force_reg=s2p_settings.get("force_reg", False),
