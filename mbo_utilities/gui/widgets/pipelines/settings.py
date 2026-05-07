@@ -1,3 +1,4 @@
+import json
 import pathlib
 import threading
 from pathlib import Path
@@ -104,6 +105,22 @@ def _mbo():
         yield
     finally:
         imgui.pop_style_color()
+
+
+@contextmanager
+def _ghost_button():
+    """Material-design-inspired ghost button: a faint white surface tint
+    at rest with a slightly stronger overlay on hover/active. Use for
+    secondary affordances (copy buttons, etc.) so they stay legible
+    without dominating the panel like the default chunky button fill.
+    """
+    imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(1, 1, 1, 0.05))
+    imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(1, 1, 1, 0.10))
+    imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(1, 1, 1, 0.16))
+    try:
+        yield
+    finally:
+        imgui.pop_style_color(3)
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._writers import _convert_paths_to_strings
@@ -318,6 +335,32 @@ def build_planar_rastermap_kwargs(extras) -> dict | None:
     return _build_planar_sub(extras)
 
 
+_s2p_schema_warmup_thread: "threading.Thread | None" = None
+
+
+def _kick_s2p_schema_warmup() -> None:
+    """Background-load `suite2p.parameters.SETTINGS` so `is_default` can
+    distinguish modified suite2p fields from defaults.
+
+    `_s2p_schema._ensure_loaded` is idempotent and thread-safe; until it
+    runs, `is_default` short-circuits to True and `collect_modified_params`
+    sees zero suite2p modifications. We start the warmup the first time
+    Modified Parameters is computed and let subsequent frames pick up the
+    loaded schema. Idempotent: skip if a thread is already running or the
+    schema is already loaded.
+    """
+    global _s2p_schema_warmup_thread
+    from mbo_utilities.gui.widgets.pipelines import _s2p_schema as _sch
+    if _sch._SETTINGS is not None:
+        return
+    if _s2p_schema_warmup_thread is not None and _s2p_schema_warmup_thread.is_alive():
+        return
+    _s2p_schema_warmup_thread = threading.Thread(
+        target=_sch.warm_up_suite2p_schema, daemon=True
+    )
+    _s2p_schema_warmup_thread.start()
+
+
 def collect_modified_params(
     s2p, s2p_db, s2p_extras=None
 ) -> list[tuple[str, object, object, str]]:
@@ -331,6 +374,7 @@ def collect_modified_params(
 
     Sorted: s2p group first (alphabetical), then lsp group (alphabetical).
     """
+    _kick_s2p_schema_warmup()
     from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
         _MBO_TO_S2P,
         _MBO_DB_TO_S2P,
@@ -1020,7 +1064,11 @@ class MboSuite2pExtras:
     # baseline scoring inherits the dF/F window/percentile and the top-level
     # correct_neuropil toggle so the filter sees the same trace the dF/F
     # plot does.
-    baseline_filter_enabled: bool = False
+    # always-on master flag — UI doesn't expose it; build_cell_filters()
+    # consults the per-criterion enables below. Default True so a fresh
+    # dataclass matches the runtime contract; loaded settings.npy values
+    # round-trip unchanged.
+    baseline_filter_enabled: bool = True
     baseline_reject_negative_F0: bool = False
     baseline_min_F0_abs_enabled: bool = False
     baseline_min_F0_abs: float = 1.0
@@ -1335,7 +1383,7 @@ def _draw_data_options_content(self):
 
     # scan-phase correction section
     if has_phase_support:
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Scan-Phase Correction")
+        imgui.text("Scan-Phase Correction")
         imgui.spacing()
 
         # fix phase (uses separate _s2p_* settings, defaults True for s2p runs)
@@ -1364,13 +1412,6 @@ def _draw_data_options_content(self):
         if max_offset_changed:
             self.max_offset = max(1, max_offset_val)
 
-        # upsample factor
-        imgui.set_next_item_width(INPUT_WIDTH)
-        upsample_changed, upsample_val = imgui.input_int("Upsample", self.phase_upsample, step=1)
-        set_tooltip("Upsampling factor for sub-pixel alignment")
-        if upsample_changed:
-            self.phase_upsample = max(1, upsample_val)
-
         # show current offset values
         imgui.spacing()
         imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "Current offsets:")
@@ -1384,7 +1425,7 @@ def _draw_data_options_content(self):
             imgui.separator()
             imgui.spacing()
 
-        imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Axial Registration")
+        imgui.text("Axial Registration")
         imgui.spacing()
 
         if has_z_reg:
@@ -1524,8 +1565,16 @@ def _draw_md_field(label: str, value, unit: str = "") -> None:
     imgui.text(text)
 
 
-def _draw_dataset_files_popup(filenames: list) -> None:
-    """Modal popup listing each file in concatenation order."""
+def _draw_dataset_files_popup(
+    filenames: list, frames_per_file: list[int] | None = None
+) -> None:
+    """Modal popup listing each file in concatenation order.
+
+    When `frames_per_file` is provided and length-matches `filenames`, a
+    "Frames" column is added and the header shows the total frame count.
+    The header row carries a ghost-styled icon button that copies the
+    listing to the clipboard as JSON.
+    """
     opened = imgui.begin_popup_modal(
         "Dataset files##current_dataset_files_popup",
         flags=imgui.WindowFlags_.no_saved_settings
@@ -1533,16 +1582,82 @@ def _draw_dataset_files_popup(filenames: list) -> None:
     )[0]
     if not opened:
         return
-    imgui.text(f"{len(filenames)} files (concatenation order):")
+
+    has_frames = (
+        isinstance(frames_per_file, (list, tuple))
+        and len(frames_per_file) == len(filenames)
+    )
+
+    # header: count (+ total frames when known), with the copy icon
+    # snapped to the right edge.
+    if has_frames:
+        imgui.text(
+            f"{len(filenames)} files (concatenation order, "
+            f"{sum(frames_per_file)} total frames):"
+        )
+    else:
+        imgui.text(f"{len(filenames)} files (concatenation order):")
+    imgui.same_line()
+    avail = imgui.get_content_region_avail().x
+    btn_w = imgui.get_frame_height()
+    if avail > btn_w + 4:
+        imgui.set_cursor_pos_x(imgui.get_cursor_pos_x() + avail - btn_w - 2)
+    with _ghost_button():
+        if imgui.button(
+            f"{fa.ICON_FA_COPY}##dataset_files_copy",
+            imgui.ImVec2(btn_w, btn_w),
+        ):
+            payload: dict = {
+                "num_files": len(filenames),
+                "file_paths": [str(f) for f in filenames],
+            }
+            if has_frames:
+                payload["frames_per_file"] = list(frames_per_file)
+                payload["num_timepoints"] = sum(frames_per_file)
+            imgui.set_clipboard_text(json.dumps(payload, indent=2))
+    set_tooltip(
+        "Copy file list as JSON (file_paths, frames_per_file, totals).",
+        show_mark=False,
+    )
+
     imgui.separator()
+
     if imgui.begin_child(
         "##current_dataset_files_list",
-        imgui.ImVec2(600, 300),
+        imgui.ImVec2(640, 300),
         imgui.ChildFlags_.borders,
     ):
-        for i, f in enumerate(filenames, start=1):
-            imgui.text(f"{i:3d}. {f}")
+        n_cols = 3 if has_frames else 2
+        if imgui.begin_table(
+            "##dataset_files_table",
+            n_cols,
+            imgui.TableFlags_.row_bg
+            | imgui.TableFlags_.borders_inner_h
+            | imgui.TableFlags_.sizing_stretch_prop,
+        ):
+            imgui.table_setup_column(
+                "#", imgui.TableColumnFlags_.width_fixed, 40
+            )
+            imgui.table_setup_column("File")
+            if has_frames:
+                imgui.table_setup_column(
+                    "Frames", imgui.TableColumnFlags_.width_fixed, 80
+                )
+            imgui.table_headers_row()
+
+            for i, f in enumerate(filenames):
+                imgui.table_next_row()
+                imgui.table_set_column_index(0)
+                imgui.text(f"{i + 1}")
+                imgui.table_set_column_index(1)
+                imgui.text_unformatted(str(f))
+                if has_frames:
+                    imgui.table_set_column_index(2)
+                    imgui.text(f"{frames_per_file[i]}")
+
+            imgui.end_table()
         imgui.end_child()
+
     imgui.separator()
     if imgui.button("Close", imgui.ImVec2(80, 0)):
         imgui.close_current_popup()
@@ -1625,7 +1740,12 @@ def _draw_current_dataset_section(self) -> None:
         imgui.open_popup("Dataset files##current_dataset_files_popup")
     imgui.text(f"Size on disk: {_format_size(size_bytes)}")
 
-    _draw_dataset_files_popup(filenames)
+    # surface frames_per_file from metadata when present and length-aligned;
+    # otherwise the popup falls back to the 2-column (#, File) layout.
+    fpf = md.get("frames_per_file")
+    if not (isinstance(fpf, (list, tuple)) and len(fpf) == n_files):
+        fpf = None
+    _draw_dataset_files_popup(filenames, fpf)
 
     # shape with bracketed dim labels (e.g. "1024 × 4 × 256 × 256 [T,Z,Y,X]").
     # push wrap_pos so long shape strings wrap rather than clip on narrow panels.
@@ -1937,20 +2057,14 @@ def _draw_section_suite2p_content(self):
                     setattr(self.s2p_extras, _enabled_attr, False)
             set_tooltip(_tip)
 
-        # baseline filter — master switch + three independent rejection
-        # criteria. inherits dff window/percentile and correct_neuropil
-        # at run time so the filter scores the same trace as the dF/F plot.
+        # baseline filter — section title (matches "Cell Filters" style).
+        # Three independent rejection criteria below; each has its own
+        # enable flag, no master gate. Inherits dff window/percentile
+        # and correct_neuropil at run time so the filter scores the same
+        # trace as the dF/F plot.
         imgui.spacing()
-        with _hi_extras("baseline_filter_enabled", self.s2p_extras.baseline_filter_enabled):
-            _, self.s2p_extras.baseline_filter_enabled = imgui.checkbox(
-                "Baseline filter", self.s2p_extras.baseline_filter_enabled
-            )
-        set_tooltip(
-            "Reject cells with suspicious F0 baseline (dim cells whose "
-            "near-zero F0 makes dF/F explode). Enable at least one criterion below."
-        )
-        imgui.begin_disabled(not self.s2p_extras.baseline_filter_enabled)
-        imgui.indent()
+        imgui.spacing()
+        imgui.text_colored(_SUBSECTION_COLOR, "Baseline Filter")
 
         with _hi_extras("baseline_reject_negative_F0", self.s2p_extras.baseline_reject_negative_F0):
             _, self.s2p_extras.baseline_reject_negative_F0 = imgui.checkbox(
@@ -2000,9 +2114,6 @@ def _draw_section_suite2p_content(self):
                     setattr(self.s2p_extras, _enabled_attr, False)
             set_tooltip(_tip)
 
-        imgui.unindent()
-        imgui.end_disabled()
-
         imgui.spacing()
         imgui.spacing()
 
@@ -2051,7 +2162,12 @@ def _draw_section_suite2p_content(self):
         imgui.same_line()
         _rm_mode = self.s2p_extras.rastermap_mode
         if imgui.radio_button("Skip##rastermap_mode", _rm_mode == 0):
+            # transitioning to Skip greys out the Planar/Volumetric
+            # checkboxes below — also clear them so they don't pop back
+            # on if the user later flips Run/Force on again.
             self.s2p_extras.rastermap_mode = 0
+            self.s2p_extras.rastermap_planar = False
+            self.s2p_extras.rastermap_volumetric = False
         imgui.same_line()
         if imgui.radio_button("Run##rastermap_mode", _rm_mode == 1):
             self.s2p_extras.rastermap_mode = 1
@@ -3106,10 +3222,6 @@ def _draw_section_suite2p_content(self):
     imgui.spacing()
     if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["pipeline_settings"] = True
-        # one-shot: tells the popup body to auto-fit its content on this
-        # frame so the user gets a "tall enough — no scrollbars" view
-        # on first render. cleared at the end of the auto-fit frame; the
-        # popup is freely user-resizable afterwards.
         self._pipe_settings_just_opened = True
         imgui.open_popup("Pipeline Settings##pipeline_settings_popup")
 
@@ -3131,19 +3243,21 @@ def _draw_section_suite2p_content(self):
         # source markers (s2p / lsp) match the in-table param-name color:
         # s2p → suite2p settings dict; lsp → lbm_suite2p_python pipeline kwargs.
         imgui.same_line()
-        if imgui.small_button(f"{fa.ICON_FA_COPY}##mod_params_copy_all"):
-            _lines = ["{"]
-            for _field, _cur, _def, _src in _mods:
-                _lines.append(
-                    f"    {_field!r}: {_cur!r},  # {_src}, default: {_def!r}"
-                )
-            _lines.append("}")
-            imgui.set_clipboard_text("\n".join(_lines))
+        with _ghost_button():
+            if imgui.small_button(f"{fa.ICON_FA_COPY}##mod_params_copy_all"):
+                _lines = ["{"]
+                for _field, _cur, _def, _src in _mods:
+                    _lines.append(
+                        f"    {_field!r}: {_cur!r},  # {_src}, default: {_def!r}"
+                    )
+                _lines.append("}")
+                imgui.set_clipboard_text("\n".join(_lines))
         set_tooltip(
             "Copy all modified params as a Python dict. Each line tags its "
             "source pipeline (s2p = suite2p settings, lsp = lbm_suite2p_python "
             "kwarg) and the default value, as inline comments.",
             align="right",
+            mark_dimmed=False,
         )
 
         # bounded scroll region — caps height so this section never
@@ -3289,14 +3403,13 @@ def _draw_section_suite2p_content(self):
         ],
     ]
     n_rows = len(rows)
-    max_cols_per_row = max(len(r) for r in rows)
 
     # worst-case (longest) labels in each column — used to compute the
     # minimum width that fits the input/checkbox + label + a right-aligned
     # (?) marker without clipping. Add new long labels here if you add
     # widgets that push past these.
     _WORST_INPUT_LABEL = {
-        "Suite2p Main Settings": "Sampling Rate (Hz)",
+        "Suite2p Main Settings": "Min F0 (frac of median)",
         "Registration": "Smooth Sigma Time",
         "ROI Detection": "Chan2 Detection Threshold",
         "Classification": "Preclassify threshold",
@@ -3327,7 +3440,6 @@ def _draw_section_suite2p_content(self):
     viewport = imgui.get_main_viewport()
     style = imgui.get_style()
     spacing_x = style.item_spacing.x
-    spacing_y = style.item_spacing.y
     window_pad_x = style.window_padding.x
     frame_pad_x = style.frame_padding.x
     qm_w = imgui.calc_text_size("(?)").x
@@ -3363,83 +3475,49 @@ def _draw_section_suite2p_content(self):
         inner_pad = 2 * frame_pad_x
         return max(body, title_row_w) + inner_pad + 8  # safety margin
 
-    # per-row natural totals (sum of natural cols + inter-col spacing)
-    row_natural_totals = []
-    col_naturals_per_row = []
-    for row in rows:
-        nat = [_calc_col_natural_w(t, mk) for (t, _, mk, _) in row]
-        col_naturals_per_row.append(nat)
-        row_natural_totals.append(sum(nat) + spacing_x * (len(row) - 1))
+    # natural column widths per row — used both for the static popup
+    # width below and for the per-column flex-share inside the row loop.
+    col_naturals_per_row = [
+        [_calc_col_natural_w(t, mk) for (t, _, mk, _) in row]
+        for row in rows
+    ]
 
-    # popup content area must accommodate the widest row at its natural size.
-    content_w = max(row_natural_totals)
-    min_pop_w_unclamped = content_w + 2 * window_pad_x + 16
-    # never demand more than the viewport (avoids min-vs-clamp flicker).
-    min_pop_w = min(min_pop_w_unclamped, viewport.size.x * 0.98)
+    # static popup width — derived from the widest row's natural column
+    # widths + inter-column spacing + window padding. fixed across frames
+    # because column natural widths don't depend on row 2 expansion state.
+    row_natural_totals = [
+        sum(nat) + spacing_x * (len(nat) - 1)
+        for nat in col_naturals_per_row
+    ]
+    _content_w_static = max(row_natural_totals) + 2 * window_pad_x + 16
+    _content_w_static = min(_content_w_static, viewport.size.x * 0.98)
 
-    # row 2 (Classification / Extraction / Deconvolution) renders as
-    # collapsing headers, collapsed by default — so the natural height
-    # is just the three header rows. row 1 absorbs the rest. when a user
-    # expands a header, the auto-grow path measures the new content
-    # height and bumps the popup. _ROW2_NATURAL_LINES is the only knob.
-    _ROW2_NATURAL_LINES = 4
-    frame_h_ws = imgui.get_frame_height_with_spacing()
-    row2_natural_h = _ROW2_NATURAL_LINES * frame_h_ws + 60
-    close_btn_h = 40
-    # initial popup height: enough to give row 1 a comfortable visible
-    # area (≥ 320px) on top of row 2's natural height, plus chrome.
-    _ROW1_TARGET_H = 320
-    init_pop_h_desired = (
-        _ROW1_TARGET_H
-        + row2_natural_h
-        + close_btn_h
-        + spacing_y * (n_rows - 1)
-        + 2 * style.window_padding.y
-        + 32
-    )
-    init_pop_w = min(min_pop_w_unclamped, viewport.size.x * 0.98)
-
-    # Aspect-locked smooth scaling.
-    #
-    # Baseline = popup natural size at scale 1.0, derived from the static
-    # schema (init_pop_w / init_pop_h_desired). Captured ONCE on each
-    # open; never updated after that, so there's no measurement-feedback
-    # loop. Replaces the old measure → recompute natural → force-resize
-    # cycle that caused snap-back.
-    #
-    # A constraint callback locks the aspect ratio: dragging any edge or
-    # corner picks the most-grown axis and forces the other to follow,
-    # so the popup scales uniformly. Bounded by [_MIN_SCALE, _MAX_SCALE]
-    # so the user can't shrink past content-fits territory.
     _just_opened = getattr(self, "_pipe_settings_just_opened", False)
 
+    # center on the viewport's true center; pivot (0.5, 0.5) puts the
+    # popup's center at that point. work_center sits below viewport.center
+    # whenever there's chrome at the top, which visibly pushes the popup
+    # downward — use the full viewport center for a true visual center.
+    _vp_center = viewport.get_center()
+    _vp_size = viewport.size
+
     if _just_opened:
-        self._pipe_baseline_w = float(init_pop_w)
-        self._pipe_baseline_h = float(init_pop_h_desired)
+        # open at a generous default — tall enough that expanding row 2's
+        # collapsing headers doesn't immediately produce a scrollbar, and
+        # consistent across opens (no snap-to-fit, no cached small size).
+        _open_h = _vp_size.y * 0.85
+        _open_w = min(_content_w_static, _vp_size.x * 0.98)
         imgui.set_next_window_size(
-            imgui.ImVec2(self._pipe_baseline_w, self._pipe_baseline_h),
+            imgui.ImVec2(_open_w, _open_h),
             imgui.Cond_.always,
         )
-
-    _baseline_w = getattr(self, "_pipe_baseline_w", float(init_pop_w))
-    _baseline_h = getattr(self, "_pipe_baseline_h", float(init_pop_h_desired))
-
-    _MIN_SCALE = 0.6
-    _MAX_SCALE = 2.5
-
-    def _aspect_constraint(data):
-        desired = data.desired_size
-        s = max(desired.x / _baseline_w, desired.y / _baseline_h)
-        s = max(_MIN_SCALE, min(_MAX_SCALE, s))
-        data.desired_size = imgui.ImVec2(_baseline_w * s, _baseline_h * s)
+        imgui.set_next_window_pos(
+            _vp_center, imgui.Cond_.always, pivot=imgui.ImVec2(0.5, 0.5)
+        )
 
     imgui.set_next_window_size_constraints(
-        imgui.ImVec2(_baseline_w * _MIN_SCALE, _baseline_h * _MIN_SCALE),
-        imgui.ImVec2(
-            min(_baseline_w * _MAX_SCALE, viewport.size.x * 0.98),
-            min(_baseline_h * _MAX_SCALE, viewport.size.y * 0.98),
-        ),
-        custom_callback=_aspect_constraint,
+        imgui.ImVec2(min(_content_w_static, _vp_size.x * 0.98), 200.0),
+        imgui.ImVec2(_vp_size.x * 0.98, _vp_size.y * 0.98),
     )
 
     _popup_flags = imgui.WindowFlags_.no_saved_settings
@@ -3455,48 +3533,12 @@ def _draw_section_suite2p_content(self):
                 _popup_states["pipeline_settings"] = False
                 imgui.close_current_popup()
             else:
-                # font-scale derived from observed window vs locked-aspect
-                # baseline. constraint callback enforces uniform scaling so
-                # _sw == _sh; pick width to be deterministic. clamped to
-                # the same [MIN, MAX] range used by the constraint callback.
-                _win_w = imgui.get_window_width()
-                _font_scale = _win_w / max(1.0, _baseline_w)
-                _font_scale = max(_MIN_SCALE, min(_MAX_SCALE, _font_scale))
-                # push the scaled font for the popup body. push_font(None,
-                # size) keeps the current font but applies the new size;
-                # children inherit from the global stack, so no per-child
-                # push is needed. paired with pop_font before end_popup.
-                # IMPORTANT: base size MUST be style.font_size_base (the
-                # unscaled value); using get_font_size() would double-apply
-                # any global font scaling factors.
-                _pushed_font = False
-                if abs(_font_scale - 1.0) > 0.01:
-                    _base_size = imgui.get_style().font_size_base
-                    imgui.push_font(None, _base_size * _font_scale)
-                    _pushed_font = True
-
-                # Wrap the row-rendering area in a scrollable child that
-                # leaves a footer reservation for the spacing + separator
-                # + button row below. Standard imgui footer idiom: a
-                # NEGATIVE size.y means "fill available minus |y| pixels"
-                # so imgui — not us — figures out the geometry. Avoids
-                # off-by-a-few-pixel overlaps that were letting row 2
-                # collapsing-headers slip behind the bottom buttons when
-                # the popup was shrunk near MIN_SCALE.
-                #
-                # Footer = item_spacing (above sep) + 1px sep + item_spacing
-                # (below sep) + button-row-height-with-spacing.
-                _style = imgui.get_style()
-                _footer_h = (
-                    imgui.get_frame_height_with_spacing()
-                    + _style.item_spacing.y * 2
-                    + 2
-                )
-                imgui.begin_child(
-                    "##pipe_content_scroll",
-                    imgui.ImVec2(0, -_footer_h),
-                    imgui.ChildFlags_.none,
-                )
+                # Render rows directly into the popup (no fixed-height
+                # scroll child). This lets the separator + button row
+                # sit immediately below the row 2 boxes; any extra
+                # vertical space the user opens up by resizing the
+                # popup falls below the buttons instead of between
+                # the boxes and the separator.
                 avail = imgui.get_content_region_avail()
 
                 col_idx = 0
@@ -3611,8 +3653,6 @@ def _draw_section_suite2p_content(self):
                         imgui.end_child()
                         col_idx += 1
 
-                imgui.end_child()  # close ##pipe_content_scroll
-
                 imgui.spacing()
                 imgui.separator()
                 # Bottom button row: Run Suite2p (green, left) | Defaults
@@ -3721,7 +3761,7 @@ def _draw_section_suite2p_content(self):
                 # and draw_boxed_label helper so the legend tracks palette
                 # tweaks automatically.
                 imgui.same_line()
-                if imgui.small_button("Legend##pipe_legend"):
+                if imgui.button("Legend##pipe_legend", imgui.ImVec2(_btn_w, 0)):
                     imgui.open_popup("Legend##pipe_legend_popup")
                 if imgui.begin_popup("Legend##pipe_legend_popup"):
                     imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p parameter")
@@ -3747,13 +3787,6 @@ def _draw_section_suite2p_content(self):
                     imgui.close_current_popup()
                 imgui.pop_style_color(3)
 
-                # pop the scaled font pushed at the top of this branch.
-                if _pushed_font:
-                    imgui.pop_font()
-
-                # End of the auto-fit frame — clear the one-shot flag
-                # so subsequent frames let the popup be user-resizable
-                # at whatever size imgui settled on this frame.
                 if _just_opened:
                     self._pipe_settings_just_opened = False
         finally:
