@@ -90,7 +90,9 @@ if TYPE_CHECKING:
     from mbo_utilities.arrays.isoview import (
         ClusterPTArray as ClusterPTArray,
         IsoviewArray as IsoviewArray,
+        IsoViewCorrectedArray as IsoViewCorrectedArray,
         IsoViewOutputArray as IsoViewOutputArray,
+        isoview_to_ome_zarr as isoview_to_ome_zarr,
     )
     from mbo_utilities.arrays.numpy import NumpyArray as NumpyArray
     from mbo_utilities.arrays.nwb import NWBArray as NWBArray
@@ -132,7 +134,9 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "BinArray": (".bin", "BinArray"),
     "IsoviewArray": (".isoview", "IsoviewArray"),
     "IsoViewOutputArray": (".isoview", "IsoViewOutputArray"),
+    "IsoViewCorrectedArray": (".isoview", "IsoViewCorrectedArray"),
     "ClusterPTArray": (".isoview", "ClusterPTArray"),
+    "isoview_to_ome_zarr": (".isoview", "isoview_to_ome_zarr"),
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
     "AxiallyAlignedView": ("._registration", "AxiallyAlignedView"),
@@ -192,6 +196,7 @@ __all__ = [
     "H5Array",
     "ImageJHyperstackArray",
     "IsoviewArray",
+    "IsoViewCorrectedArray",
     "IsoViewOutputArray",
     "LBMArray",
     "NWBArray",
@@ -217,6 +222,7 @@ __all__ = [
     "find_suite2p_plane_dirs",
     # TIFF helpers
     "find_tiff_plane_files",
+    "isoview_to_ome_zarr",
     "iter_rois",
     "normalize_roi",
     "open_scanimage",
