@@ -584,7 +584,7 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_fix_phase = True
         self._saveas_use_fft = True
 
-        # Video export options (active when ext is .mp4/.avi/.mov)
+        # Video export options (active when ext is .mp4 or .mov)
         self._saveas_video_fps = 30
         self._saveas_video_speed_factor = 1.0
         self._saveas_video_auto = True
@@ -593,11 +593,17 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_video_vmin_pct = 1.0
         self._saveas_video_vmax_pct = 99.5
         self._saveas_video_temporal_smooth = 0
+        self._saveas_video_temporal_mode_idx = 0  # 0=mean 1=max 2=std
         self._saveas_video_spatial_smooth = 0.0
         self._saveas_video_gamma = 1.0
-        self._saveas_video_cmap_idx = 0  # 0 = grayscale (None)
-        self._saveas_video_quality = 9
+        from mbo_utilities.gui._colormaps import DEFAULT_COLORMAPS, DEFAULT_COLORMAP
+        self._saveas_video_cmaps: list[str] = list(DEFAULT_COLORMAPS)
+        self._saveas_video_cmap_idx: int = self._saveas_video_cmaps.index(DEFAULT_COLORMAP)
+        self._saveas_video_quality_idx = 2  # 0=preview 1=high 2=visually lossless 3=lossless
         self._saveas_video_codec_idx = 0  # 0 = libx264
+        self._saveas_video_mean_subtract = False
+        self._saveas_video_time_overlay = False
+        self._saveas_video_scalebar = False
 
     def _init_viewer(self):
         """Initialize the viewer based on data type."""

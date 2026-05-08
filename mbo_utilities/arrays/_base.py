@@ -471,6 +471,9 @@ def _imwrite_base(
         compression_level = kwargs.pop("compression_level", 0)
         compressor = kwargs.pop("compressor", "none")
         shuffle = kwargs.pop("shuffle", None)
+        pyramid = kwargs.pop("pyramid", False)
+        pyramid_max_layers = kwargs.pop("pyramid_max_layers", 4)
+        pyramid_method = kwargs.pop("pyramid_method", "mean")
         result = _write_volumetric_zarr(
             arr,
             outpath,
@@ -488,6 +491,9 @@ def _imwrite_base(
             compression_level=compression_level,
             compressor=compressor,
             shuffle=shuffle,
+            pyramid=pyramid,
+            pyramid_max_layers=pyramid_max_layers,
+            pyramid_method=pyramid_method,
         )
         return result
 
@@ -521,10 +527,14 @@ def _imwrite_base(
         return result
 
     # video: one file per (z, channel) via to_video.
-    if ext_clean in ("mp4", "avi", "mov"):
+    if ext_clean in ("mp4", "mov"):
         from mbo_utilities._writers import _write_volumetric_video
 
         output_suffix = kwargs.pop("output_suffix", None)
+        mean_subtract_stack = kwargs.pop("mean_subtract_stack", None)
+        mean_subtract_path = kwargs.pop("mean_subtract_path", None)
+        if mean_subtract_stack is None and mean_subtract_path:
+            mean_subtract_stack = np.load(mean_subtract_path)
         return _write_volumetric_video(
             arr,
             outpath,
@@ -547,8 +557,12 @@ def _imwrite_base(
             spatial_smooth=float(kwargs.pop("spatial_smooth", 0.0)),
             gamma=float(kwargs.pop("gamma", 1.0)),
             cmap=kwargs.pop("cmap", None),
-            quality=int(kwargs.pop("quality", 9)),
+            quality=kwargs.pop("quality", "visually lossless"),
             codec=str(kwargs.pop("codec", "libx264")),
+            mean_subtract_stack=mean_subtract_stack,
+            temporal_mode=str(kwargs.pop("temporal_mode", "mean")),
+            time_overlay=bool(kwargs.pop("time_overlay", False)),
+            scalebar=bool(kwargs.pop("scalebar", False)),
         )
 
     # other formats: use per-plane streaming writer (bin, npy)
