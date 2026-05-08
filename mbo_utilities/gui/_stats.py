@@ -361,12 +361,24 @@ def refresh_zstats(parent: Any):
     for i in range(n):
         reset_progress_state(f"zstats_{i}")
 
-    # Update nz based on dims property if available, else fallback to shape
+    # Update nz from the array's dims tuple. Dims labels are not normalized:
+    # some readers emit lowercase ("t", "z", "c"), others uppercase
+    # ("T", "C", "Z", "Y", "X" — IsoViewCorrectedArray, ScanImageArray, etc.)
+    # The case-sensitive `"z" in dims` test used to fail on uppercase
+    # readers, so we'd fall through to `shape[1]` — which on a 5D TCZYX
+    # array is the channel axis, not Z. Result: nz silently became nc, the
+    # zstats slider ran 0..nc-1 and surfaced "z" stats for what were really
+    # the first nc planes. Lowercase both sides before the lookup.
     arr = parent.image_widget.data[0] if parent.image_widget.data else None
     dims = getattr(arr, "dims", None) if arr is not None else None
-    if dims is not None and "z" in dims:
-        z_idx = dims.index("z")
+    dims_lower = tuple(d.lower() for d in dims) if dims else None
+    if dims_lower is not None and "z" in dims_lower:
+        z_idx = dims_lower.index("z")
         parent.nz = parent.shape[z_idx]
+    elif arr is not None and hasattr(arr, "nz"):
+        # arrays with shape5d carry a canonical Z size even when dims
+        # don't expose a "z" label — prefer that over a positional guess.
+        parent.nz = int(arr.nz)
     elif len(parent.shape) >= 4:
         parent.nz = parent.shape[1]
     elif len(parent.shape) == 3:
