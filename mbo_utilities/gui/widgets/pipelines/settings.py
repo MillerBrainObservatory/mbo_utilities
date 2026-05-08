@@ -1575,10 +1575,15 @@ def _draw_dataset_files_popup(
     The header row carries a ghost-styled icon button that copies the
     listing to the clipboard as JSON.
     """
+    imgui.set_next_window_size(
+        imgui.ImVec2(700, 450), imgui.Cond_.first_use_ever
+    )
+    imgui.set_next_window_size_constraints(
+        imgui.ImVec2(420, 240), imgui.ImVec2(1600, 1200)
+    )
     opened = imgui.begin_popup_modal(
         "Dataset files##current_dataset_files_popup",
-        flags=imgui.WindowFlags_.no_saved_settings
-        | imgui.WindowFlags_.always_auto_resize,
+        flags=imgui.WindowFlags_.no_saved_settings,
     )[0]
     if not opened:
         return
@@ -1622,9 +1627,10 @@ def _draw_dataset_files_popup(
 
     imgui.separator()
 
+    _reserved = imgui.get_frame_height_with_spacing() + 8
     if imgui.begin_child(
         "##current_dataset_files_list",
-        imgui.ImVec2(640, 300),
+        imgui.ImVec2(-1, -_reserved),
         imgui.ChildFlags_.borders,
     ):
         n_cols = 3 if has_frames else 2
@@ -1650,7 +1656,7 @@ def _draw_dataset_files_popup(
                 imgui.table_set_column_index(0)
                 imgui.text(f"{i + 1}")
                 imgui.table_set_column_index(1)
-                imgui.text_unformatted(str(f))
+                imgui.text_wrapped(str(f))
                 if has_frames:
                     imgui.table_set_column_index(2)
                     imgui.text(f"{frames_per_file[i]}")
@@ -1682,6 +1688,8 @@ def _draw_current_dataset_section(self) -> None:
         pass
 
     imgui.text_colored(_SUBSECTION_COLOR, "Current dataset")
+    imgui.spacing()
+    imgui.spacing()
     if arr is None:
         imgui.text_disabled("(no file loaded)")
         imgui.spacing()
@@ -1902,6 +1910,7 @@ def _draw_section_suite2p_content(self):
         align="right",
     )
     imgui.spacing()
+    imgui.spacing()
     if imgui.button(f"{fa.ICON_FA_FOLDER_OPEN}##s2p_browse"):
         default_dir = s2p_path or str(
             get_last_dir("suite2p_output") or pathlib.Path().home()
@@ -1945,6 +1954,7 @@ def _draw_section_suite2p_content(self):
         "summary line below the button shows the resulting counts.",
         align="right",
     )
+    imgui.spacing()
     imgui.spacing()
     if imgui.button("Set slice", imgui.ImVec2(_BTN_W, 0)):
         self._s2p_slicing_open = True
@@ -3200,9 +3210,32 @@ def _draw_section_suite2p_content(self):
         align="right",
     )
     imgui.spacing()
+    imgui.spacing()
     if imgui.button("Open##data_options_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["data_options"] = True
         imgui.open_popup("Data Options##data_options")
+
+    imgui.spacing()
+    _has_phase_support = getattr(self, "has_raster_scan_support", False)
+    _nz = getattr(self, "nz", 1)
+    _is_raw = getattr(self, "is_mbo_scan", False)
+    _has_z_reg = _nz > 1 and _is_raw
+    if _has_phase_support or _has_z_reg:
+        imgui.indent(12)
+        if _has_phase_support:
+            imgui.text(f"Fix Phase: {getattr(self, '_s2p_fix_phase', True)}")
+            imgui.text(f"Sub-Pixel (FFT): {getattr(self, '_s2p_use_fft', True)}")
+            imgui.text(f"Border (px): {getattr(self, 'border', 0)}")
+            imgui.text(f"Max Offset: {getattr(self, 'max_offset', 0)}")
+        if _has_z_reg:
+            _reg_z = getattr(self, "_register_z", False)
+            imgui.text(f"Register Z-Planes: {_reg_z}")
+            if _reg_z:
+                imgui.text(f"Max frames: {getattr(self, '_axial_max_frames', 200)}")
+                imgui.text(f"Max shift (px): {getattr(self, '_axial_max_reg_xy', 30)}")
+        imgui.unindent(12)
+    else:
+        imgui.text_disabled("No options available for this data")
 
     imgui.spacing()
     imgui.spacing()
@@ -3220,6 +3253,7 @@ def _draw_section_suite2p_content(self):
         align="right",
     )
     imgui.spacing()
+    imgui.spacing()
     if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["pipeline_settings"] = True
         self._pipe_settings_just_opened = True
@@ -3235,7 +3269,7 @@ def _draw_section_suite2p_content(self):
     # user can see at a glance what's changed.
     _mods = collect_modified_params(self.s2p, self.s2p_db, self.s2p_extras)
     _n_mods = len(_mods)
-    imgui.text_colored(_SUBSECTION_COLOR, f"Modified parameters ({_n_mods})")
+    imgui.text(f"Modified parameters ({_n_mods})")
     if _mods:
         # copy-all icon next to the title — emits a Python dict literal
         # with each field's default + source pipeline annotated as an
@@ -3257,7 +3291,6 @@ def _draw_section_suite2p_content(self):
             "source pipeline (s2p = suite2p settings, lsp = lbm_suite2p_python "
             "kwarg) and the default value, as inline comments.",
             align="right",
-            mark_dimmed=False,
         )
 
         # bounded scroll region — caps height so this section never

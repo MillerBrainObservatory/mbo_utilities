@@ -42,6 +42,7 @@ class WindowFunctionsWidget(Widget):
         imgui.spacing()
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Window Functions")
         imgui.spacing()
+        imgui.spacing()
 
         # projection type combo (temporal operations only)
         options = ["mean", "max", "std"]
@@ -103,6 +104,7 @@ class SpatialFunctionsWidget(Widget):
         imgui.separator()
         imgui.spacing()
         imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Spatial Functions")
+        imgui.spacing()
         imgui.spacing()
 
         # gaussian sigma
