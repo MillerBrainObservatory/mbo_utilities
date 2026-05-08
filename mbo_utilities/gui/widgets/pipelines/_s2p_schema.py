@@ -515,6 +515,12 @@ _FLAT_TO_MBO: dict[str, Any] = {
     "dff_percentile": "dff_percentile",
     "dff_smooth_window": "dff_smooth_window",
     "correct_neuropil": "correct_neuropil",
+    "accept_all_cells": "accept_all_cells",
+    "save_json": "save_json",
+    # cell_filters / rastermap_kwargs are persisted by lsp as nested
+    # structures (list[dict] / nested dict) rather than scalars; the
+    # decompose-back-to-GUI-state step is handled separately so they're
+    # intentionally not in this scalar map.
 }
 
 
@@ -634,6 +640,68 @@ def from_flat(ops: dict) -> dict[str, Any]:
             }.get(ana_i, "max_proj / meanImg")
         elif "sparse_mode" in ops:
             out["algorithm"] = "sparsery" if ops["sparse_mode"] else "sourcery"
+
+    # lsp post-processing: cell_filters list-of-dicts → GUI's per-criterion
+    # (enabled, value) pairs. lsp run_lsp persists this list to ops.npy
+    # with one entry per active filter; mirrors build_cell_filters() in
+    # mbo_utilities (settings.py) so a saved run round-trips back into
+    # the same checkbox state.
+    cell_filters = ops.get("cell_filters")
+    if isinstance(cell_filters, (list, tuple)):
+        for entry in cell_filters:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if name == "max_diameter":
+                if "min_diameter_um" in entry and entry["min_diameter_um"]:
+                    out["min_diameter_um_enabled"] = True
+                    out["min_diameter_um"] = float(_to_py(entry["min_diameter_um"]))
+                if "max_diameter_um" in entry and entry["max_diameter_um"]:
+                    out["max_diameter_um_enabled"] = True
+                    out["max_diameter_um"] = float(_to_py(entry["max_diameter_um"]))
+            elif name == "negative_baseline":
+                out["baseline_filter_enabled"] = True
+                out["baseline_reject_negative_F0"] = True
+            elif name == "min_baseline_abs":
+                out["baseline_filter_enabled"] = True
+                out["baseline_min_F0_abs_enabled"] = True
+                if "min_F0_abs" in entry and entry["min_F0_abs"] is not None:
+                    out["baseline_min_F0_abs"] = float(_to_py(entry["min_F0_abs"]))
+            elif name == "min_baseline_rel":
+                out["baseline_filter_enabled"] = True
+                out["baseline_min_F0_rel_enabled"] = True
+                if "min_F0_rel" in entry and entry["min_F0_rel"] is not None:
+                    out["baseline_min_F0_rel"] = float(_to_py(entry["min_F0_rel"]))
+
+    # lsp post-processing: rastermap_kwargs dict → GUI's planar/volumetric
+    # toggles + per-mode overrides. Presence of "planar" / "volumetric"
+    # sub-dicts is the per-mode enable signal (mirrors lsp's unified api).
+    rm_kw = ops.get("rastermap_kwargs")
+    if isinstance(rm_kw, dict):
+        any_mode = False
+        planar = rm_kw.get("planar")
+        if isinstance(planar, dict):
+            out["rastermap_planar"] = True
+            any_mode = True
+            if "n_clusters" in planar and planar["n_clusters"] is not None:
+                out["rastermap_planar_n_clusters"] = int(_to_py(planar["n_clusters"]))
+            if "n_PCs" in planar and planar["n_PCs"] is not None:
+                out["rastermap_planar_n_pcs"] = int(_to_py(planar["n_PCs"]))
+            if "locality" in planar and planar["locality"] is not None:
+                out["rastermap_planar_locality"] = float(_to_py(planar["locality"]))
+        volumetric = rm_kw.get("volumetric")
+        if isinstance(volumetric, dict):
+            out["rastermap_volumetric"] = True
+            any_mode = True
+            if "n_clusters" in volumetric and volumetric["n_clusters"] is not None:
+                out["rastermap_volumetric_n_clusters"] = int(_to_py(volumetric["n_clusters"]))
+            if "n_PCs" in volumetric and volumetric["n_PCs"] is not None:
+                out["rastermap_volumetric_n_pcs"] = int(_to_py(volumetric["n_PCs"]))
+        if any_mode:
+            # Skip=0, Run=1, Force=2. We don't know force-vs-run from a
+            # saved run, so default to Run when either mode is enabled.
+            out["rastermap_mode"] = 1
+
     return out
 
 
