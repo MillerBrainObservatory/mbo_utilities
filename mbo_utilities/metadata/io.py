@@ -994,12 +994,18 @@ def _build_ome_metadata(
         }
     ]
 
+    # ngff 0.5: per-multiscale `version` was removed (lives only on parent
+    # `ome` object). strict schema also requires `metadata` and `type`.
     multiscales = [
         {
-            "version": "0.5",
             "name": metadata.get("name", "volume"),
             "axes": axes,
             "datasets": datasets,
+            "type": "none",
+            "metadata": {
+                "method": "none",
+                "description": "Single resolution level (no pyramid)",
+            },
         }
     ]
 
