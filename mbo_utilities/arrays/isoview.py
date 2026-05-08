@@ -1559,7 +1559,12 @@ class IsoViewOutputArray(Shape5DMixin):
         self._fused_stack_naming = False
 
         if tif_files:
-            self._file_ext = ".tif"
+            # OME-TIFF outputs use the compound extension `.ome.tif`; preserve
+            # it so reconstructed filenames in `_get_file_path` actually exist.
+            if any(f.name.endswith(".ome.tif") for f in tif_files):
+                self._file_ext = ".ome.tif"
+            else:
+                self._file_ext = ".tif"
             self._data_files = tif_files
         elif klb_files:
             self._file_ext = ".klb"
@@ -1597,6 +1602,7 @@ class IsoViewOutputArray(Shape5DMixin):
         # SPM00_TM000000_CM00_VW01.tif -> camera=0, view=1
         # SPM00_TM000000_CM00_CM01_VW01.fusedStack.klb -> fused cameras 0+1, view=1
         # SPM00_TM000000_VW00.tif -> view=0 (no camera)
+        # SPM00_TM000000_CM00.zarr -> camera=0 (corrected per-camera, no VW)
         pattern_cm = re.compile(
             r"SPM(\d+)_TM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
@@ -1605,6 +1611,9 @@ class IsoViewOutputArray(Shape5DMixin):
         )
         pattern_vw = re.compile(
             r"SPM(\d+)_TM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
+        )
+        pattern_cm_only = re.compile(
+            r"SPM(\d+)_TM(\d+)_CM(\d+)(?:\.[a-zA-Z]+)+" + "$"
         )
 
         self._views = []
@@ -1651,6 +1660,18 @@ class IsoViewOutputArray(Shape5DMixin):
                     self._file_map[view_idx] = {"view": view_idx}
                 continue
 
+            # try CM-only pattern (corrected per-camera output, no VW suffix)
+            match = pattern_cm_only.match(f.name)
+            if match:
+                specimen, timepoint, camera = map(int, match.groups())
+                self._specimen = specimen
+                self._view_type = "cm"
+                self._pipeline_stage = "isoview-corrected"
+                if camera not in self._views:
+                    self._views.append(camera)
+                    self._file_map[camera] = {"camera": camera}
+                continue
+
         if not self._views:
             raise ValueError(f"No valid data files found in {tm_folder}")
 
@@ -1668,7 +1689,7 @@ class IsoViewOutputArray(Shape5DMixin):
 
     def _read_shape(self, file_path: Path):
         """Read shape, dtype, and pixel spacing from first file."""
-        if self._file_ext == ".tif":
+        if self._file_ext in (".tif", ".ome.tif"):
             import tifffile
             with tifffile.TiffFile(str(file_path)) as tif:
                 # get shape from first series
@@ -1871,6 +1892,9 @@ class IsoViewOutputArray(Shape5DMixin):
             filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_VW{info['view']:02d}{ext}"
             if not (tm_folder / filename).exists():
                 filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_CHN{info['view']:02d}{ext}"
+        elif self._view_type == "cm":
+            info = self._file_map[view]
+            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}{ext}"
         else:  # view
             filename = f"SPM{sp:02d}_TM{tp:06d}_VW{view:02d}{ext}"
             if not (tm_folder / filename).exists():
@@ -1888,7 +1912,7 @@ class IsoViewOutputArray(Shape5DMixin):
         if not path.exists():
             raise FileNotFoundError(f"File not found: {path}")
 
-        if self._file_ext == ".tif":
+        if self._file_ext in (".tif", ".ome.tif"):
             import tifffile
             data = tifffile.imread(str(path))
         elif self._file_ext == ".klb":
@@ -1905,6 +1929,10 @@ class IsoViewOutputArray(Shape5DMixin):
             else:
                 arr = z
             data = arr[:]
+            # multiscale OME-Zarr stores per-volume arrays as (1, 1, Z, Y, X);
+            # downstream slicing assumes (Z, Y, X), so peel singleton T/C.
+            while data.ndim > 3 and data.shape[0] == 1:
+                data = data[0]
         else:
             raise ValueError(f"Unsupported file type: {self._file_ext}")
 
@@ -1917,6 +1945,8 @@ class IsoViewOutputArray(Shape5DMixin):
 
     def _detect_view_dim(self) -> str:
         """Auto-detect view dimension name from file pattern."""
+        if self._view_type == "cm":
+            return "cm"
         if self._view_type == "vw":
             return "vw"
         elif self._view_type == "view":
@@ -2706,3 +2736,455 @@ class ClusterPTArray(Shape5DMixin):
             f"ClusterPTArray(shape={self.shape}, dtype={self.dtype}, "
             f"views={self._views}, timepoints={len(self.tm_folders)})"
         )
+
+
+def _find_isoview_corrected_root(p: Path) -> Path | None:
+    """Return the `*.corrected/` directory associated with `p`.
+
+    The Keller-lab pipeline emits `<dataset>.corrected/` as the top-level
+    output, with per-camera zarrs under `SPM00/` and fused-view OME-TIFFs
+    under `Results/MultiFused_geometric/SPM00/`. Acceptable inputs:
+        1. the `.corrected` directory itself
+        2. its parent (dataset root)
+        3. any descendant inside the tree (e.g. `.corrected/SPM00` or
+           `.corrected/SPM00/TM000000`) — walk up until we hit the
+           `.corrected` ancestor.
+    """
+    if not p.is_dir():
+        return None
+
+    if p.name.endswith(".corrected") and (p / "SPM00").is_dir():
+        return p
+
+    for child in p.iterdir():
+        if (
+            child.is_dir()
+            and child.name.endswith(".corrected")
+            and (child / "SPM00").is_dir()
+        ):
+            return child
+
+    for ancestor in p.parents:
+        if (
+            ancestor.name.endswith(".corrected")
+            and (ancestor / "SPM00").is_dir()
+        ):
+            return ancestor
+
+    return None
+
+
+class IsoViewCorrectedArray(Shape5DMixin):
+    """Combined view of a Keller-lab `*.corrected/` isoview pipeline output.
+
+    Wraps the per-camera corrected zarrs (`SPM00/TM######/SPM00_TM######_CM##.zarr`)
+    and the fused-view OME-TIFFs (`Results/MultiFused_geometric/SPM00/TM######/
+    SPM00_TM######_CM##_CM##_VW##.ome.tif`) as a single lazy 5D array with a
+    real OME-NGFF channel axis.
+
+    Channels are concatenated as `[CM00, CM01, ..., VW00_fused, VW90_fused, ...]`
+    so the GUI's existing multi-channel paths (napari channel_axis split,
+    save-as channel selection, `num_color_channels` metadata) work without
+    special-casing.
+
+    Shape: ``(T, C, Z, Y, X)``.
+    Dims: ``("T", "C", "Z", "Y", "X")``.
+
+    Parameters
+    ----------
+    path : str | Path
+        Either the `*.corrected/` directory or its dataset-root parent.
+    """
+
+    def __init__(self, path: str | Path):
+        self.base_path = Path(path)
+        if not self.base_path.exists():
+            raise FileNotFoundError(f"Path does not exist: {self.base_path}")
+
+        corrected_root = _find_isoview_corrected_root(self.base_path)
+        if corrected_root is None:
+            raise ValueError(
+                f"Not an isoview .corrected output: {self.base_path}"
+            )
+        self.corrected_root = corrected_root
+
+        self._children: list[tuple[str, "IsoViewOutputArray"]] = []
+        self._channel_names: list[str] = []
+        self._chan_to_source: list[tuple[int, int]] = []
+        self._metadata: dict = {}
+
+        self._discover_children()
+        self._validate_alignment()
+        self._merge_metadata()
+
+    def _discover_children(self) -> None:
+        """Locate the camera and fused-view trees and instantiate readers for each."""
+        cam_dir = self.corrected_root / "SPM00"
+        if cam_dir.is_dir() and _find_tm_folders(cam_dir):
+            try:
+                cam_arr = IsoViewOutputArray(cam_dir)
+            except (ValueError, FileNotFoundError) as e:
+                logger.debug(f"camera tree at {cam_dir} unreadable: {e}")
+            else:
+                self._children.append(("cameras", cam_arr))
+
+        fused_dir = (
+            self.corrected_root / "Results" / "MultiFused_geometric" / "SPM00"
+        )
+        if fused_dir.is_dir() and _find_tm_folders(fused_dir):
+            try:
+                view_arr = IsoViewOutputArray(fused_dir)
+            except (ValueError, FileNotFoundError) as e:
+                logger.debug(f"fused-view tree at {fused_dir} unreadable: {e}")
+            else:
+                self._children.append(("views", view_arr))
+
+        if not self._children:
+            raise ValueError(
+                f"No isoview camera or fused-view data under {self.corrected_root}"
+            )
+
+        for ci, (label, child) in enumerate(self._children):
+            for vi, view_key in enumerate(child.views):
+                self._chan_to_source.append((ci, vi))
+                self._channel_names.append(
+                    self._channel_label(label, child, view_key)
+                )
+
+    @staticmethod
+    def _channel_label(group_label: str, child: "IsoViewOutputArray", view_key) -> str:
+        """Build a human-readable channel name for a child view.
+
+        Camera trees (`view_type == "cm"`) yield ``CM##``; fused trees
+        (`view_type == "fused"`) yield ``VW##_fused`` using the VW number
+        from the child's `_file_map` rather than the camera-pair tuple.
+        Falls back to a positional label when the source structure is
+        unfamiliar.
+        """
+        vt = getattr(child, "_view_type", None)
+        info = child._file_map.get(view_key, {}) if hasattr(child, "_file_map") else {}
+        if vt == "cm" and isinstance(view_key, int):
+            return f"CM{view_key:02d}"
+        if vt == "fused":
+            vw = info.get("view")
+            return f"VW{vw:02d}_fused" if isinstance(vw, int) else f"fused_{view_key}"
+        if vt in ("vw", "view") and isinstance(view_key, int):
+            return f"VW{view_key:02d}"
+        # generic fallback
+        return f"{group_label}_{view_key}"
+
+    def _validate_alignment(self) -> None:
+        """Pick T/Z/Y/X for the combined array.
+
+        Children may carry differing timepoint counts when one tree is still
+        being processed (common with iso-view: per-camera correction often
+        finishes before fusion). Truncate to the shortest T so missing fused
+        frames don't surface as out-of-range reads. Z, Y, X must still match
+        because they describe a single volume's geometry, not a job's
+        progress, and a mismatch there would silently misregister channels.
+        """
+        ref_label, ref = self._children[0]
+        self._nt = min(child.num_timepoints for _, child in self._children)
+        self._nz = ref.num_planes
+        self._ny = ref._single_shape[1]
+        self._nx = ref._single_shape[2]
+        self._dtype = ref.dtype
+        for label, child in self._children[1:]:
+            if child.num_planes != self._nz:
+                raise ValueError(
+                    f"z-plane mismatch: {label}={child.num_planes} "
+                    f"vs {ref_label}={self._nz}"
+                )
+            if child._single_shape[1:] != (self._ny, self._nx):
+                raise ValueError(
+                    f"YX mismatch: {label}={child._single_shape[1:]} "
+                    f"vs {ref_label}=({self._ny}, {self._nx})"
+                )
+
+    def _merge_metadata(self) -> None:
+        """Pull spatial scale / sampling rate from the first child."""
+        ref_meta = self._children[0][1].metadata
+        for k in ("dx", "dy", "dz", "fs"):
+            if k in ref_meta:
+                self._metadata[k] = ref_meta[k]
+
+    @property
+    def shape(self) -> tuple[int, int, int, int, int]:
+        return (self._nt, len(self._chan_to_source), self._nz, self._ny, self._nx)
+
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
+        return self.shape
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    @property
+    def ndim(self) -> int:
+        return 5
+
+    @property
+    def size(self) -> int:
+        return int(np.prod(self.shape))
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        return ("T", "C", "Z", "Y", "X")
+
+    @property
+    def channel_names(self) -> list[str]:
+        return list(self._channel_names)
+
+    @property
+    def num_color_channels(self) -> int:
+        return len(self._chan_to_source)
+
+    @property
+    def views(self) -> list[int]:
+        return list(range(self.num_color_channels))
+
+    @property
+    def num_timepoints(self) -> int:
+        return self._nt
+
+    @property
+    def num_planes(self) -> int:
+        return self._nz
+
+    @property
+    def metadata(self) -> dict:
+        meta = dict(self._metadata)
+        meta["Ly"] = self._ny
+        meta["Lx"] = self._nx
+        meta["num_zplanes"] = self._nz
+        meta["nplanes"] = self._nz
+        meta["num_planes"] = self._nz
+        meta["num_timepoints"] = self._nt
+        meta["nframes"] = self._nt
+        meta["num_frames"] = self._nt
+        meta["num_color_channels"] = self.num_color_channels
+        meta["channel_names"] = list(self._channel_names)
+        meta["dtype"] = str(self._dtype)
+        meta["stack_type"] = "isoview-corrected-combined"
+        meta["pipeline_stage"] = "isoview-corrected-combined"
+        meta["shape"] = self.shape
+        return meta
+
+    @metadata.setter
+    def metadata(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        self._metadata.update(value)
+
+    @property
+    def filenames(self) -> list[Path]:
+        out: list[Path] = []
+        for _, child in self._children:
+            out.extend(child.filenames)
+        return out
+
+    def __len__(self) -> int:
+        return self._nt
+
+    def __getitem__(self, key):
+        """Index as ``(T, C, Z, Y, X)``."""
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (5 - len(key))
+        t_key, c_key, z_key, y_key, x_key = key
+
+        def to_indices(k, max_val):
+            if isinstance(k, int):
+                return [k if k >= 0 else max_val + k]
+            if isinstance(k, slice):
+                return list(range(*k.indices(max_val)))
+            if isinstance(k, (list, np.ndarray)):
+                return list(k)
+            return list(range(max_val))
+
+        c_indices = to_indices(c_key, self.num_color_channels)
+
+        # use the slice form of t/z/y/x to delegate to children — children
+        # natively support int/slice/list keys per axis. we just iterate
+        # channels and stack along the C axis.
+        slabs: list[np.ndarray] = []
+        for ci in c_indices:
+            child_idx, view_idx = self._chan_to_source[ci]
+            child = self._children[child_idx][1]
+            # IsoViewOutputArray natural shape is (T, Z, Views, Y, X);
+            # pin the view to the child-local index, forward T/Z/Y/X.
+            chunk = child[t_key, z_key, view_idx, y_key, x_key]
+            slabs.append(np.asarray(chunk))
+
+        if not slabs:
+            empty_shape = self._materialize_shape(t_key, z_key, y_key, x_key)
+            return np.empty((*empty_shape[:1], 0, *empty_shape[1:]), dtype=self._dtype)
+
+        # All slabs share the chunk shape returned by the child for one view:
+        # the chunk has T/Z/Y/X axes with int-indexed dims already squeezed.
+        # Stacking along axis 0 puts C at the front; the C axis in our
+        # (T, C, Z, Y, X) contract sits *just after* T, so move C to slot 1
+        # only when T survived (T was a slice/list). Otherwise C stays at 0.
+        stacked = np.stack(slabs, axis=0)
+        target_c_axis = 0 if isinstance(t_key, int) else 1
+        if target_c_axis != 0:
+            stacked = np.moveaxis(stacked, 0, target_c_axis)
+
+        if isinstance(c_key, int):
+            stacked = np.take(stacked, 0, axis=target_c_axis)
+
+        return stacked
+
+    def _materialize_shape(self, t_key, z_key, y_key, x_key):
+        def length(k, max_val):
+            if isinstance(k, int):
+                return None  # int dims are squeezed
+            if isinstance(k, slice):
+                return len(range(*k.indices(max_val)))
+            if isinstance(k, (list, np.ndarray)):
+                return len(k)
+            return max_val
+
+        dims = [
+            length(t_key, self._nt),
+            length(z_key, self._nz),
+            length(y_key, self._ny),
+            length(x_key, self._nx),
+        ]
+        return tuple(d for d in dims if d is not None)
+
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        out = self[:]
+        if dtype is not None:
+            out = out.astype(dtype)
+        return out
+
+    def astype(self, dtype, *args, **kwargs) -> np.ndarray:
+        return np.asarray(self).astype(dtype, *args, **kwargs)
+
+    def close(self) -> None:
+        for _, child in self._children:
+            close = getattr(child, "close", None)
+            if callable(close):
+                close()
+
+    def _imwrite(
+        self,
+        outpath: Path | str,
+        overwrite: bool = False,
+        target_chunk_mb: int = 50,
+        ext: str = ".tiff",
+        progress_callback=None,
+        debug: bool = False,
+        planes: list[int] | int | None = None,
+        **kwargs,
+    ):
+        from mbo_utilities.arrays._base import _imwrite_base
+
+        return _imwrite_base(
+            self,
+            outpath,
+            planes=planes,
+            ext=ext,
+            overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb,
+            progress_callback=progress_callback,
+            debug=debug,
+            **kwargs,
+        )
+
+    def __repr__(self):
+        return (
+            f"IsoViewCorrectedArray(shape={self.shape}, dtype={self.dtype}, "
+            f"channels={self._channel_names})"
+        )
+
+
+def isoview_to_ome_zarr(
+    src: str | Path,
+    out: str | Path,
+    *,
+    timepoints: list[int] | int | None = None,
+    channels: list[int] | int | None = None,
+    planes: list[int] | int | None = None,
+    overwrite: bool = False,
+    target_chunk_mb: int = 64,
+    sharded: bool = True,
+    compressor: str = "zstd",
+    compression_level: int = 3,
+    shuffle: str | None = None,
+    pyramid: bool = False,
+    pyramid_max_layers: int = 4,
+    pyramid_method: str = "mean",
+    output_suffix: str | None = None,
+    progress_callback=None,
+    show_progress: bool = True,
+    debug: bool = False,
+):
+    """Convert an isoview ``*.corrected/`` tree to a single 5D OME-Zarr.
+
+    Wraps :class:`IsoViewCorrectedArray` (per-camera corrected zarrs +
+    fused-view OME-TIFFs under ``Results/MultiFused_geometric/``) and writes
+    a single zarr v3 group with shape ``(T, C, Z, Y, X)`` and NGFF v0.5
+    multiscales. The omero block carries one channel entry per ``CM##`` /
+    ``VW##_fused`` view so napari/OMERO readers can label and tint each one.
+
+    Parameters
+    ----------
+    src : str | Path
+        Path to a ``*.corrected/`` directory or its parent dataset root.
+    out : str | Path
+        Output directory; the zarr filename is generated from the array's
+        dims (timepoint range + planes + channels) plus ``output_suffix``.
+    timepoints, channels, planes : int | list[int] | None
+        1-based selections forwarded to the writer (None = all).
+    overwrite : bool
+        Overwrite an existing zarr at the resolved output path.
+    target_chunk_mb : int
+        Target shard size in MB. Inner chunks are ``(1, 1, 1, Y, X)`` so
+        per-plane scrubbing decompresses only the requested plane.
+    sharded : bool
+        Use zarr v3 sharding (recommended).
+    compressor, compression_level, shuffle :
+        Codec config inside the shard. ``compressor`` is one of
+        ``"none"``, ``"gzip"``, ``"zstd"``, ``"blosc-lz4"``, ``"blosc-zstd"``.
+    pyramid, pyramid_max_layers, pyramid_method :
+        Multi-resolution pyramid config. Only Y/X are downsampled
+        (factors ``(1, 1, 1, 2, 2)`` for 5D output).
+    output_suffix : str | None
+        Filename suffix; defaults to ``"isoview"``.
+
+    Returns
+    -------
+    Path
+        Path to the written ``.zarr`` group.
+
+    Examples
+    --------
+    >>> isoview_to_ome_zarr(
+    ...     "D:/isoview_pipeline_demo/Dme_E1.corrected",
+    ...     "D:/isoview_pipeline_demo/exports",
+    ...     pyramid=True,
+    ... )
+    """
+    arr = IsoViewCorrectedArray(src)
+    return arr._imwrite(
+        out,
+        ext=".zarr",
+        overwrite=overwrite,
+        target_chunk_mb=target_chunk_mb,
+        progress_callback=progress_callback,
+        show_progress=show_progress,
+        debug=debug,
+        planes=planes,
+        frames=timepoints,
+        channels=channels,
+        sharded=sharded,
+        compressor=compressor,
+        compression_level=compression_level,
+        shuffle=shuffle,
+        pyramid=pyramid,
+        pyramid_max_layers=pyramid_max_layers,
+        pyramid_method=pyramid_method,
+        output_suffix=output_suffix or "isoview",
+    )

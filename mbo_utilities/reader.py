@@ -33,7 +33,9 @@ from mbo_utilities.arrays import (
     _extract_tiff_plane_number,
     open_scanimage,
 )
+from mbo_utilities.arrays import IsoViewCorrectedArray
 from mbo_utilities.arrays.isoview import (
+    _find_isoview_corrected_root,
     _find_tm_folders,
     _has_tm_pattern,
     _TILED_CORRECTED_PATTERN,
@@ -48,7 +50,7 @@ if TYPE_CHECKING:
 logger = log.get("reader")
 
 # UI dropdown shows these formats (excludes .tif to avoid duplication)
-MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".klb", ".mp4", ".avi", ".mov"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".klb", ".mp4", ".mov"]
 # reading accepts .tif as alias for .tiff
 MBO_READABLE_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy", ".klb"]
 
@@ -187,6 +189,17 @@ def imread(
         elif p.is_dir():
             logger.debug(f"Input is a directory, searching for supported files in {p}")
 
+            # Check for an isoview `.corrected/` pipeline output root, either
+            # the `.corrected` directory itself or its dataset-root parent.
+            # Returns a single (T, C, Z, Y, X) array combining per-camera and
+            # fused-view trees as channels — see IsoViewCorrectedArray.
+            corrected_root = _find_isoview_corrected_root(p)
+            if corrected_root is not None:
+                logger.info(
+                    f"Detected isoview .corrected root: {corrected_root.name}"
+                )
+                return IsoViewCorrectedArray(corrected_root)
+
             # Check for raw Isoview structure: .stack files with XML metadata
             stack_files = list(p.glob("*.stack"))
             if stack_files:
@@ -233,10 +246,21 @@ def imread(
                     )
                     return IsoViewOutputArray(p)
                 elif zarr_files:
-                    logger.info(
-                        f"Detected Isoview structure with {len(tm_folders)} TM folders."
-                    )
-                    return IsoviewArray(p)
+                    # Prefer the pipeline-output reader: it handles CM-only,
+                    # CM+VW, fused-CM, and VW-only naming for zarr trees.
+                    # Fall back to the raw IsoviewArray only when filenames
+                    # don't match any pipeline-output pattern.
+                    try:
+                        logger.info(
+                            f"Detected IsoView output with {len(tm_folders)} TM folders and zarr files."
+                        )
+                        return IsoViewOutputArray(p)
+                    except (ValueError, FileNotFoundError):
+                        logger.info(
+                            f"Falling back to raw IsoviewArray for {p} "
+                            "(filenames did not match pipeline-output patterns)."
+                        )
+                        return IsoviewArray(p)
 
             # Check if this IS a TM folder (single timepoint)
             # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
@@ -259,7 +283,10 @@ def imread(
                     logger.info(
                         f"Detected single TM folder with {len(zarrs)} zarr files."
                     )
-                    return IsoviewArray(p)
+                    try:
+                        return IsoViewOutputArray(p)
+                    except (ValueError, FileNotFoundError):
+                        return IsoviewArray(p)
 
             zarrs = list(p.glob("*.zarr"))
             if zarrs:

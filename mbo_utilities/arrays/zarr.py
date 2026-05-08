@@ -326,16 +326,20 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
 
     @property
     def _shape_tzyx(self) -> tuple[int, int, int, int]:
-        """internal 4D shape for zarr indexing."""
+        """internal 4D shape for zarr indexing (used by 2D/3D/4D source paths;
+        5D sources skip this and feed _shape5d directly)."""
         first_shape = self.zs[0].shape
         if len(first_shape) == 4:
             return first_shape
         if len(first_shape) == 3:
             t, h, w = first_shape
             return t, len(self.zs), h, w
+        if len(first_shape) == 2:
+            h, w = first_shape
+            return 1, len(self.zs), h, w
         raise ValueError(
             f"Unexpected zarr shape: {first_shape}. "
-            f"Expected 3D (T, H, W) or 4D (T, Z, H, W)"
+            f"Expected 2D (Y, X), 3D (T, Y, X), 4D (T, Z, Y, X), or 5D (T, C, Z, Y, X)"
         )
 
     @property
@@ -363,6 +367,12 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
 
 
     def _shape5d(self) -> tuple[int, int, int, int, int]:
+        # 5D source zarr: TCZYX is the natural layout, return as-is. This
+        # supports the multi-channel OME-Zarrs produced by isoview_to_ome_zarr
+        # and any other (T, C, Z, Y, X) NGFF stores.
+        first_shape = self.zs[0].shape
+        if len(first_shape) == 5:
+            return first_shape
         s = self._shape_tzyx
         return (s[0], 1, s[1], s[2], s[3])
 
@@ -408,15 +418,31 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
             return normalize(k)
 
         t_read = to_keep_slice(t_key)
+        c_read = to_keep_slice(c_key)
         z_read = to_keep_slice(z_key)
         y_read = normalize(y_key)
         x_read = normalize(x_key)
 
-        # internal zarr stores are TZYX — read without C
-        is_single_4d = len(self.zs) == 1 and len(self.zs[0].shape) == 4
+        first_ndim = len(self.zs[0].shape)
+        is_single_5d = len(self.zs) == 1 and first_ndim == 5
+        is_single_4d = len(self.zs) == 1 and first_ndim == 4
+        is_single_2d = len(self.zs) == 1 and first_ndim == 2
 
-        if is_single_4d:
+        if is_single_5d:
+            # native 5D TCZYX read — no synthesis required
+            out = self.zs[0][t_read, c_read, z_read, y_read, x_read]
+        elif is_single_4d:
+            # internal zarr stores are TZYX — read without C, insert C below
             out = self.zs[0][t_read, z_read, y_read, x_read]
+        elif is_single_2d:
+            # bare YX zarr: treat as single timepoint, single z-plane
+            if isinstance(t_key, (int, np.integer)) and int(t_key) != 0:
+                raise IndexError("T dimension has size 1, only index 0 is valid")
+            if isinstance(z_key, (int, np.integer)) and int(z_key) != 0:
+                raise IndexError("Z dimension has size 1, only index 0 is valid")
+            data = self.zs[0][y_read, x_read]
+            # data is (Y, X); reshape to (T=1, Z=1, Y, X)
+            out = data[np.newaxis, np.newaxis, ...]
         elif len(self.zs) == 1:
             # 3D zarr with implicit Z=1
             if isinstance(z_key, (int, np.integer)) and int(z_key) != 0:
@@ -440,13 +466,15 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegis
             arrs = [self.zs[i][t_read, y_read, x_read] for i in z_indices]
             out = np.stack(arrs, axis=1)
 
-        # at this point `out` is always 4D TZYX. insert C=1 at axis 1 so it
-        # matches the 5D contract advertised by `shape` / `ndim`.
-        out = np.expand_dims(out, axis=1)
+        # 4D-source paths produce a TZYX block; add the C axis so every path
+        # exits with a 5D TCZYX result matching the `shape` / `ndim` contract.
+        if not is_single_5d:
+            out = np.expand_dims(out, axis=1)
 
         # squeeze every axis the user passed as an integer, in 5D order
         # (T=0, C=1, Z=2). every such axis is guaranteed size-1 here because
-        # we read with slice-of-one above (T, Z) or because C is always 1.
+        # we read with slice-of-one above (T, C, Z) or — for non-5D sources —
+        # because C is always 1.
         squeeze_axes = []
         if isinstance(t_key, (int, np.integer)):
             squeeze_axes.append(0)

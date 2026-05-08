@@ -1405,12 +1405,6 @@ def _write_volumetric_zarr(
     n_frames = slicing.selections["T"].count if "T" in slicing.selections else 1
     n_planes = slicing.selections["Z"].count if "Z" in slicing.selections else 1
     n_channels = slicing.selections["C"].count if "C" in slicing.selections else 1
-    if n_channels != 1:
-        raise NotImplementedError(
-            f"_write_volumetric_zarr writes 4D TZYX and only supports a single "
-            f"channel; got n_channels={n_channels}. Select one channel via the "
-            f"`channels` kwarg."
-        )
     Ly, Lx = slicing.spatial_shape
 
     # coerce to plain python int — `slicing.spatial_shape` returns np.int
@@ -1420,8 +1414,15 @@ def _write_volumetric_zarr(
     Ly_out, Lx_out = int(Ly), int(Lx)
     n_frames = int(n_frames)
     n_planes = int(n_planes)
+    n_channels = int(n_channels)
 
-    target_shape = (n_frames, n_planes, Ly_out, Lx_out)
+    # 5D output when the source carries a real C axis with >1 entries; otherwise
+    # collapse C to keep 4D TZYX so the existing on-disk layout is unchanged.
+    output_5d = "C" in slicing.selections and n_channels > 1
+    if output_5d:
+        target_shape = (n_frames, n_channels, n_planes, Ly_out, Lx_out)
+    else:
+        target_shape = (n_frames, n_planes, Ly_out, Lx_out)
 
     # update metadata using OutputMetadata for reactive values
     # get dims from array
@@ -1448,7 +1449,9 @@ def _write_volumetric_zarr(
 
     if debug:
         logger.info(f"Writing volumetric zarr: {filename}")
-        logger.info(f"  Shape: {target_shape} (TZYX)")
+        logger.info(
+            f"  Shape: {target_shape} ({'TCZYX' if output_5d else 'TZYX'})"
+        )
         logger.info(
             f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}"
         )
@@ -1457,20 +1460,22 @@ def _write_volumetric_zarr(
                 f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)"
             )
 
-    # determine chunking based on target_chunk_mb
-    # for 4D TZYX, chunk along T dimension
-    bytes_per_frame = n_planes * Ly_out * Lx_out * np.dtype(data.dtype).itemsize
+    # determine chunking based on target_chunk_mb. chunk along T;
+    # bytes-per-T includes C only when the output is 5D.
+    itemsize = np.dtype(data.dtype).itemsize
+    if output_5d:
+        bytes_per_frame = n_channels * n_planes * Ly_out * Lx_out * itemsize
+        inner_chunk = (1, 1, 1, Ly_out, Lx_out)
+    else:
+        bytes_per_frame = n_planes * Ly_out * Lx_out * itemsize
+        # inner chunk shape: one (t, z) plane per chunk. (1, 1, Y, X) — picking
+        # full Z-stack chunks forced every per-plane read to decompress the
+        # whole Z stack, making scrubbing ~10x slower than necessary.
+        inner_chunk = (1, 1, Ly_out, Lx_out)
+
     target_bytes = target_chunk_mb * 1024 * 1024
     frames_per_chunk = max(1, int(target_bytes / bytes_per_frame))
     frames_per_chunk = min(frames_per_chunk, n_frames)
-
-    # inner chunk shape: one (t, z) plane per chunk. (1, n_planes, Y, X)
-    # forced every per-plane read to decompress the full Z-stack, making
-    # scrubbing ~10x slower than necessary (each frame paid the cost of
-    # decompressing 14× the data it needed). single-plane chunks let
-    # zarr v3 sharding fetch exactly the requested plane out of the
-    # shard, with no change in compressed size.
-    inner_chunk = (1, 1, Ly_out, Lx_out)
 
     # build codec chain
     inner_codecs = _build_inner_codecs(compressor, compression_level, shuffle=shuffle)
@@ -1478,7 +1483,10 @@ def _write_volumetric_zarr(
     if sharded:
         # shard size: multiple frames per shard for efficient sequential reads
         shard_t = min(n_frames, frames_per_chunk)
-        shard_shape = (shard_t, n_planes, Ly_out, Lx_out)
+        if output_5d:
+            shard_shape = (shard_t, n_channels, n_planes, Ly_out, Lx_out)
+        else:
+            shard_shape = (shard_t, n_planes, Ly_out, Lx_out)
 
         codec = ShardingCodec(
             chunk_shape=inner_chunk,
@@ -1494,11 +1502,12 @@ def _write_volumetric_zarr(
     # create zarr v3 group with OME-NGFF structure
     root = zarr.open_group(str(filename), mode="w", zarr_format=3)
 
-    # compute pyramid levels if enabled
+    # compute pyramid levels if enabled. PyramidConfig.get_scale_factors_for_ndim
+    # picks (1,1,2,2) for 4D and (1,1,1,2,2) for 5D, so leave scale_factors at
+    # the default and let it adapt to target_shape's ndim.
     if pyramid:
         pyramid_config = PyramidConfig(
             max_layers=pyramid_max_layers,
-            scale_factors=(1, 1, 2, 2),  # TZYX: only downsample Y, X
             method=pyramid_method,
             min_size=64,
         )
@@ -1510,7 +1519,18 @@ def _write_volumetric_zarr(
     else:
         pyramid_levels = None
 
-    # create the array as "0" (full resolution level)
+    # OME-NGFF axes order: TZYX for 4D, TCZYX for 5D
+    output_dims = ("T", "C", "Z", "Y", "X") if output_5d else ("T", "Z", "Y", "X")
+    ome_meta = out_meta.to_ome_ngff(dims=output_dims)
+    base_scale = ome_meta["coordinateTransformations"][0]["scale"]
+    dimension_names = [d.lower() for d in output_dims]
+
+    # store dims in metadata for readers
+    md["dims"] = output_dims
+
+    # create the array as "0" (full resolution level). dimension_names is a
+    # top-level zarr v3 array metadata field (not an attribute) per the
+    # NGFF 0.5 / zarr v3 spec.
     z = zarr.create(
         store=root.store,
         path="0",
@@ -1518,23 +1538,25 @@ def _write_volumetric_zarr(
         chunks=chunks,
         dtype=data.dtype,
         codecs=codecs,
+        dimension_names=dimension_names,
         overwrite=True,
     )
 
-    # build OME-NGFF metadata using OutputMetadata with array's dims
-    # for 4D output, use TZYX ordering
-    output_dims = ("T", "Z", "Y", "X")
-    ome_meta = out_meta.to_ome_ngff(dims=output_dims)
-    base_scale = ome_meta["coordinateTransformations"][0]["scale"]
+    # ngff 0.5 multiscale entry. version lives on the parent `ome` object
+    # only — having it here too is invalid in 0.5. `metadata` is required by
+    # the strict schema; it documents how the pyramid was generated.
+    multiscale_metadata = {
+        "method": pyramid_method,
+        "description": (
+            f"Downsampled with mbo_utilities using {pyramid_method} method"
+            if pyramid_levels
+            else "Single resolution level (no pyramid)"
+        ),
+    }
 
-    # store dims in metadata for readers
-    md["dims"] = output_dims
-
-    # build full OME-NGFF v0.5 structure with pyramid datasets
     if pyramid_levels:
         datasets = []
         for lvl in pyramid_levels:
-            # compute physical scale for this level
             # pyramid scale is relative (e.g., 1, 2, 4), multiply with base
             physical_scale = [
                 base_scale[i] * lvl.scale[i] for i in range(len(base_scale))
@@ -1550,17 +1572,16 @@ def _write_volumetric_zarr(
 
         multiscales = [
             {
-                "version": "0.5",
                 "name": metadata.get("name", filename.stem),
                 "axes": ome_meta["axes"],
                 "datasets": datasets,
                 "type": pyramid_method,
+                "metadata": multiscale_metadata,
             }
         ]
     else:
         multiscales = [
             {
-                "version": "0.5",
                 "name": metadata.get("name", filename.stem),
                 "axes": ome_meta["axes"],
                 "datasets": [
@@ -1571,6 +1592,8 @@ def _write_volumetric_zarr(
                         ],
                     }
                 ],
+                "type": "none",
+                "metadata": multiscale_metadata,
             }
         ]
 
@@ -1578,6 +1601,55 @@ def _write_volumetric_zarr(
         "version": "0.5",
         "multiscales": multiscales,
     }
+
+    # 5D output gets an omero.channels block keyed off the source channel_names
+    # so napari-ome-zarr / OMERO readers can render each C entry as its own
+    # channel (label + window). The 4D path intentionally skips this — the
+    # existing _build_omero_metadata treats Z as channels, which is wrong for
+    # NGFF and would regress current 4D consumers.
+    if output_5d:
+        channel_names = metadata.get("channel_names") if metadata else None
+        if not channel_names or len(channel_names) < n_channels:
+            channel_names = [f"Channel {i + 1}" for i in range(n_channels)]
+        else:
+            channel_names = list(channel_names[:n_channels])
+
+        if np.issubdtype(data.dtype, np.integer):
+            info = np.iinfo(data.dtype)
+            data_min, data_max = float(info.min), float(info.max)
+        else:
+            data_min, data_max = 0.0, 1.0
+
+        default_colors = [
+            "00FF00", "FF0000", "0000FF", "FFFF00",
+            "FF00FF", "00FFFF", "FFFFFF",
+        ]
+        channels_block = [
+            {
+                "active": True,
+                "coefficient": 1.0,
+                "color": default_colors[i % len(default_colors)],
+                "family": "linear",
+                "inverted": False,
+                "label": str(channel_names[i]),
+                "window": {
+                    "end": data_max,
+                    "max": data_max,
+                    "min": data_min,
+                    "start": data_min,
+                },
+            }
+            for i in range(n_channels)
+        ]
+        ome_content["omero"] = {
+            "channels": channels_block,
+            "rdefs": {
+                "defaultT": 0,
+                "defaultZ": n_planes // 2,
+                "model": "color" if n_channels > 1 else "greyscale",
+            },
+            "version": "0.5",
+        }
 
     # set OME metadata on the group
     root.attrs["ome"] = ome_content
@@ -1590,10 +1662,9 @@ def _write_volumetric_zarr(
     for k, v in serializable_md.items():
         root.attrs[k] = v
 
-    # set napari-compatible scale on level 0 array
+    # napari-compatible scale on level 0 array (dimension_names is set as
+    # a top-level zarr v3 field via zarr.create above, not in attrs)
     z.attrs["scale"] = base_scale
-    # set dimension_names for NGFF 0.5 compliance (lowercase)
-    z.attrs["dimension_names"] = [d.lower() for d in output_dims]
 
     # write data in chunks
     pbar = None
@@ -1607,8 +1678,9 @@ def _write_volumetric_zarr(
         for chunk_info in slicing.iter_chunks(chunk_dim="T", target_mb=target_chunk_mb):
             chunk_data = read_chunk(data, chunk_info, slicing.dims)
 
-            # squeeze singleton C — zarr target is 4D TZYX (n_channels==1 enforced above)
-            if chunk_data.ndim == 5:
+            # collapse the singleton C only for 4D TZYX output. read_chunk
+            # always returns 5D TCZYX, so the 5D writer keeps it as-is.
+            if not output_5d and chunk_data.ndim == 5:
                 chunk_data = chunk_data[:, 0, :, :, :]
 
             chunk_data = np.ascontiguousarray(chunk_data)
@@ -1616,8 +1688,8 @@ def _write_volumetric_zarr(
             t_start = t_offset
             t_end = t_start + chunk_data.shape[0]
 
-            # write to zarr level 0
-            z[t_start:t_end, :, :, :] = chunk_data
+            # write to zarr level 0 — leading-axis slice works for 4D and 5D
+            z[t_start:t_end] = chunk_data
 
             # update offset
             t_offset = t_end
@@ -1642,7 +1714,7 @@ def _write_volumetric_zarr(
                 unit="levels",
             )
 
-        scale_factors = pyramid_config.get_scale_factors_for_ndim(4)
+        scale_factors = pyramid_config.get_scale_factors_for_ndim(len(target_shape))
 
         for lvl in pyramid_levels[1:]:
             prev_level = lvl.level - 1
@@ -1657,11 +1729,8 @@ def _write_volumetric_zarr(
 
             # compute chunks for this level
             lvl_shape = level_data.shape
-            lvl_chunks = (
-                min(chunks[0], lvl_shape[0]),
-                min(chunks[1], lvl_shape[1]),
-                min(chunks[2], lvl_shape[2]),
-                min(chunks[3], lvl_shape[3]),
+            lvl_chunks = tuple(
+                min(chunks[i], lvl_shape[i]) for i in range(len(lvl_shape))
             )
 
             # create array for this level (simpler codec for smaller levels)
@@ -1674,6 +1743,7 @@ def _write_volumetric_zarr(
                 chunks=lvl_chunks,
                 dtype=data.dtype,
                 codecs=lvl_codecs,
+                dimension_names=dimension_names,
                 overwrite=True,
             )
 
@@ -1795,7 +1865,9 @@ def _write_zarr(
             array_codecs = codecs
             array_chunks = chunks
 
-            # Create the array as "0" (full resolution level)
+            # Create the array as "0" (full resolution level). 3D (T, Y, X)
+            # for the per-plane writer path; matches the axes/scale produced
+            # by _build_ome_metadata for ndim==3.
             z = zarr.create(
                 store=root.store,
                 path="0",
@@ -1803,6 +1875,7 @@ def _write_zarr(
                 chunks=array_chunks,
                 dtype=data.dtype,
                 codecs=array_codecs,
+                dimension_names=["t", "y", "x"],
                 overwrite=True,
             )
 
@@ -2142,6 +2215,163 @@ def write_ops(metadata, raw_filename, **kwargs):
     )
 
 
+VIDEO_QUALITY_PRESETS = ("preview", "high", "visually lossless", "lossless")
+
+
+def _format_overlay_time(t_seconds: float) -> str:
+    if t_seconds < 60:
+        return f"{t_seconds:5.1f}s"
+    m, s = divmod(t_seconds, 60)
+    return f"{int(m)}m {s:4.1f}s"
+
+
+def _draw_scalebar(frame_rgb: np.ndarray, dx_um: float) -> None:
+    """Draw a scalebar in the bottom-left with the label centered below the bar.
+
+    Bar width is exactly 10% of the frame so multiplying the label by 10
+    gives the full-frame width. The whole block (bar + gap + label + outline)
+    is laid out from the bottom up and clamped to stay inside the frame, so
+    the label never gets cut off on the bottom or the left.
+    """
+    import cv2
+    h, w = frame_rgb.shape[:2]
+    bar_px = max(2, int(round(w * 0.10)))
+    bar_um = bar_px * dx_um
+
+    text = f"{bar_um:.3g} um"
+    # smaller font than before — h/900 instead of h/600, capped at 0.6
+    font_scale = max(0.3, min(0.6, h / 900.0))
+    font_thickness = 1
+    (text_w, text_h), text_baseline = cv2.getTextSize(
+        text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness,
+    )
+
+    bar_h = max(2, int(round(h * 0.010)))
+    gap = max(2, int(round(h * 0.012)))  # space between bar and label
+    pad_x = max(4, int(round(w * 0.025)))
+    pad_y = max(4, int(round(h * 0.020)))
+    outline_pad = font_thickness + 1  # the +2 outline added per putText call
+
+    # lay out from the bottom up so the label baseline sits inside the frame
+    label_baseline_y = h - pad_y - outline_pad
+    label_top_y = label_baseline_y - text_h
+    bar_bottom_y = label_top_y - gap
+    bar_top_y = bar_bottom_y - bar_h
+
+    bar_x0 = pad_x
+    bar_x1 = bar_x0 + bar_px
+
+    # text centered on bar, but never off the left edge
+    text_x = bar_x0 + (bar_px - text_w) // 2
+    text_x = max(pad_x, text_x)
+    # also keep right edge inside the frame
+    text_x = min(text_x, w - pad_x - text_w)
+
+    # black backing under the bar for contrast on bright cmaps
+    cv2.rectangle(
+        frame_rgb,
+        (bar_x0 - 1, bar_top_y - 1), (bar_x1 + 1, bar_bottom_y + 1),
+        (0, 0, 0), -1,
+    )
+    cv2.rectangle(
+        frame_rgb,
+        (bar_x0, bar_top_y), (bar_x1, bar_bottom_y),
+        (255, 255, 255), -1,
+    )
+
+    cv2.putText(
+        frame_rgb, text, (text_x, label_baseline_y),
+        cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+        (0, 0, 0), font_thickness + 2, cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame_rgb, text, (text_x, label_baseline_y),
+        cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+        (255, 255, 255), font_thickness, cv2.LINE_AA,
+    )
+
+
+def _draw_time_overlay(frame_rgb: np.ndarray, t_seconds: float) -> None:
+    """Draw an MM:SS / X.Xs clock on `frame_rgb` in-place (top-left)."""
+    import cv2
+    h = frame_rgb.shape[0]
+    text = _format_overlay_time(t_seconds)
+    scale = max(0.4, min(1.5, h / 600.0))
+    thickness = max(1, int(round(scale * 1.6)))
+    pos = (max(6, int(scale * 12)), max(18, int(scale * 28)))
+    cv2.putText(
+        frame_rgb, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale,
+        (0, 0, 0), thickness + 2, cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame_rgb, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale,
+        (255, 255, 255), thickness, cv2.LINE_AA,
+    )
+
+# yuv420p is left to imageio's default — adding -pix_fmt here collides with
+# imageio's own injected -pix_fmt and triggers a "Multiple -pix_fmt" ffmpeg
+# warning. yuv420p is mathematically lossless for grayscale input since R=G=B
+# means chroma is identically zero (subsampling zero is still zero) and is the
+# only browser-compatible chroma layout.
+# veryslow + yuv444p was tried and crashed the bundled imageio-ffmpeg binary
+# mid-stream (broken pipe). slow gives ~95% of the compression efficiency at a
+# fraction of the memory/time and is rock-solid.
+# "lossless" intentionally uses crf=8, not crf=0: -crf 0 enables libx264's
+# lossless mode which produces a non-standard High Profile stream that Windows
+# Photos / Chrome / native QuickTime refuse to display (file is created but
+# won't open). crf=8 stays inside standard High Profile so every player works,
+# and for 8-bit output it is mathematically lossless within the LSB.
+_X264_PRESET_TABLE = {
+    "preview":           {"crf": 23, "preset": "medium", "tune": None},
+    "high":              {"crf": 18, "preset": "slow",   "tune": None},
+    "visually lossless": {"crf": 14, "preset": "slow",   "tune": None},
+    "lossless":          {"crf":  8, "preset": "slow",   "tune": "psnr"},
+}
+
+_MPEG4_QSCALE_TABLE = {
+    "preview": 8,
+    "high": 4,
+    "visually lossless": 2,
+    "lossless": 1,
+}
+
+
+def _resolve_quality_preset(quality: str | int) -> str:
+    """Normalize quality (string preset name or legacy 1-10 int) to a preset key."""
+    if isinstance(quality, str):
+        key = quality.strip().lower().replace("_", " ")
+        if key not in _X264_PRESET_TABLE:
+            raise ValueError(
+                f"Unknown quality preset {quality!r}. "
+                f"Expected one of {VIDEO_QUALITY_PRESETS}."
+            )
+        return key
+    q = int(quality)
+    if q <= 3:
+        return "preview"
+    if q <= 7:
+        return "high"
+    if q <= 9:
+        return "visually lossless"
+    return "lossless"
+
+
+def _build_video_output_params(codec: str, quality: str | int) -> list[str]:
+    """Build ffmpeg output_params for (codec, quality preset)."""
+    preset = _resolve_quality_preset(quality)
+    if codec in ("libx264", "libx265"):
+        cfg = _X264_PRESET_TABLE[preset]
+        params = ["-crf", str(cfg["crf"]), "-preset", cfg["preset"]]
+        if cfg.get("tune"):
+            params.extend(["-tune", cfg["tune"]])
+        return params
+    if codec == "mpeg4":
+        return ["-qscale:v", str(_MPEG4_QSCALE_TABLE[preset])]
+    if codec == "rawvideo":
+        return []
+    return ["-q:v", str(_MPEG4_QSCALE_TABLE[preset])]
+
+
 def to_video(
     data,
     output_path,
@@ -2156,12 +2386,17 @@ def to_video(
     spatial_smooth: float = 0,
     gamma: float = 1.0,
     cmap: str | None = None,
-    quality: int = 9,
+    quality: str | int = "visually lossless",
     codec: str = "libx264",
     max_frames: int | None = None,
+    mean_subtract: np.ndarray | None = None,
+    temporal_mode: str = "mean",
+    time_overlay: bool = False,
+    scalebar: bool = False,
+    pixel_size_um: float | None = None,
 ):
     """
-    Export array data to video file (mp4/avi).
+    Export array data to video file (mp4 or mov).
 
     Works with 3D (T, Y, X) or 4D (T, Z, Y, X) arrays, including lazy arrays.
     Optimized for high-quality output suitable for presentations and websites.
@@ -2171,7 +2406,7 @@ def to_video(
     data : array-like
         3D array (T, Y, X) or 4D array (T, Z, Y, X). Supports lazy arrays.
     output_path : str or Path
-        Output video path. Extension determines format (.mp4, .avi, .mov).
+        Output video path. Extension determines format (.mp4 or .mov).
     fps : int, default 30
         Base frame rate of the recording.
     speed_factor : float, default 1.0
@@ -2188,8 +2423,29 @@ def to_video(
     vmax_percentile : float, default 99.5
         Percentile for auto vmax calculation. Lower = brighter highlights.
     temporal_smooth : int, default 0
-        Rolling average window size (frames). Reduces flicker/noise.
-        0 = disabled, 3-7 = subtle smoothing, 10+ = heavy smoothing.
+        Rolling-window size in frames. Reduces flicker/noise.
+        0 = disabled, 3-7 = subtle, 10+ = heavy. The aggregation applied to
+        the window is controlled by `temporal_mode`.
+    temporal_mode : {"mean", "max", "std"}, default "mean"
+        How the rolling window is aggregated. "mean" smooths flicker, "max"
+        emphasizes transient activity, "std" highlights variance/noise.
+    mean_subtract : ndarray, optional
+        2D image (Y, X) subtracted from every frame before contrast scaling.
+        Useful for removing static structure to highlight dynamics.
+    time_overlay : bool, default False
+        Draw a clock in the top-left of every frame showing elapsed *recording*
+        time (frame_index / fps). Independent of speed_factor — the overlay
+        always reflects the source recording duration, so a sped-up clip ticks
+        through real seconds faster on screen.
+    scalebar : bool, default False
+        Draw a scalebar at exactly 10% of frame width in the bottom-left, with
+        a "NN um" label. Multiply the label by 10 to read the full-frame width.
+        Requires `pixel_size_um` (taken from `data.dx` automatically when the
+        input array exposes the VoxelSize feature).
+    pixel_size_um : float, optional
+        Pixel size in micrometers (X). Read from `data.dx` if not provided.
+        If neither source has a positive value, scalebar is silently skipped
+        with a warning.
     spatial_smooth : float, default 0
         Gaussian blur sigma (pixels). Reduces pixel noise.
         0 = disabled, 0.5-1.0 = subtle, 2+ = heavy blur.
@@ -2199,10 +2455,17 @@ def to_video(
     cmap : str, optional
         Matplotlib colormap name (e.g., "viridis", "gray", "hot").
         If None, outputs grayscale.
-    quality : int, default 9
-        Video quality (1-10, higher is better). 9-10 recommended for web.
+    quality : str or int, default "visually lossless"
+        Quality preset. One of:
+          - "preview"           crf 23, preset medium, yuv420p (small/fast)
+          - "high"              crf 18, preset slow,    yuv420p
+          - "visually lossless" crf 14, preset veryslow, yuv444p
+          - "lossless"          crf 0,  preset veryslow, yuv444p (math-lossless)
+        Ints 1-10 are mapped to presets for backwards compatibility
+        (1-3 -> preview, 4-7 -> high, 8-9 -> visually lossless, 10 -> lossless).
     codec : str, default "libx264"
-        Video codec. "libx264" for mp4 (best compatibility).
+        Video codec. "libx264" for mp4 (best compatibility). For mpeg4 the
+        preset is mapped to -qscale:v; lossless mode is not supported there.
     max_frames : int, optional
         Limit number of frames to export. If None, exports all frames.
 
@@ -2234,6 +2497,46 @@ def to_video(
 
     output_path = Path(output_path)
 
+    ext = output_path.suffix.lower()
+    if codec == "rawvideo" and ext != ".mkv":
+        raise ValueError(
+            f"codec='rawvideo' is not supported in {ext} containers — "
+            f"use .mkv (or pick codec='libx264' for .mp4/.mov)."
+        )
+
+    # resolve scalebar pixel size before np.asarray strips metadata-bearing wrappers.
+    # Try arr.dx, then arr.metadata['dx'], then arr.metadata['pixel_resolution'][0]
+    # (ScanImage stores it as a (dx, dy) tuple).
+    if scalebar and pixel_size_um is None:
+        candidates = []
+        candidates.append(getattr(data, "dx", None))
+        candidates.append(getattr(data, "dy", None))
+        md = getattr(data, "metadata", None)
+        if isinstance(md, dict):
+            candidates.append(md.get("dx"))
+            candidates.append(md.get("dy"))
+            pr = md.get("pixel_resolution")
+            if isinstance(pr, (tuple, list)) and len(pr) >= 1:
+                candidates.append(pr[0])
+            elif pr is not None:
+                candidates.append(pr)
+        for value in candidates:
+            try:
+                v = float(value)
+            except (TypeError, ValueError):
+                continue
+            if v > 0:
+                pixel_size_um = v
+                break
+    if scalebar and (pixel_size_um is None or pixel_size_um <= 0):
+        logger.warning(
+            f"scalebar requested but pixel_size_um is unavailable "
+            f"(resolved value: {pixel_size_um!r}); skipping."
+        )
+        scalebar = False
+    elif scalebar:
+        logger.info(f"Scalebar enabled with pixel_size_um={pixel_size_um}")
+
     # normalize to 5D TCZYX (handles raw numpy arrays from external callers)
     arr = np.asarray(data)
     if arr.ndim == 3:
@@ -2264,14 +2567,17 @@ def to_video(
         f"(speed_factor={speed_factor}x, duration={duration:.1f}s)"
     )
 
-    # Determine intensity range from sample frames
+    # Determine intensity range from sample frames. When mean_subtract is on,
+    # percentile must be computed on subtracted samples so contrast matches
+    # what gets rendered.
     if vmin is None or vmax is None:
-        # Sample frames across the video for percentile estimation
         n_samples = min(50, n_frames)
         sample_indices = np.linspace(0, n_frames - 1, n_samples, dtype=int)
         samples = []
         for i in sample_indices:
-            frame = np.asarray(arr[i, 0, plane_idx])
+            frame = np.asarray(arr[i, 0, plane_idx], dtype=np.float32)
+            if mean_subtract is not None:
+                frame = frame - np.asarray(mean_subtract, dtype=np.float32)
             samples.append(frame)
         sample_stack = np.stack(samples)
 
@@ -2294,23 +2600,35 @@ def to_video(
     else:
         colormap = None
 
-    # Map quality (1-10) to crf (28-18, lower crf = better quality)
-    crf = int(28 - (quality - 1) * (28 - 18) / 9)
+    output_params = _build_video_output_params(codec, quality)
+    logger.info(f"ffmpeg output params: {' '.join(output_params)}")
 
-    # Buffer for temporal smoothing
+    _temporal_aggregators = {
+        "mean": lambda buf: np.mean(buf, axis=0),
+        "max":  lambda buf: np.max(buf, axis=0),
+        "std":  lambda buf: np.std(buf, axis=0),
+    }
+    if temporal_mode not in _temporal_aggregators:
+        raise ValueError(
+            f"temporal_mode={temporal_mode!r} not in {list(_temporal_aggregators)}"
+        )
+    aggregate_window = _temporal_aggregators[temporal_mode]
     frame_buffer = [] if temporal_smooth > 0 else None
 
-    # Write video using imageio-ffmpeg
+    mean_sub_2d = None
+    if mean_subtract is not None:
+        mean_sub_2d = np.asarray(mean_subtract, dtype=np.float32)
+        if mean_sub_2d.shape != (height, width):
+            raise ValueError(
+                f"mean_subtract shape {mean_sub_2d.shape} != frame ({height}, {width})"
+            )
+
     writer = imageio.get_writer(
         str(output_path),
         fps=output_fps,
         codec=codec,
-        output_params=[
-            "-crf",
-            str(crf),
-            "-pix_fmt",
-            "yuv420p",
-        ],  # yuv420p for browser compatibility
+        macro_block_size=1,
+        output_params=output_params,
     )
 
     try:
@@ -2318,14 +2636,15 @@ def to_video(
             # get frame from 5D TCZYX (first channel, selected plane)
             frame = np.asarray(arr[i, 0, plane_idx], dtype=np.float32)
 
-            # Temporal smoothing (rolling average)
+            if mean_sub_2d is not None:
+                frame = frame - mean_sub_2d
+
             if temporal_smooth > 0:
                 frame_buffer.append(frame)
                 if len(frame_buffer) > temporal_smooth:
                     frame_buffer.pop(0)
-                frame = np.mean(frame_buffer, axis=0)
+                frame = aggregate_window(frame_buffer)
 
-            # Spatial smoothing (Gaussian blur)
             if spatial_smooth > 0:
                 frame = gaussian_filter(frame, sigma=spatial_smooth)
 
@@ -2344,6 +2663,14 @@ def to_video(
                 # Grayscale -> RGB
                 frame_uint8 = (frame * 255).astype(np.uint8)
                 frame_rgb = np.stack([frame_uint8] * 3, axis=-1)
+
+            if time_overlay or scalebar:
+                # cv2 draws in-place; ensure the array is contiguous and writable
+                frame_rgb = np.ascontiguousarray(frame_rgb)
+                if time_overlay:
+                    _draw_time_overlay(frame_rgb, i / fps)
+                if scalebar:
+                    _draw_scalebar(frame_rgb, pixel_size_um)
 
             writer.append_data(frame_rgb)
     finally:
@@ -2376,14 +2703,22 @@ def _write_volumetric_video(
     spatial_smooth: float = 0.0,
     gamma: float = 1.0,
     cmap: str | None = None,
-    quality: int = 9,
+    quality: str | int = "visually lossless",
     codec: str = "libx264",
+    mean_subtract_stack: np.ndarray | None = None,
+    temporal_mode: str = "mean",
+    time_overlay: bool = False,
+    scalebar: bool = False,
 ):
     """
     Write one video file per (z-plane, channel).
 
     Filename pattern: zplaneNN_tpN-tpN_chNN_<suffix>.<ext> — Z first because
     each file is a single plane; channel suffix is always present.
+
+    `mean_subtract_stack` is an optional (C, Z, Y, X) array of per-channel,
+    per-plane mean images; the (c, z) slice is forwarded to to_video for that
+    iteration.
     """
     from mbo_utilities.arrays.features import (
         OutputFilename,
@@ -2408,6 +2743,38 @@ def _write_volumetric_video(
         frame_indices_0 = None
 
     suffix = output_suffix.lstrip("_") if output_suffix else "movie"
+
+    # carry dx through to to_video — np.asarray(sliced) below would strip it.
+    # Try several sources because not every array type inherits VoxelSizeMixin:
+    #   1. arr.dx (VoxelSizeMixin, e.g. some Suite2pArray/Zarr paths)
+    #   2. arr.metadata['dx']                       (suite2p ops style)
+    #   3. arr.metadata['pixel_resolution'][0]      (ScanImage style — (dx, dy))
+    pixel_size_um = None
+    pixel_size_source = "none"
+    if scalebar:
+        candidates: list[tuple[str, object]] = []
+        candidates.append(("arr.dx", getattr(arr, "dx", None)))
+        md = getattr(arr, "metadata", None)
+        if isinstance(md, dict):
+            candidates.append(("metadata['dx']", md.get("dx")))
+            pr = md.get("pixel_resolution")
+            if isinstance(pr, (tuple, list)) and len(pr) >= 1:
+                candidates.append(("metadata['pixel_resolution'][0]", pr[0]))
+            elif pr is not None:
+                candidates.append(("metadata['pixel_resolution']", pr))
+        for source, value in candidates:
+            try:
+                v = float(value)
+            except (TypeError, ValueError):
+                continue
+            if v > 0:
+                pixel_size_um = v
+                pixel_size_source = source
+                break
+        logger.info(
+            f"Scalebar pixel size: candidates={[(s, v) for s, v in candidates]} "
+            f"-> pixel_size_um={pixel_size_um!r} (from {pixel_size_source})"
+        )
 
     t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes_total, frames)
 
@@ -2434,6 +2801,10 @@ def _write_volumetric_video(
             logger.info(
                 f"Writing video {file_idx + 1}/{total_files}: {target.name}"
             )
+            mean_img = None
+            if mean_subtract_stack is not None:
+                mean_img = mean_subtract_stack[c_idx, plane_idx]
+
             to_video(
                 sliced,
                 target,
@@ -2450,6 +2821,11 @@ def _write_volumetric_video(
                 cmap=cmap,
                 quality=quality,
                 codec=codec,
+                mean_subtract=mean_img,
+                temporal_mode=temporal_mode,
+                time_overlay=time_overlay,
+                scalebar=scalebar,
+                pixel_size_um=pixel_size_um,
             )
 
             file_idx += 1

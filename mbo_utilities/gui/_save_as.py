@@ -300,7 +300,7 @@ def _draw_options_popup(parent: Any):
     # screen when the Options button is at the bottom of the Save As dialog
     # — and tall content (video options) then gets clipped. centering on the
     # viewport sidesteps both problems.
-    is_video = parent._ext in (".mp4", ".avi", ".mov")
+    is_video = parent._ext in (".mp4", ".mov")
     viewport = imgui.get_main_viewport()
     default_h = min(720 if is_video else 420, int(viewport.size.y * 0.9))
     center = imgui.ImVec2(
@@ -507,7 +507,7 @@ def _draw_options_popup(parent: Any):
                             imgui.set_item_default_focus()
                     imgui.end_combo()
 
-        if parent._ext in (".mp4", ".avi", ".mov"):
+        if parent._ext in (".mp4", ".mov"):
             _draw_video_options(parent)
 
         imgui.spacing()
@@ -517,30 +517,171 @@ def _draw_options_popup(parent: Any):
         imgui.end_popup()
 
 
-_VIDEO_CMAPS = ["grayscale", "viridis", "magma", "inferno", "gray", "hot", "plasma", "cividis"]
-_VIDEO_CODECS = ["libx264", "mpeg4", "rawvideo"]
+_VIDEO_CODECS = ["libx264", "mpeg4"]
+_VIDEO_QUALITY_PRESETS = ["preview", "high", "visually lossless", "lossless"]
+_VIDEO_TEMPORAL_MODES = ["mean", "max", "std"]
+
+
+def _preview_fps(parent: Any) -> float | None:
+    """Look up sampling frequency from the loaded array, trying several sources."""
+    try:
+        data0 = parent.image_widget.data[0]
+    except Exception:
+        data0 = None
+    candidates = []
+    if data0 is not None:
+        candidates.append(getattr(data0, "fs", None))
+        md = getattr(data0, "metadata", None)
+        if isinstance(md, dict):
+            candidates.append(md.get("fs"))
+    md = getattr(parent, "metadata", None)
+    if isinstance(md, dict):
+        candidates.append(md.get("fs"))
+    for v in candidates:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f > 0:
+            return f
+    return None
+
+
+def _preview_cmap(parent: Any) -> str | None:
+    try:
+        c = str(parent.image_widget.graphics[0].cmap or "")
+    except Exception:
+        return None
+    return c or None
+
+
+def _preview_vmin_vmax(parent: Any) -> tuple[float, float] | None:
+    try:
+        g = parent.image_widget.graphics[0]
+        return float(g.vmin), float(g.vmax)
+    except Exception:
+        return None
+
+
+def _preview_temporal_mode_idx(parent: Any) -> int | None:
+    proj = getattr(parent, "_proj", None) or getattr(parent, "proj", None)
+    if proj in _VIDEO_TEMPORAL_MODES:
+        return _VIDEO_TEMPORAL_MODES.index(proj)
+    return None
+
+
+def _sync_video_options_from_preview(parent: Any) -> None:
+    """Pull every video-export field from the live preview state in one shot."""
+    synced: list[str] = []
+
+    fps = _preview_fps(parent)
+    if fps is not None:
+        parent._saveas_video_fps = max(1, int(round(fps)))
+        synced.append(f"fps={parent._saveas_video_fps}")
+
+    vv = _preview_vmin_vmax(parent)
+    if vv is not None:
+        parent._saveas_video_vmin, parent._saveas_video_vmax = vv
+        parent._saveas_video_auto = False
+        synced.append(f"vmin/vmax=[{vv[0]:.1f}, {vv[1]:.1f}]")
+
+    cmap = _preview_cmap(parent)
+    if cmap is not None:
+        if cmap not in parent._saveas_video_cmaps:
+            parent._saveas_video_cmaps = [cmap, *parent._saveas_video_cmaps]
+        parent._saveas_video_cmap_idx = parent._saveas_video_cmaps.index(cmap)
+        synced.append(f"cmap={cmap!r}")
+
+    ms = getattr(parent, "mean_subtraction", None)
+    if isinstance(ms, bool):
+        parent._saveas_video_mean_subtract = ms
+        synced.append(f"mean_subtract={ms}")
+
+    idx = _preview_temporal_mode_idx(parent)
+    if idx is not None:
+        parent._saveas_video_temporal_mode_idx = idx
+        synced.append(f"temporal_mode={_VIDEO_TEMPORAL_MODES[idx]!r}")
+
+    ws = getattr(parent, "window_size", None)
+    if isinstance(ws, int) and ws > 0:
+        parent._saveas_video_temporal_smooth = ws
+        synced.append(f"window={ws}")
+
+    sig = getattr(parent, "gaussian_sigma", None)
+    if isinstance(sig, (int, float)):
+        parent._saveas_video_spatial_smooth = float(sig)
+        synced.append(f"sigma={float(sig):.2f}")
+
+    if synced:
+        parent.logger.info("Synced from preview: " + ", ".join(synced))
+    else:
+        parent.logger.warning(
+            "Sync from preview found no usable values (fs not set, no graphics, etc.)"
+        )
+
+
+def _write_mean_subtract_stack(parent: Any) -> str | None:
+    """If mean-subtract is enabled and zstats are computed, write a (C, Z, Y, X)
+    npy file and return its path. Returns None if not applicable / unavailable."""
+    if not getattr(parent, "_saveas_video_mean_subtract", False):
+        return None
+    means = getattr(parent, "_zstats_means", None)
+    done = getattr(parent, "_zstats_done", None)
+    if not means or not done:
+        return None
+    import numpy as np
+    import tempfile
+
+    stacks = []
+    for c in range(getattr(parent, "num_graphics", len(means))):
+        if c >= len(done) or not done[c] or means[c] is None:
+            return None
+        stacks.append(np.asarray(means[c], dtype=np.float32))
+    if not stacks:
+        return None
+    stack = np.stack(stacks, axis=0)  # (C, Z, Y, X)
+    fd, path = tempfile.mkstemp(prefix="mbo_meansub_", suffix=".npy")
+    import os
+    os.close(fd)
+    np.save(path, stack)
+    return path
+
+
 
 
 def _draw_video_options(parent: Any):
-    """Video-specific options shown when ext is .mp4/.avi/.mov."""
+    """Video-specific options shown when ext is .mp4 or .mov."""
     imgui.spacing()
     imgui.separator()
     imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Video Options")
+    imgui.same_line()
+    if imgui.button("Sync from preview"):
+        _sync_video_options_from_preview(parent)
+    set_tooltip(
+        "Pull current values from the preview widget: fps (metadata.fs), "
+        "vmin/vmax (histogram), colormap, mean-subtract toggle, "
+        "temporal projection mode, window size, and gaussian sigma."
+    )
     imgui.dummy(imgui.ImVec2(0, 5))
 
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._saveas_video_fps = imgui.drag_int(
-        "FPS", parent._saveas_video_fps, v_speed=1, v_min=1, v_max=120
+    imgui.set_next_item_width(hello_imgui.em_size(10))
+    _, parent._saveas_video_fps = imgui.input_int(
+        "FPS", parent._saveas_video_fps, step=1, step_fast=10
     )
-    set_tooltip("Base frame rate of the recording.")
+    parent._saveas_video_fps = max(1, min(int(parent._saveas_video_fps), 240))
+    set_tooltip("Base frame rate of the recording. Type a value or use +/-.")
 
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._saveas_video_speed_factor = imgui.drag_float(
-        "Speed", parent._saveas_video_speed_factor, v_speed=0.1, v_min=0.1, v_max=100.0
+    imgui.set_next_item_width(hello_imgui.em_size(10))
+    _, parent._saveas_video_speed_factor = imgui.input_float(
+        "Speed", parent._saveas_video_speed_factor,
+        step=0.1, step_fast=1.0, format="%.2f",
+    )
+    parent._saveas_video_speed_factor = max(
+        0.1, min(float(parent._saveas_video_speed_factor), 100.0)
     )
     set_tooltip(
-        "Playback speed multiplier. 10x plays 10x faster (all frames included, "
-        "just faster playback). Output FPS = FPS * Speed."
+        "Playback speed multiplier. Type any value (e.g. 10, 10.5). "
+        "Output FPS = FPS * Speed."
     )
 
     imgui.spacing()
@@ -550,67 +691,127 @@ def _draw_video_options(parent: Any):
     set_tooltip("Use percentile-based intensity scaling instead of explicit vmin/vmax.")
 
     if parent._saveas_video_auto:
-        imgui.set_next_item_width(hello_imgui.em_size(8))
-        _, parent._saveas_video_vmin_pct = imgui.drag_float(
-            "vmin %", parent._saveas_video_vmin_pct, v_speed=0.1, v_min=0.0, v_max=10.0
+        imgui.set_next_item_width(hello_imgui.em_size(10))
+        _, parent._saveas_video_vmin_pct = imgui.input_float(
+            "vmin %", parent._saveas_video_vmin_pct,
+            step=0.1, step_fast=1.0, format="%.1f",
         )
+        parent._saveas_video_vmin_pct = max(0.0, min(parent._saveas_video_vmin_pct, 10.0))
         set_tooltip("Percentile for auto vmin. Lower = darker blacks.")
 
-        imgui.set_next_item_width(hello_imgui.em_size(8))
-        _, parent._saveas_video_vmax_pct = imgui.drag_float(
-            "vmax %", parent._saveas_video_vmax_pct, v_speed=0.1, v_min=90.0, v_max=100.0
+        imgui.set_next_item_width(hello_imgui.em_size(10))
+        _, parent._saveas_video_vmax_pct = imgui.input_float(
+            "vmax %", parent._saveas_video_vmax_pct,
+            step=0.1, step_fast=1.0, format="%.1f",
         )
+        parent._saveas_video_vmax_pct = max(90.0, min(parent._saveas_video_vmax_pct, 100.0))
         set_tooltip("Percentile for auto vmax. Lower = brighter highlights.")
     else:
-        imgui.set_next_item_width(hello_imgui.em_size(10))
-        _, parent._saveas_video_vmin = imgui.drag_float(
-            "vmin", parent._saveas_video_vmin, v_speed=1.0
+        imgui.set_next_item_width(hello_imgui.em_size(12))
+        _, parent._saveas_video_vmin = imgui.input_float(
+            "vmin", parent._saveas_video_vmin,
+            step=10.0, step_fast=100.0, format="%.1f",
         )
         set_tooltip("Min intensity value (clipped to black).")
 
-        imgui.set_next_item_width(hello_imgui.em_size(10))
-        _, parent._saveas_video_vmax = imgui.drag_float(
-            "vmax", parent._saveas_video_vmax, v_speed=1.0
+        imgui.set_next_item_width(hello_imgui.em_size(12))
+        _, parent._saveas_video_vmax = imgui.input_float(
+            "vmax", parent._saveas_video_vmax,
+            step=10.0, step_fast=100.0, format="%.1f",
         )
         set_tooltip("Max intensity value (clipped to white).")
 
     imgui.spacing()
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._saveas_video_temporal_smooth = imgui.drag_int(
-        "Temporal smooth",
-        parent._saveas_video_temporal_smooth,
-        v_speed=1, v_min=0, v_max=30,
+    _, parent._saveas_video_mean_subtract = imgui.checkbox(
+        "Mean subtract", parent._saveas_video_mean_subtract
     )
     set_tooltip(
-        "Rolling-mean window size in frames. 0 = off, 3-7 = subtle, 10+ = heavy."
+        "Subtract the per-(channel, plane) mean image from every frame before "
+        "contrast scaling. Requires z-stats to be computed."
+    )
+
+    _, parent._saveas_video_time_overlay = imgui.checkbox(
+        "Time overlay", parent._saveas_video_time_overlay
+    )
+    set_tooltip(
+        "Draw a clock in the top-left of every frame showing recording time "
+        "(frame_index / fps). The clock always reflects real recording seconds, "
+        "so a sped-up clip ticks faster on screen — useful for showing how fast "
+        "playback is relative to the source."
+    )
+
+    _, parent._saveas_video_scalebar = imgui.checkbox(
+        "Scalebar", parent._saveas_video_scalebar
+    )
+    set_tooltip(
+        "Draw a scalebar at exactly 10% of frame width in the bottom-left, "
+        "labeled with the matching micron length. Multiply the label by 10 "
+        "to read the full-frame width. Pixel size is taken from arr.dx."
     )
 
     imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._saveas_video_spatial_smooth = imgui.drag_float(
-        "Spatial smooth",
-        parent._saveas_video_spatial_smooth,
-        v_speed=0.1, v_min=0.0, v_max=5.0,
+    _, parent._saveas_video_temporal_mode_idx = imgui.combo(
+        "Temporal mode",
+        parent._saveas_video_temporal_mode_idx,
+        _VIDEO_TEMPORAL_MODES,
+    )
+    set_tooltip(
+        "Rolling-window aggregation: mean smooths flicker, max emphasizes "
+        "transient activity, std highlights variance."
+    )
+
+    imgui.set_next_item_width(hello_imgui.em_size(10))
+    _, parent._saveas_video_temporal_smooth = imgui.input_int(
+        "Window", parent._saveas_video_temporal_smooth, step=1, step_fast=10
+    )
+    parent._saveas_video_temporal_smooth = max(
+        0, min(int(parent._saveas_video_temporal_smooth), 500)
+    )
+    set_tooltip(
+        "Rolling-window size in frames. 0 = off; combined with Temporal mode."
+    )
+
+    imgui.set_next_item_width(hello_imgui.em_size(10))
+    _, parent._saveas_video_spatial_smooth = imgui.input_float(
+        "Spatial smooth", parent._saveas_video_spatial_smooth,
+        step=0.1, step_fast=1.0, format="%.2f",
+    )
+    parent._saveas_video_spatial_smooth = max(
+        0.0, min(float(parent._saveas_video_spatial_smooth), 20.0)
     )
     set_tooltip("Gaussian blur sigma in pixels. 0 = off.")
 
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._saveas_video_gamma = imgui.drag_float(
-        "Gamma", parent._saveas_video_gamma, v_speed=0.05, v_min=0.3, v_max=3.0
+    imgui.set_next_item_width(hello_imgui.em_size(10))
+    _, parent._saveas_video_gamma = imgui.input_float(
+        "Gamma", parent._saveas_video_gamma,
+        step=0.05, step_fast=0.5, format="%.2f",
     )
+    parent._saveas_video_gamma = max(0.1, min(float(parent._saveas_video_gamma), 5.0))
     set_tooltip("Gamma correction. <1 brightens midtones, >1 darkens them.")
 
     imgui.spacing()
-    imgui.set_next_item_width(hello_imgui.em_size(12))
+    imgui.set_next_item_width(hello_imgui.em_size(14))
     _, parent._saveas_video_cmap_idx = imgui.combo(
-        "Colormap", parent._saveas_video_cmap_idx, _VIDEO_CMAPS
+        "Colormap", parent._saveas_video_cmap_idx, parent._saveas_video_cmaps
     )
-    set_tooltip("Matplotlib colormap. 'grayscale' writes single-channel video.")
+    set_tooltip(
+        "Colormap (cmap-library / fastplotlib names). 'gray' writes grayscale. "
+        "Click 'Sync from preview' to adopt the active fpl cmap if it's not in this list."
+    )
 
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._saveas_video_quality = imgui.slider_int(
-        "Quality", parent._saveas_video_quality, 1, 10
+    imgui.set_next_item_width(hello_imgui.em_size(14))
+    _, parent._saveas_video_quality_idx = imgui.combo(
+        "Quality", parent._saveas_video_quality_idx, _VIDEO_QUALITY_PRESETS
     )
-    set_tooltip("Video quality 1-10. Higher = larger file, better fidelity. 9 is web-friendly.")
+    set_tooltip(
+        "Quality preset (libx264, yuv420p):\n"
+        "  preview            crf 23, medium     (small/fast)\n"
+        "  high               crf 18, slow       (web-friendly)\n"
+        "  visually lossless  crf 14, slow       (no perceptible loss)\n"
+        "  lossless           crf 8,  slow, psnr (lossless within 8-bit LSB; standard\n"
+        "                                         profile so every player accepts it)\n"
+        "mpeg4 maps these to -qscale:v 8/4/2/1."
+    )
 
     imgui.set_next_item_width(hello_imgui.em_size(12))
     _, parent._saveas_video_codec_idx = imgui.combo(
@@ -776,7 +977,7 @@ def _draw_selection_section(parent: Any):
 
     # build filename preview
     ext = getattr(parent, "_ext", ".tiff").lstrip(".")
-    is_video = f".{ext}" in (".mp4", ".avi", ".mov")
+    is_video = f".{ext}" in (".mp4", ".mov")
     tags = []
 
     # timepoint tag from parsed selection
@@ -1100,9 +1301,9 @@ def _draw_save_button(parent: Any):
                 if parent._ext == ".h5":
                     save_kwargs["dataset_name"] = parent._h5_dataset_name
 
-                # Video options (.mp4/.avi/.mov)
-                if parent._ext in (".mp4", ".avi", ".mov"):
-                    cmap_name = _VIDEO_CMAPS[parent._saveas_video_cmap_idx]
+                # Video options (.mp4 or .mov)
+                if parent._ext in (".mp4", ".mov"):
+                    cmap_name = parent._saveas_video_cmaps[parent._saveas_video_cmap_idx]
                     save_kwargs["fps"] = parent._saveas_video_fps
                     save_kwargs["speed_factor"] = parent._saveas_video_speed_factor
                     if parent._saveas_video_auto:
@@ -1116,9 +1317,19 @@ def _draw_save_button(parent: Any):
                     save_kwargs["temporal_smooth"] = parent._saveas_video_temporal_smooth
                     save_kwargs["spatial_smooth"] = parent._saveas_video_spatial_smooth
                     save_kwargs["gamma"] = parent._saveas_video_gamma
-                    save_kwargs["cmap"] = None if cmap_name == "grayscale" else cmap_name
-                    save_kwargs["quality"] = parent._saveas_video_quality
+                    save_kwargs["cmap"] = cmap_name
+                    save_kwargs["quality"] = _VIDEO_QUALITY_PRESETS[parent._saveas_video_quality_idx]
                     save_kwargs["codec"] = _VIDEO_CODECS[parent._saveas_video_codec_idx]
+                    save_kwargs["temporal_mode"] = _VIDEO_TEMPORAL_MODES[parent._saveas_video_temporal_mode_idx]
+                    save_kwargs["time_overlay"] = parent._saveas_video_time_overlay
+                    save_kwargs["scalebar"] = parent._saveas_video_scalebar
+                    mean_sub_path = _write_mean_subtract_stack(parent)
+                    if mean_sub_path:
+                        save_kwargs["mean_subtract_path"] = mean_sub_path
+                    elif parent._saveas_video_mean_subtract:
+                        parent.logger.warning(
+                            "Mean subtract enabled but z-stats not computed — skipping."
+                        )
 
                 n_frames = len(frames) if frames else max_timepoints
                 # build frames message from parsed selection
@@ -1142,10 +1353,10 @@ def _draw_save_button(parent: Any):
                     src = Path(parent.fpath) if parent.fpath else None
                     input_path = str(src) if src else ""
                     fname = (src.name or "data") if src else "data"
-                    is_video = parent._ext in (".mp4", ".avi", ".mov")
+                    is_video = parent._ext in (".mp4", ".mov")
                     video_kwargs = {}
                     if is_video:
-                        cmap_name = _VIDEO_CMAPS[parent._saveas_video_cmap_idx]
+                        cmap_name = parent._saveas_video_cmaps[parent._saveas_video_cmap_idx]
                         video_kwargs = {
                             "fps": parent._saveas_video_fps,
                             "speed_factor": parent._saveas_video_speed_factor,
@@ -1156,10 +1367,20 @@ def _draw_save_button(parent: Any):
                             "temporal_smooth": parent._saveas_video_temporal_smooth,
                             "spatial_smooth": parent._saveas_video_spatial_smooth,
                             "gamma": parent._saveas_video_gamma,
-                            "cmap": None if cmap_name == "grayscale" else cmap_name,
-                            "quality": parent._saveas_video_quality,
+                            "cmap": cmap_name,
+                            "quality": _VIDEO_QUALITY_PRESETS[parent._saveas_video_quality_idx],
                             "codec": _VIDEO_CODECS[parent._saveas_video_codec_idx],
+                            "temporal_mode": _VIDEO_TEMPORAL_MODES[parent._saveas_video_temporal_mode_idx],
+                            "time_overlay": parent._saveas_video_time_overlay,
+                            "scalebar": parent._saveas_video_scalebar,
                         }
+                        mean_sub_path = _write_mean_subtract_stack(parent)
+                        if mean_sub_path:
+                            video_kwargs["mean_subtract_path"] = mean_sub_path
+                        elif parent._saveas_video_mean_subtract:
+                            parent.logger.warning(
+                                "Mean subtract enabled but z-stats not computed — skipping."
+                            )
 
                     worker_args = {
                         "input_path": input_path,

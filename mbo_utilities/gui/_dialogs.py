@@ -16,12 +16,36 @@ from mbo_utilities.arrays import ScanImageArray
 from mbo_utilities.preferences import add_recent_file, set_last_dir
 
 
+def _resolve_plane_dir(p: Path) -> Path | None:
+    """Return the plane directory for `p` if it looks like a suite2p output.
+
+    Accepts:
+      - `…/plane_dir/data.bin` or `…/plane_dir/data_raw.bin` → `plane_dir`
+      - `…/plane_dir/` itself (contains ops.npy / settings.npy / data.bin)
+      - `…/volume_root/` (contains one or more `plane*/` subdirs) →
+        first plane subdir (settings/db.npy are identical across planes
+        — they were passed into lsp.pipeline once)
+    """
+    if p.is_file() and p.name in ("data.bin", "data_raw.bin"):
+        return p.parent
+    if p.is_dir():
+        if any((p / n).is_file() for n in ("ops.npy", "settings.npy", "data.bin", "data_raw.bin")):
+            return p
+        try:
+            for child in sorted(p.iterdir()):
+                if child.is_dir() and (child / "ops.npy").is_file():
+                    return child
+        except (OSError, PermissionError):
+            return None
+    return None
+
+
 def _try_hydrate_s2p_from_binary(parent: Any, path: str | Path) -> bool:
-    """If `path` looks like a suite2p binary (data.bin / data_raw.bin),
-    hydrate parent.s2p / parent.s2p_db from the plane folder's settings
-    files AND point parent._s2p_outdir at the suite2p output ROOT (the
-    plane folder's parent) so re-running the pipeline recreates the same
-    layout in the same place.
+    """If `path` points at suite2p output (data.bin file, plane dir, or
+    volumetric root containing plane*/ subdirs), hydrate parent.s2p /
+    parent.s2p_db from the plane folder's settings files AND point
+    parent._s2p_outdir at the suite2p output ROOT so re-running the
+    pipeline recreates the same layout in the same place.
 
     Source-of-truth preference:
       1. settings.npy + db.npy (canonical upstream-shape pair, exactly
@@ -29,13 +53,12 @@ def _try_hydrate_s2p_from_binary(parent: Any, path: str | Path) -> bool:
       2. ops.npy (flat fused dict — may have been mutated by reactive
          fs/dz rescaling, includes detection outputs)
 
-    No-op when the path isn't a suite2p binary or none of the sibling
-    settings files exist. Returns True iff settings were applied.
+    No-op when the path doesn't resolve to a plane dir or none of the
+    sibling settings files exist. Returns True iff settings were applied.
     """
-    p = Path(path)
-    if p.name not in ("data.bin", "data_raw.bin"):
+    plane_dir = _resolve_plane_dir(Path(path))
+    if plane_dir is None:
         return False
-    plane_dir = p.parent
     settings_file = plane_dir / "settings.npy"
     db_file = plane_dir / "db.npy"
     ops_file = plane_dir / "ops.npy"
