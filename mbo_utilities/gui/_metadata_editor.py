@@ -130,14 +130,21 @@ def draw_metadata_editor_content(parent: Any):
     # build suggested fields (includes filename detection)
     suggested_fields = _build_suggested_fields(parent)
 
+    table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
+    # column widths shared by suggested + custom tables so everything aligns
+    col_label = hello_imgui.em_size(7)
+    col_value = hello_imgui.em_size(10)
+    col_input = hello_imgui.em_size(8)
+    col_btn = hello_imgui.em_size(6)  # widened to fit Set + delete-X
+    input_w = hello_imgui.em_size(7.5)
+
     # draw suggested fields in a table
     if suggested_fields:
-        table_flags = imgui.TableFlags_.sizing_fixed_fit | imgui.TableFlags_.no_borders_in_body
         if imgui.begin_table("suggested_meta", 4, table_flags):
-            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(7))
-            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(10))
-            imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(8))
-            imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, hello_imgui.em_size(3))
+            imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, col_label)
+            imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, col_value)
+            imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, col_input)
+            imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, col_btn)
 
             for field in suggested_fields:
                 canonical = field["canonical"]
@@ -188,7 +195,7 @@ def draw_metadata_editor_content(parent: Any):
                 if not hasattr(parent, input_key):
                     setattr(parent, input_key, "")
 
-                imgui.set_next_item_width(hello_imgui.em_size(7.5))
+                imgui.set_next_item_width(input_w)
                 flags = imgui.InputTextFlags_.chars_decimal if dtype in (float, int) else 0
                 _, new_val = imgui.input_text(f"##{canonical}", getattr(parent, input_key), flags=flags)
                 setattr(parent, input_key, new_val)
@@ -200,7 +207,7 @@ def draw_metadata_editor_content(parent: Any):
                         tip += " (number)"
                     imgui.set_tooltip(tip)
 
-                # set button column
+                # button column: Set (always) + X delete (only when user has overridden)
                 imgui.table_next_column()
                 if imgui.small_button(f"Set##{canonical}"):
                     input_val = getattr(parent, input_key).strip()
@@ -214,53 +221,78 @@ def draw_metadata_editor_content(parent: Any):
                             setattr(parent, input_key, "")
                         except (ValueError, TypeError):
                             pass
+                if custom_val is not None:
+                    imgui.same_line()
+                    if imgui.small_button(f"X##del_{canonical}"):
+                        del parent._custom_metadata[canonical]
+                        if (current_data and hasattr(current_data, "metadata")
+                                and isinstance(current_data.metadata, dict)
+                                and canonical in current_data.metadata):
+                            del current_data.metadata[canonical]
+                    if imgui.is_item_hovered():
+                        imgui.set_tooltip("Clear this override")
 
             imgui.end_table()
 
         imgui.spacing()
 
-    # show existing custom entries as removable tags
+    # === Custom section ===
     suggested_keys = {f["canonical"] for f in suggested_fields}
     custom_entries = [(k, v) for k, v in parent._custom_metadata.items() if k not in suggested_keys]
 
-    if custom_entries:
-        imgui.dummy(imgui.ImVec2(0, 2))
+    imgui.spacing()
+    imgui.separator()
+    imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Custom")
+    imgui.dummy(imgui.ImVec2(0, 2))
+
+    if imgui.begin_table("custom_meta", 4, table_flags):
+        imgui.table_setup_column("label", imgui.TableColumnFlags_.width_fixed, col_label)
+        imgui.table_setup_column("value", imgui.TableColumnFlags_.width_fixed, col_value)
+        imgui.table_setup_column("input", imgui.TableColumnFlags_.width_fixed, col_input)
+        imgui.table_setup_column("btn", imgui.TableColumnFlags_.width_fixed, col_btn)
+
+        # existing custom entries \u2014 same row layout as suggested table
         to_remove = None
         for key, value in custom_entries:
-            imgui.push_id(f"custom_{key}")
-            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.2, 0.25, 0.3, 1.0))
-            imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.3, 0.35, 0.4, 1.0))
-            tag_text = f"{key}={value}"
-            if imgui.small_button(f"{tag_text}  \u00d7"):
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), key)
+            imgui.table_next_column()
+            imgui.text_colored(imgui.ImVec4(0.5, 0.8, 0.5, 1.0), str(value))
+            imgui.table_next_column()  # input col left blank
+            imgui.table_next_column()
+            if imgui.small_button(f"X##custom_del_{key}"):
                 to_remove = key
-            imgui.pop_style_color(2)
-            imgui.same_line()
-            imgui.pop_id()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Delete this custom entry")
         if to_remove:
             del parent._custom_metadata[to_remove]
-        imgui.new_line()
 
-    # add new custom entry row
-    imgui.dummy(imgui.ImVec2(0, 2))
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._custom_key = imgui.input_text("##key", parent._custom_key)
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("Custom key name")
-    imgui.same_line()
-    imgui.text_colored(imgui.ImVec4(0.5, 0.5, 0.5, 1.0), "=")
-    imgui.same_line()
-    imgui.set_next_item_width(hello_imgui.em_size(8))
-    _, parent._custom_value = imgui.input_text("##val", parent._custom_value)
-    if imgui.is_item_hovered():
-        imgui.set_tooltip("Custom value (auto-detects number vs text)")
-    imgui.same_line()
-    if imgui.button("+", imgui.ImVec2(hello_imgui.em_size(2), 0)) and parent._custom_key.strip():
-        val = parent._custom_value
-        with contextlib.suppress(ValueError):
-            val = float(val) if "." in val else int(val)
-        parent._custom_metadata[parent._custom_key.strip()] = val
-        parent._custom_key = ""
-        parent._custom_value = ""
+        # new-entry row \u2014 key in label col, value in input col, Set in btn col
+        imgui.table_next_row()
+        imgui.table_next_column()
+        imgui.set_next_item_width(col_label)
+        _, parent._custom_key = imgui.input_text("##custom_key", parent._custom_key)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Custom key name")
+
+        imgui.table_next_column()  # value col empty until Set
+        imgui.table_next_column()
+        imgui.set_next_item_width(input_w)
+        _, parent._custom_value = imgui.input_text("##custom_val", parent._custom_value)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Custom value (numbers auto-detected)")
+
+        imgui.table_next_column()
+        if imgui.small_button("Set##custom_add") and parent._custom_key.strip():
+            val = parent._custom_value
+            with contextlib.suppress(ValueError):
+                val = float(val) if "." in val else int(val)
+            parent._custom_metadata[parent._custom_key.strip()] = val
+            parent._custom_key = ""
+            parent._custom_value = ""
+
+        imgui.end_table()
 
 
 def draw_metadata_popup(parent: Any) -> None:
