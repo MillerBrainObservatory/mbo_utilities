@@ -26,16 +26,23 @@ _ACTIVE_Z_COLOR = (0.13, 0.55, 0.13, 1.00)
 
 def _active_z(parent: Any) -> int | None:
     """Return the 1-based z-index currently displayed by the image widget,
-    or None when the dataset is single-plane / has no z slider.
+    or None when the dataset has no z slider.
 
-    Z lives at indices[1] for the canonical TZYX 4D layout (T is at index 0).
+    Resolves Z by name from `_slider_dim_names` so 5D TCZYX data (where
+    indices[1] is C, not Z) reports the correct active plane. Hardcoding
+    indices[1] previously caused the stats table highlight and plot
+    accent line to track C when the user scrolled the channel slider.
     """
     iw = getattr(parent, "image_widget", None)
-    if iw is None or getattr(iw, "n_sliders", 0) < 2:
+    if iw is None or getattr(iw, "n_sliders", 0) < 1:
         return None
+    names = tuple(n.lower() for n in (getattr(iw, "_slider_dim_names", None) or ()))
     try:
-        return int(iw.indices[1]) + 1
-    except (IndexError, TypeError, ValueError):
+        if "z" in names:
+            return int(iw.indices["z"]) + 1
+        # 3D TYX or other no-z layout
+        return None
+    except (KeyError, IndexError, TypeError, ValueError):
         return None
 
 
