@@ -29,20 +29,20 @@ def _active_z(parent: Any) -> int | None:
     """Return the 1-based z-index currently displayed by the image widget,
     or None when the dataset has no z slider.
 
-    Resolves Z by name from `_slider_dim_names` so 5D TCZYX data (where
-    indices[1] is C, not Z) reports the correct active plane. Hardcoding
-    indices[1] previously caused the stats table highlight and plot
-    accent line to track C when the user scrolled the channel slider.
+    Resolves Z by case-insensitive match against ``_slider_dim_names``
+    so 5D TCZYX layouts (whether dims are upper or lowercase) all report
+    correctly. fastplotlib's ``Indices`` is case-sensitive, so we must
+    index with the canonical original-case name.
     """
     iw = getattr(parent, "image_widget", None)
     if iw is None or getattr(iw, "n_sliders", 0) < 1:
         return None
-    names = tuple(n.lower() for n in (getattr(iw, "_slider_dim_names", None) or ()))
-    try:
-        if "z" in names:
-            return int(iw.indices["z"]) + 1
-        # 3D TYX or other no-z layout
+    names = tuple(getattr(iw, "_slider_dim_names", None) or ())
+    z_name = next((n for n in names if n.lower() == "z"), None)
+    if z_name is None:
         return None
+    try:
+        return int(iw.indices[z_name]) + 1
     except (KeyError, IndexError, TypeError, ValueError):
         return None
 
@@ -125,6 +125,49 @@ def _load_subsampled(arr: Any, subsample: int = 10) -> np.ndarray:
     return data
 
 
+def _current_channel(parent: Any) -> int:
+    """Read the C-slider position from the image widget, or 0 if no C slider.
+
+    fastplotlib's ``ImageWidget.indices`` is a case-sensitive ``Indices``
+    object keyed by the original slider_dim_names. Isoview arrays expose
+    uppercase ("T", "C", "Z"), LBM/ScanImage arrays expose lowercase
+    ("t", "c", "z") — we resolve the canonical name by case-insensitive
+    match against ``_slider_dim_names`` and index with that. The naive
+    ``"c" in indices`` always returns False because ``Indices`` doesn't
+    implement ``__contains__`` for name lookups.
+    """
+    iw = getattr(parent, "image_widget", None)
+    if iw is None:
+        return 0
+    indices = getattr(iw, "indices", None)
+    if indices is None:
+        return 0
+    names = tuple(getattr(iw, "_slider_dim_names", None) or ())
+    c_name = next((n for n in names if n.lower() == "c"), None)
+    if c_name is None:
+        return 0
+    try:
+        return int(indices[c_name])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return 0
+
+
+def _selected_channel(parent: Any) -> int:
+    """Return the channel zstats should display.
+
+    ``parent._zstats_channel_selection`` holds the user's UI choice:
+    -1 means "follow the C slider"; any other int pins to that channel.
+    Clamps to ``[0, nc-1]`` and falls back to 0 for single-channel data.
+    """
+    nc = max(1, int(getattr(parent, "nc", 1) or 1))
+    if nc <= 1:
+        return 0
+    sel = int(getattr(parent, "_zstats_channel_selection", -1))
+    if sel < 0:
+        return _current_channel(parent) % nc
+    return max(0, min(sel, nc - 1))
+
+
 def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     """Determine the range of slices to compute stats over.
 
@@ -159,8 +202,14 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     return [0], "z"
 
 
-def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 30) -> np.ndarray:
+def _read_plane_subsampled(
+    arr: Any, z: int, max_samples: int = 30, channel: int = 0
+) -> np.ndarray:
     """Read a single z-plane subsampled in T, capped at `max_samples` frames.
+
+    For arrays with a C dimension, ``channel`` selects which channel to
+    sample. Caller must pass the user's current C selection — defaulting
+    to 0 only catches the no-C case (legacy 3D/4D inputs).
 
     This is the per-plane equivalent of `_load_subsampled` and is used by
     the stats compute loop so progress reports as each plane finishes
@@ -207,7 +256,7 @@ def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 30) -> np.ndarra
             if d == "t":
                 idx.append(slice(None, None, stride))
             elif d == "c":
-                idx.append(0)
+                idx.append(int(channel))
             elif d == "z":
                 idx.append(int(z))
             else:
@@ -217,7 +266,7 @@ def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 30) -> np.ndarra
         # positional 5D TCZYX or 4D TZYX assumption
         ndim = len(shape)
         if ndim == 5:
-            data = np.asarray(arr[::stride, 0, int(z), :, :])
+            data = np.asarray(arr[::stride, int(channel), int(z), :, :])
         elif ndim == 4:
             data = np.asarray(arr[::stride, int(z), :, :])
         elif ndim == 3:
@@ -232,44 +281,76 @@ def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 30) -> np.ndarra
     return data.astype(np.float32, copy=False)
 
 
+def _plane_stats(stack: np.ndarray) -> tuple[float, float, float, np.ndarray]:
+    """Reduce a (T, Y, X) plane stack to (mean, std, snr, mean_image)."""
+    mean_img = np.mean(stack, axis=0)
+    std_img = np.std(stack, axis=0)
+    p80 = np.percentile(mean_img, 80)
+    p50 = np.percentile(mean_img, 50)
+    fg = mean_img >= p80
+    bg = mean_img <= p50
+    fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
+    bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
+    bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
+    snr_val = (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
+    return float(np.mean(mean_img)), float(np.mean(std_img)), snr_val, mean_img
+
+
 def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
-    """Compute slice-stats (z-plane or channel) for a single array."""
+    """Compute slice-stats for every channel of a single array.
+
+    The compute loop is (channel, slice) — all channels are populated
+    up front so the table/graph can switch instantly when the user
+    moves the channel selector or scrubs C. Storage per array:
+    ``parent._zstats[idx-1]`` and ``_zstats_means[idx-1]`` /
+    ``_zstats_mean_scalar[idx-1]`` are dicts keyed by channel int.
+    """
     # phase correction is irrelevant for mean/std/SNR and expensive per
     # chunk under the shared _tiff_lock — turn it off for all reads here.
     arr.fix_phase = False
     t_total_start = time.perf_counter()
+    n_channels = max(1, int(getattr(parent, "nc", 1) or 1))
+    nc_arr = int(getattr(arr, "nc", n_channels) or n_channels)
     parent.logger.debug(
         f"[zstats] start array={idx} type={type(arr).__name__} "
-        f"shape={getattr(arr, 'shape', None)} dims={getattr(arr, 'dims', None)}"
+        f"shape={getattr(arr, 'shape', None)} dims={getattr(arr, 'dims', None)} "
+        f"channels={n_channels}"
     )
-    # Check for pre-computed stats in zarr metadata (instant loading)
-    # supports both 'stats' (new) and 'zstats' (legacy) properties
+
+    # init per-channel storage for this array
+    parent._zstats[idx - 1] = {}
+    parent._zstats_means[idx - 1] = {}
+    parent._zstats_mean_scalar[idx - 1] = {}
+
+    # determine slice range once — same for every channel of a TCZYX array
+    slice_range, slice_label = _get_slice_range(parent, arr)
+    n_slices = len(slice_range)
+
+    # Pre-cached stats on disk are single-channel only. Use them solely
+    # when the array is single-channel; multi-channel data always
+    # recomputes (the legacy cache schema has no channel slot).
     pre_stats = None
-    if hasattr(arr, "stats") and arr.stats is not None:
-        pre_stats = arr.stats
-    elif hasattr(arr, "zstats") and arr.zstats is not None:
-        pre_stats = arr.zstats
+    if n_channels <= 1 and nc_arr <= 1:
+        if hasattr(arr, "stats") and arr.stats is not None:
+            pre_stats = arr.stats
+        elif hasattr(arr, "zstats") and arr.zstats is not None:
+            pre_stats = arr.zstats
+
     if pre_stats is not None:
-        stats = pre_stats
-        parent._zstats[idx - 1] = stats
-        # Still need to compute mean images for visualization. read per
-        # plane so progress reports as each one finishes — same per-plane
-        # capped read the compute path uses below.
-        means = []
-        slice_range, slice_label = _get_slice_range(parent, arr)
-        n_slices = len(slice_range)
-        # nudge to a non-zero value so the progress bar shows "started"
-        # before the first plane finishes (the first read can take a
-        # while on a slow share even with the per-plane cap).
+        # Stats values come from disk; we still read each plane to fill
+        # the mean-images cache used by the visualization layer.
+        stats = dict(pre_stats)
+        stats.setdefault("slice_label", slice_label)
+        parent._zstats[idx - 1][0] = stats
+        means: list[np.ndarray] = []
         parent._zstats_progress[idx - 1] = 0.01
         prev_end = time.perf_counter()
         for i, s in enumerate(slice_range):
             t_iter_start = time.perf_counter()
             gap_ms = (t_iter_start - prev_end) * 1000.0
-            stack = _read_plane_subsampled(arr, z=s, max_samples=30)
+            stack = _read_plane_subsampled(arr, z=s, max_samples=30, channel=0)
             t_after_read = time.perf_counter()
-            mean_img = np.mean(stack, axis=0)
-            means.append(mean_img)
+            means.append(np.mean(stack, axis=0))
             t_after_compute = time.perf_counter()
             parent.logger.debug(
                 f"[zstats:pre] arr={idx} plane={s} "
@@ -282,8 +363,8 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
             parent._zstats_current_z[idx - 1] = s
             prev_end = t_after_compute
         means_stack = np.stack(means)
-        parent._zstats_means[idx - 1] = means_stack
-        parent._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
+        parent._zstats_means[idx - 1][0] = means_stack
+        parent._zstats_mean_scalar[idx - 1][0] = means_stack.mean(axis=(1, 2))
         parent._zstats_done[idx - 1] = True
         parent._zstats_running[idx - 1] = False
         parent.logger.debug(
@@ -293,97 +374,83 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         )
         return
 
-    stats, means = {"mean": [], "std": [], "snr": []}, []
-
-    # determine slice range (z-planes or channels)
-    slice_range, slice_label = _get_slice_range(parent, arr)
-    n_slices = len(slice_range)
-    stats["slice_label"] = slice_label
-
-    # nudge progress so the bar shows we've started before the first
-    # plane finishes — on a network share the first read can take tens
-    # of seconds and the user otherwise sees a stuck 0%.
+    # Live compute path — loop channel-then-slice. The slice_label="c"
+    # case (single-z multi-channel) collapses to one outer iteration
+    # because _get_slice_range already returns range(nc) as the inner
+    # loop; running the outer channel loop there would index into
+    # absent channels.
+    outer_channels = list(range(n_channels)) if slice_label != "c" else [0]
+    total_steps = max(1, len(outer_channels) * n_slices)
     parent._zstats_progress[idx - 1] = 0.01
 
-    # read each z-plane independently with a capped sample count. this
-    # used to be a single bulk `_load_subsampled` call that pulled every
-    # 10th frame across ALL planes at once — fine for a few-thousand
-    # frame LBM file, catastrophic for a 388-file network dataset where
-    # the bulk read is tens of GB. per-plane reads keep total bytes
-    # bounded (max_samples * n_planes * Y * X) and let the progress
-    # callback tick once per plane.
     total_read_ms = 0.0
     total_compute_ms = 0.0
     total_bytes = 0
     prev_end = time.perf_counter()
-    for i, s in enumerate(slice_range):
-        t_iter_start = time.perf_counter()
-        # `gap` is wall-clock time between the previous plane finishing
-        # and this plane starting. Should be ~0 ms; non-trivial values
-        # indicate the worker thread was descheduled (lock contention,
-        # GIL hand-off, GC, etc.) — useful for diagnosing GUI starvation.
-        gap_ms = (t_iter_start - prev_end) * 1000.0
-        stack = _read_plane_subsampled(arr, z=s, max_samples=30)
-        t_after_read = time.perf_counter()
 
-        mean_img = np.mean(stack, axis=0)
-        std_img = np.std(stack, axis=0)
+    for ci, c in enumerate(outer_channels):
+        stats: dict = {"mean": [], "std": [], "snr": [], "slice_label": slice_label}
+        means: list[np.ndarray] = []
+        for i, s in enumerate(slice_range):
+            t_iter_start = time.perf_counter()
+            gap_ms = (t_iter_start - prev_end) * 1000.0
+            stack = _read_plane_subsampled(arr, z=s, max_samples=30, channel=c)
+            t_after_read = time.perf_counter()
 
-        p80 = np.percentile(mean_img, 80)
-        p50 = np.percentile(mean_img, 50)
-        fg = mean_img >= p80
-        bg = mean_img <= p50
-        fg_mean = float(mean_img[fg].mean()) if fg.any() else 0.0
-        bg_mean = float(mean_img[bg].mean()) if bg.any() else 0.0
-        bg_std = float(mean_img[bg].std()) if bg.any() else 1.0
-        snr_val = (fg_mean - bg_mean) / bg_std if bg_std > 0 else 0.0
+            mean_val, std_val, snr_val, mean_img = _plane_stats(stack)
+            stats["mean"].append(mean_val)
+            stats["std"].append(std_val)
+            stats["snr"].append(snr_val)
+            means.append(mean_img)
 
-        stats["mean"].append(float(np.mean(mean_img)))
-        stats["std"].append(float(np.mean(std_img)))
-        stats["snr"].append(snr_val)
+            parent._zstats_progress[idx - 1] = (ci * n_slices + i + 1) / total_steps
+            parent._zstats_current_z[idx - 1] = s
 
-        means.append(mean_img)
-        parent._zstats_progress[idx - 1] = (i + 1) / n_slices
-        parent._zstats_current_z[idx - 1] = s
+            t_after_compute = time.perf_counter()
+            read_ms = (t_after_read - t_iter_start) * 1000.0
+            compute_ms = (t_after_compute - t_after_read) * 1000.0
+            total_read_ms += read_ms
+            total_compute_ms += compute_ms
+            total_bytes += int(stack.nbytes)
+            parent.logger.debug(
+                f"[zstats] arr={idx} c={c} plane={s} "
+                f"gap={gap_ms:.0f}ms read={read_ms:.0f}ms "
+                f"compute={compute_ms:.0f}ms "
+                f"frames={stack.shape[0]} bytes={stack.nbytes / 1e6:.1f}MB"
+            )
+            prev_end = t_after_compute
 
-        t_after_compute = time.perf_counter()
-        read_ms = (t_after_read - t_iter_start) * 1000.0
-        compute_ms = (t_after_compute - t_after_read) * 1000.0
-        total_read_ms += read_ms
-        total_compute_ms += compute_ms
-        total_bytes += int(stack.nbytes)
-        parent.logger.debug(
-            f"[zstats] arr={idx} plane={s} "
-            f"gap={gap_ms:.0f}ms read={read_ms:.0f}ms "
-            f"compute={compute_ms:.0f}ms "
-            f"frames={stack.shape[0]} bytes={stack.nbytes / 1e6:.1f}MB"
-        )
-        prev_end = t_after_compute
+        parent._zstats[idx - 1][c] = stats
+        means_stack = np.stack(means)
+        parent._zstats_means[idx - 1][c] = means_stack
+        parent._zstats_mean_scalar[idx - 1][c] = means_stack.mean(axis=(1, 2))
 
-    parent._zstats[idx - 1] = stats
-    means_stack = np.stack(means)
-    parent._zstats_means[idx - 1] = means_stack
-    parent._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
     parent._zstats_done[idx - 1] = True
     parent._zstats_running[idx - 1] = False
     parent.logger.debug(
         f"[zstats] done array={idx} "
         f"total={(time.perf_counter() - t_total_start) * 1000:.0f}ms "
         f"reads={total_read_ms:.0f}ms compute={total_compute_ms:.0f}ms "
-        f"bytes={total_bytes / 1e6:.1f}MB planes={n_slices}"
+        f"bytes={total_bytes / 1e6:.1f}MB channels={len(outer_channels)} "
+        f"slices={n_slices}"
     )
 
-    # Save stats to array metadata for persistence (zarr files)
-    # prefer 'stats' property but fall back to 'zstats' for backwards compat
+    # Persist channel 0 stats for single-channel arrays. Skip writeback
+    # for multi-channel: legacy on-disk schema has no channel slot.
+    if n_channels > 1 or nc_arr > 1:
+        return
+    stats0 = parent._zstats[idx - 1].get(0)
+    if stats0 is None:
+        return
     if hasattr(arr, "stats"):
         try:
-            arr.stats = stats
+            arr.stats = stats0
             parent.logger.debug(f"Saved stats to array {idx} metadata")
         except Exception as e:
             parent.logger.debug(f"Could not save stats to array metadata: {e}")
     elif hasattr(arr, "zstats"):
         try:
-            arr.zstats = stats
+            arr.zstats = stats0
             parent.logger.debug(f"Saved z-stats to array {idx} metadata")
         except Exception as e:
             parent.logger.debug(f"Could not save z-stats to array metadata: {e}")
@@ -416,14 +483,18 @@ def refresh_zstats(parent: Any):
     # Use num_graphics which matches len(iw.graphics)
     n = parent.num_graphics
 
-    # Reset z-stats state
-    parent._zstats = [{"mean": [], "std": [], "snr": []} for _ in range(n)]
-    parent._zstats_means = [None] * n
-    parent._zstats_mean_scalar = [0.0] * n
+    # Reset z-stats state. Per-array slots are dicts keyed by channel
+    # int; populated by `compute_zstats_single_array` (one entry per
+    # channel for multi-channel arrays, just {0: ...} for single-channel).
+    parent._zstats = [{} for _ in range(n)]
+    parent._zstats_means = [{} for _ in range(n)]
+    parent._zstats_mean_scalar = [{} for _ in range(n)]
     parent._zstats_done = [False] * n
     parent._zstats_running = [False] * n
     parent._zstats_progress = [0.0] * n
     parent._zstats_current_z = [0] * n
+    if not hasattr(parent, "_zstats_channel_selection"):
+        parent._zstats_channel_selection = -1
 
     # Reset progress state for each graphic to allow new progress display
     for i in range(n):
@@ -464,12 +535,40 @@ def refresh_zstats(parent: Any):
     compute_zstats(parent)
 
 
+def _draw_channel_selector(parent: Any, nc: int) -> None:
+    """Channel picker for multi-channel arrays. ``-1`` follows the C
+    slider (default); explicit values pin the table/graph to that
+    channel regardless of where the slider is."""
+    sel = int(getattr(parent, "_zstats_channel_selection", -1))
+    labels = ["Follow C slider"] + [f"C{c}" for c in range(nc)]
+    values = [-1] + list(range(nc))
+    try:
+        current_idx = values.index(sel)
+    except ValueError:
+        current_idx = 0
+        parent._zstats_channel_selection = -1
+
+    imgui.set_next_item_width(160)
+    changed, new_idx = imgui.combo("Channel##zstats", current_idx, labels)
+    if changed:
+        parent._zstats_channel_selection = values[new_idx]
+
+    if values[current_idx] == -1:
+        imgui.same_line()
+        resolved = _selected_channel(parent)
+        imgui.text_colored(
+            imgui.ImVec4(0.65, 0.65, 0.65, 1.0), f"-> C{resolved}"
+        )
+
+
 def draw_stats_section(parent: Any):
     """Draw the z-stats visualization section."""
     if not any(parent._zstats_done):
         return
 
     stats_list = parent._zstats
+    nc = max(1, int(getattr(parent, "nc", 1) or 1))
+    channel = _selected_channel(parent)
     is_single_zplane = parent.nz == 1  # Single bar for 1 plane
     is_dual_zplane = parent.nz == 2    # Grouped bars for 2 planes
 
@@ -483,11 +582,19 @@ def draw_stats_section(parent: Any):
             imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats"
         )
 
-    # ROI selector
+    # Channel selector for multi-channel data — sits above the array
+    # selector so a user can scope the view first, then pick an array.
+    if nc > 1:
+        _draw_channel_selector(parent, nc)
+        imgui.separator()
+
+    # ROI selector — show a graphic only when its channel slot is populated.
     array_labels = [
         f"graphic {i + 1}"
         for i in range(len(stats_list))
-        if stats_list[i] and "mean" in stats_list[i]
+        if isinstance(stats_list[i], dict)
+        and channel in stats_list[i]
+        and "mean" in stats_list[i][channel]
     ]
     # Only show "Combined" if there are multiple arrays
     if len(array_labels) > 1:
@@ -522,31 +629,42 @@ def draw_stats_section(parent: Any):
     has_combined = len(array_labels) > 1 and array_labels[-1] == "Combined"
     is_combined = has_combined and parent._selected_array == len(array_labels) - 1
 
-    _draw_array_stats(parent, stats_list, is_single_zplane, is_dual_zplane, is_combined)
+    _draw_array_stats(
+        parent, stats_list, channel, is_single_zplane, is_dual_zplane, is_combined
+    )
 
 
 def _draw_array_stats(
-    parent, stats_list, is_single_zplane, is_dual_zplane, is_combined
+    parent, stats_list, channel, is_single_zplane, is_dual_zplane, is_combined
 ):
-    """Draw stats for selected array or combined view."""
+    """Draw stats for selected array or combined view at ``channel``."""
     # Get stats values based on combined or single array mode
     if is_combined:
         imgui.text("Stats for Combined graphics")
+        per_array = [
+            s[channel] for s in stats_list
+            if isinstance(s, dict) and channel in s and "mean" in s[channel]
+        ]
+        if not per_array:
+            return
         mean_vals = np.mean(
-            [np.array(s["mean"]) for s in stats_list if s and "mean" in s], axis=0
+            [np.array(s["mean"]) for s in per_array], axis=0
         )
         if len(mean_vals) == 0:
             return
         std_vals = np.mean(
-            [np.array(s["std"]) for s in stats_list if s and "std" in s], axis=0
+            [np.array(s["std"]) for s in per_array], axis=0
         )
         snr_vals = np.mean(
-            [np.array(s["snr"]) for s in stats_list if s and "snr" in s], axis=0
+            [np.array(s["snr"]) for s in per_array], axis=0
         )
         array_idx = None
     else:
         array_idx = parent._selected_array
-        stats = stats_list[array_idx]
+        array_slot = stats_list[array_idx] if array_idx < len(stats_list) else None
+        if not isinstance(array_slot, dict) or channel not in array_slot:
+            return
+        stats = array_slot[channel]
         if not stats or "mean" not in stats:
             return
         mean_vals = np.array(stats["mean"])
@@ -567,7 +685,7 @@ def _draw_array_stats(
         imgui.separator()
         imgui.spacing()
         if is_combined:
-            _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane)
+            _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane, channel)
         else:
             _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, array_idx)
     else:
@@ -583,7 +701,7 @@ def _draw_array_stats(
         imgui.spacing()
         if is_combined:
             _draw_combined_zplane_plot(
-                parent, z_vals, stats_list, active_z=active_z
+                parent, z_vals, stats_list, channel, active_z=active_z
             )
         else:
             _draw_zplane_signal_plot(
@@ -712,8 +830,16 @@ def _draw_zplane_stats_table(
         imgui.end_table()
 
 
-def _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane):
-    """Draw signal comparison bar chart."""
+def _channel_stats(parent, r, channel):
+    """Return the per-channel stats dict for graphic ``r`` or None."""
+    slot = parent._zstats[r] if r < len(parent._zstats) else None
+    if isinstance(slot, dict) and channel in slot:
+        return slot[channel]
+    return None
+
+
+def _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane, channel):
+    """Draw signal comparison bar chart at ``channel``."""
     imgui.text("Signal Quality Comparison")
     set_tooltip(
         "Comparison of mean fluorescence across all graphics"
@@ -725,15 +851,14 @@ def _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane):
 
     if is_dual_zplane:
         # Grouped bar chart for 2 z-planes
+        per_r = [_channel_stats(parent, r, channel) for r in range(parent.num_graphics)]
         graphic_means_z1 = [
-            np.asarray(parent._zstats[r]["mean"][0], float)
-            for r in range(parent.num_graphics)
-            if parent._zstats[r] and "mean" in parent._zstats[r] and len(parent._zstats[r]["mean"]) >= 1
+            np.asarray(s["mean"][0], float)
+            for s in per_r if s and "mean" in s and len(s["mean"]) >= 1
         ]
         graphic_means_z2 = [
-            np.asarray(parent._zstats[r]["mean"][1], float)
-            for r in range(parent.num_graphics)
-            if parent._zstats[r] and "mean" in parent._zstats[r] and len(parent._zstats[r]["mean"]) >= 2
+            np.asarray(s["mean"][1], float)
+            for s in per_r if s and "mean" in s and len(s["mean"]) >= 2
         ]
 
         if graphic_means_z1 and graphic_means_z2 and implot.begin_plot(
@@ -786,10 +911,10 @@ def _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane):
                 implot.end_plot()
     else:
         # Single z-plane: simple bar chart
+        per_r = [_channel_stats(parent, r, channel) for r in range(parent.num_graphics)]
         graphic_means = [
-            np.asarray(parent._zstats[r]["mean"][0], float)
-            for r in range(parent.num_graphics)
-            if parent._zstats[r] and "mean" in parent._zstats[r]
+            np.asarray(s["mean"][0], float)
+            for s in per_r if s and "mean" in s and len(s["mean"]) >= 1
         ]
 
         if graphic_means and implot.begin_plot(
@@ -908,8 +1033,8 @@ def _draw_signal_metrics_chart(mean_vals, std_vals, snr_vals, is_dual_zplane, ar
             implot.end_plot()
 
 
-def _draw_combined_zplane_plot(parent, z_vals, stats_list, *, active_z=None):
-    """Draw combined z-plane signal plot.
+def _draw_combined_zplane_plot(parent, z_vals, stats_list, channel, *, active_z=None):
+    """Draw combined z-plane signal plot at ``channel``.
 
     When `active_z` is provided, an orange vertical line marks that plane
     on the x-axis, the corresponding tick label is rendered in brackets
@@ -925,11 +1050,14 @@ def _draw_combined_zplane_plot(parent, z_vals, stats_list, *, active_z=None):
         True,
     )
 
-    # build per-graphic series
+    # build per-graphic series at the active channel
     graphic_series = [
-        np.asarray(parent._zstats[r]["mean"], float)
-        for r in range(parent.num_graphics)
+        np.asarray(s["mean"], float)
+        for s in (_channel_stats(parent, r, channel) for r in range(parent.num_graphics))
+        if s and "mean" in s and len(s["mean"]) > 0
     ]
+    if not graphic_series:
+        return
 
     L = min(len(s) for s in graphic_series)
     z = np.asarray(z_vals[:L], float)

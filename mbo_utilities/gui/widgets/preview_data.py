@@ -481,16 +481,21 @@ class PreviewDataWidget(EdgeWindow):
         self._widgets = get_supported_widgets(self)
 
     def _init_zstats(self):
-        """Initialize z-stats tracking state."""
-        self._zstats = [
-            {"mean": [], "std": [], "snr": []} for _ in range(self.num_graphics)
-        ]
-        self._zstats_means = [None] * self.num_graphics
-        self._zstats_mean_scalar = [0.0] * self.num_graphics
+        """Initialize z-stats tracking state.
+
+        Per-array slots are dicts keyed by channel int; compute_zstats
+        populates one key per channel for multi-channel arrays, just
+        ``{0: ...}`` for single-channel. ``_zstats_channel_selection``
+        is the user's UI choice (-1 = follow C slider).
+        """
+        self._zstats = [{} for _ in range(self.num_graphics)]
+        self._zstats_means = [{} for _ in range(self.num_graphics)]
+        self._zstats_mean_scalar = [{} for _ in range(self.num_graphics)]
         self._zstats_done = [False] * self.num_graphics
         self._zstats_running = [False] * self.num_graphics
         self._zstats_progress = [0.0] * self.num_graphics
         self._zstats_current_z = [0] * self.num_graphics
+        self._zstats_channel_selection = -1
 
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
@@ -937,15 +942,35 @@ class PreviewDataWidget(EdgeWindow):
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
         names = self.image_widget._slider_dim_names or ()
+        # fastplotlib's `indices` is case-sensitive; isoview uses
+        # uppercase TCZYX, LBM/ScanImage use lowercase. Resolve the
+        # canonical key by case-insensitive match before indexing.
+        z_name = next((n for n in names if n.lower() == "z"), None)
         try:
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            z_idx = self.image_widget.indices[z_name] if z_name else 0
         except (IndexError, KeyError):
             z_idx = 0
 
         sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
 
+        # Pick the channel matching the currently displayed C slider so
+        # mean subtraction matches what the user sees. `_zstats_means[i]`
+        # is now `dict[c, (n_slices, Y, X)]`; fall back to channel 0 if
+        # the slider channel hasn't been computed yet.
+        c_name = next((n for n in names if n.lower() == "c"), None)
+        try:
+            c_for_mean = self.image_widget.indices[c_name] if c_name else 0
+        except (IndexError, KeyError):
+            c_for_mean = 0
+
+        def _means_for(i):
+            slot = self._zstats_means[i] if i < len(self._zstats_means) else None
+            if not isinstance(slot, dict) or not slot:
+                return None
+            return slot.get(c_for_mean) or slot.get(0)
+
         any_mean_sub = self._mean_subtraction and any(
-            self._zstats_done[i] and self._zstats_means[i] is not None
+            self._zstats_done[i] and _means_for(i) is not None
             for i in range(self.num_graphics)
         )
 
@@ -958,8 +983,10 @@ class PreviewDataWidget(EdgeWindow):
         spatial_funcs = []
         for i in range(self.num_graphics):
             mean_img = None
-            if self._mean_subtraction and self._zstats_done[i] and self._zstats_means[i] is not None:
-                mean_img = self._zstats_means[i][z_idx].astype(np.float32)
+            if self._mean_subtraction and self._zstats_done[i]:
+                means_arr = _means_for(i)
+                if means_arr is not None:
+                    mean_img = means_arr[z_idx].astype(np.float32)
 
             spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
 
@@ -1096,15 +1123,26 @@ class PreviewDataWidget(EdgeWindow):
                 f"SLOW FRAME: gap={gap_ms:.0f}ms menu={menu_ms:.1f}ms draw={draw_ms:.1f}ms"
             )
 
-        # Update mean subtraction when z-plane changes
+        # Update mean subtraction when z-plane or channel changes. With
+        # all channels precomputed by zstats, a C change just rebinds the
+        # mean image from the per-channel cache — no recompute needed.
+        # `indices` is case-sensitive; resolve canonical names from the
+        # slider list before indexing (isoview uses upper, LBM uses lower).
         names = self.image_widget._slider_dim_names or ()
+        z_name = next((n for n in names if n.lower() == "z"), None)
+        c_name = next((n for n in names if n.lower() == "c"), None)
         try:
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            z_idx = self.image_widget.indices[z_name] if z_name else 0
         except (IndexError, KeyError):
             z_idx = 0
+        try:
+            c_idx = self.image_widget.indices[c_name] if c_name else 0
+        except (IndexError, KeyError):
+            c_idx = 0
 
-        if z_idx != self._last_z_idx:
+        if z_idx != self._last_z_idx or c_idx != getattr(self, "_last_c_idx", 0):
             self._last_z_idx = z_idx
+            self._last_c_idx = c_idx
             # rebuild mean-sub (if active) and reset contrast (if auto) are
             # independent concerns — both can apply on the same z change.
             if self._mean_subtraction:

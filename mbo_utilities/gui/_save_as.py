@@ -622,7 +622,13 @@ def _sync_video_options_from_preview(parent: Any) -> None:
 
 def _write_mean_subtract_stack(parent: Any) -> str | None:
     """If mean-subtract is enabled and zstats are computed, write a (C, Z, Y, X)
-    npy file and return its path. Returns None if not applicable / unavailable."""
+    npy file and return its path. Returns None if not applicable / unavailable.
+
+    ``_zstats_means[i]`` is a dict keyed by channel int; this writer
+    picks the channel currently selected for stats display (which
+    follows the C slider by default) so the saved stack matches what
+    the user sees in the GUI.
+    """
     if not getattr(parent, "_saveas_video_mean_subtract", False):
         return None
     means = getattr(parent, "_zstats_means", None)
@@ -632,11 +638,20 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
     import numpy as np
     import tempfile
 
+    from mbo_utilities.gui._stats import _selected_channel
+    channel = _selected_channel(parent)
+
     stacks = []
-    for c in range(getattr(parent, "num_graphics", len(means))):
-        if c >= len(done) or not done[c] or means[c] is None:
+    for i in range(getattr(parent, "num_graphics", len(means))):
+        if i >= len(done) or not done[i]:
             return None
-        stacks.append(np.asarray(means[c], dtype=np.float32))
+        slot = means[i]
+        if not isinstance(slot, dict) or not slot:
+            return None
+        arr = slot.get(channel) or slot.get(0)
+        if arr is None:
+            return None
+        stacks.append(np.asarray(arr, dtype=np.float32))
     if not stacks:
         return None
     stack = np.stack(stacks, axis=0)  # (C, Z, Y, X)
