@@ -227,7 +227,7 @@ class PreviewDataWidget(EdgeWindow):
             isinstance(underlying, ScanImageArray) or
             isinstance(underlying, TiffArray)
         )
-        self.logger.info(f"Data type: {type(first_arr).__name__}, is_mbo_scan: {self.is_mbo_scan}")
+        self.logger.debug(f"Data type: {type(first_arr).__name__}, is_mbo_scan: {self.is_mbo_scan}")
 
         # Initialize state
         self._init_state()
@@ -243,7 +243,7 @@ class PreviewDataWidget(EdgeWindow):
 
         # Start z-stats computation
         if threading_enabled:
-            self.logger.info("Starting zstats computation...")
+            self.logger.debug("Starting zstats computation...")
             for i in range(self.num_graphics):
                 self._zstats_running[i] = True
             threading.Thread(target=lambda: compute_zstats(self), daemon=True).start()
@@ -258,17 +258,16 @@ class PreviewDataWidget(EdgeWindow):
 
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter("%(levelname)s - %(name)s - %(message)s"))
+        console_handler.setLevel(logging.DEBUG)
 
         if bool(int(os.getenv("MBO_DEBUG", "0"))):
-            console_handler.setLevel(logging.DEBUG)
             log.set_global_level(logging.DEBUG)
         else:
-            console_handler.setLevel(logging.INFO)
             log.set_global_level(logging.INFO)
 
         log.attach(console_handler)
         self.logger = log.get("gui")
-        self.logger.info("Logger initialized.")
+        self.logger.debug("Logger initialized.")
         start_output_capture()
 
     def _init_suite2p(self):
@@ -428,7 +427,7 @@ class PreviewDataWidget(EdgeWindow):
             cm_idx = dims_lower.index("cm")
             self.n_views = self.shape[cm_idx]
 
-        self.logger.info(f"Detected nz={self.nz}, nc={self.nc}, n_views={self.n_views} from dims={dims}")
+        self.logger.debug(f"Detected nz={self.nz}, nc={self.nc}, n_views={self.n_views} from dims={dims}")
 
         # Window/projection/contrast state — all per-data widget controls
         # are reset by _reset_per_data_state. Also called on every reload
@@ -482,16 +481,21 @@ class PreviewDataWidget(EdgeWindow):
         self._widgets = get_supported_widgets(self)
 
     def _init_zstats(self):
-        """Initialize z-stats tracking state."""
-        self._zstats = [
-            {"mean": [], "std": [], "snr": []} for _ in range(self.num_graphics)
-        ]
-        self._zstats_means = [None] * self.num_graphics
-        self._zstats_mean_scalar = [0.0] * self.num_graphics
+        """Initialize z-stats tracking state.
+
+        Per-array slots are dicts keyed by channel int; compute_zstats
+        populates one key per channel for multi-channel arrays, just
+        ``{0: ...}`` for single-channel. ``_zstats_channel_selection``
+        is the user's UI choice (-1 = follow C slider).
+        """
+        self._zstats = [{} for _ in range(self.num_graphics)]
+        self._zstats_means = [{} for _ in range(self.num_graphics)]
+        self._zstats_mean_scalar = [{} for _ in range(self.num_graphics)]
         self._zstats_done = [False] * self.num_graphics
         self._zstats_running = [False] * self.num_graphics
         self._zstats_progress = [0.0] * self.num_graphics
         self._zstats_current_z = [0] * self.num_graphics
+        self._zstats_channel_selection = -1
 
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
@@ -610,7 +614,7 @@ class PreviewDataWidget(EdgeWindow):
         from mbo_utilities.gui.viewers import get_viewer_class
         viewer_cls = get_viewer_class(self.image_widget.data[0])
         self._viewer = viewer_cls(self.image_widget, self.fpath, parent=self)
-        self.logger.info(f"Viewer: {self._viewer.name}")
+        self.logger.debug(f"Viewer: {self._viewer.name}")
         self.set_context_info()
         self._update_window_funcs()
         rebind_space_to_playback(self)
@@ -634,7 +638,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @s2p_dir.setter
     def s2p_dir(self, value):
-        self.logger.info(f"Setting Suite2p directory to {value}")
+        self.logger.debug(f"Setting Suite2p directory to {value}")
         self._s2p_dir = value
 
     @property
@@ -730,7 +734,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @fix_phase.setter
     def fix_phase(self, value: bool):
-        self.logger.info(f"Setting fix_phase to {value}.")
+        self.logger.debug(f"Setting fix_phase to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.enabled = value
@@ -751,7 +755,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @use_fft.setter
     def use_fft(self, value: bool):
-        self.logger.info(f"Setting use_fft to {value}.")
+        self.logger.debug(f"Setting use_fft to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.use_fft = value
@@ -772,7 +776,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @border.setter
     def border(self, value: int):
-        self.logger.info(f"Setting border to {value}.")
+        self.logger.debug(f"Setting border to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 arr.phase_correction.border = value
@@ -788,7 +792,7 @@ class PreviewDataWidget(EdgeWindow):
 
     @max_offset.setter
     def max_offset(self, value: int):
-        self.logger.info(f"Setting max_offset to {value}.")
+        self.logger.debug(f"Setting max_offset to {value}.")
         for arr in self._get_data_arrays():
             if hasattr(arr, "max_offset"):
                 arr.max_offset = value
@@ -823,7 +827,7 @@ class PreviewDataWidget(EdgeWindow):
     @proj.setter
     def proj(self, value: str):
         if value != self._proj:
-            self.logger.info(f"Projection changed: {self._proj} -> {value}")
+            self.logger.debug(f"Projection changed: {self._proj} -> {value}")
             self._proj = value
             self._update_window_funcs()
 
@@ -860,7 +864,7 @@ class PreviewDataWidget(EdgeWindow):
         if value == self._window_size:
             return
         self._window_size = value
-        self.logger.info(f"Window size set to {value}.")
+        self.logger.debug(f"Window size set to {value}.")
         if not self.processors:
             return
         n_slider_dims = self.processors[0].n_slider_dims
@@ -913,6 +917,13 @@ class PreviewDataWidget(EdgeWindow):
                 if subplot.docks["right"].size < 1:
                     subplot.docks["right"].size = 80
 
+        # fpl's window_funcs/window_sizes/spatial_func setters refresh via
+        # `self.indices = self.indices`, but that runs *before* the histogram
+        # restore above and can leave the displayed graphic stale. Force a
+        # post-restore refresh so changes take effect immediately.
+        if attr in ("window_funcs", "window_sizes", "spatial_func"):
+            self._refresh_image_widget()
+
     def _refresh_widgets(self):
         """Refresh widgets based on current data capabilities."""
         self._widgets = get_supported_widgets(self)
@@ -931,15 +942,35 @@ class PreviewDataWidget(EdgeWindow):
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
         names = self.image_widget._slider_dim_names or ()
+        # fastplotlib's `indices` is case-sensitive; isoview uses
+        # uppercase TCZYX, LBM/ScanImage use lowercase. Resolve the
+        # canonical key by case-insensitive match before indexing.
+        z_name = next((n for n in names if n.lower() == "z"), None)
         try:
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            z_idx = self.image_widget.indices[z_name] if z_name else 0
         except (IndexError, KeyError):
             z_idx = 0
 
         sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
 
+        # Pick the channel matching the currently displayed C slider so
+        # mean subtraction matches what the user sees. `_zstats_means[i]`
+        # is now `dict[c, (n_slices, Y, X)]`; fall back to channel 0 if
+        # the slider channel hasn't been computed yet.
+        c_name = next((n for n in names if n.lower() == "c"), None)
+        try:
+            c_for_mean = self.image_widget.indices[c_name] if c_name else 0
+        except (IndexError, KeyError):
+            c_for_mean = 0
+
+        def _means_for(i):
+            slot = self._zstats_means[i] if i < len(self._zstats_means) else None
+            if not isinstance(slot, dict) or not slot:
+                return None
+            return slot.get(c_for_mean) or slot.get(0)
+
         any_mean_sub = self._mean_subtraction and any(
-            self._zstats_done[i] and self._zstats_means[i] is not None
+            self._zstats_done[i] and _means_for(i) is not None
             for i in range(self.num_graphics)
         )
 
@@ -952,8 +983,10 @@ class PreviewDataWidget(EdgeWindow):
         spatial_funcs = []
         for i in range(self.num_graphics):
             mean_img = None
-            if self._mean_subtraction and self._zstats_done[i] and self._zstats_means[i] is not None:
-                mean_img = self._zstats_means[i][z_idx].astype(np.float32)
+            if self._mean_subtraction and self._zstats_done[i]:
+                means_arr = _means_for(i)
+                if means_arr is not None:
+                    mean_img = means_arr[z_idx].astype(np.float32)
 
             spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
 
@@ -1069,24 +1102,47 @@ class PreviewDataWidget(EdgeWindow):
         """Main render callback."""
         import time
         t0 = time.perf_counter()
+        # `gap` measures wall-clock time since the previous frame entered
+        # update(). On a healthy GUI this should hover near the canvas's
+        # frame interval (16 ms @ 60 Hz). A spike means the main thread
+        # was blocked between frames — by GIL contention with a worker,
+        # the canvas swap, a Qt event handler, etc. Logging this is the
+        # primary signal for "GUI feels frozen during zstats."
+        prev = getattr(self, "_last_frame_t", None)
+        gap_ms = (t0 - prev) * 1000.0 if prev is not None else 0.0
+        self._last_frame_t = t0
+
         draw_menu_bar(self)
         t1 = time.perf_counter()
         self._viewer.draw()
         t2 = time.perf_counter()
         menu_ms = (t1 - t0) * 1000
         draw_ms = (t2 - t1) * 1000
-        if menu_ms > 50 or draw_ms > 50:
-            print(f"SLOW FRAME: menu={menu_ms:.1f}ms, draw={draw_ms:.1f}ms")
+        if gap_ms > 100 or menu_ms > 50 or draw_ms > 50:
+            self.logger.debug(
+                f"SLOW FRAME: gap={gap_ms:.0f}ms menu={menu_ms:.1f}ms draw={draw_ms:.1f}ms"
+            )
 
-        # Update mean subtraction when z-plane changes
+        # Update mean subtraction when z-plane or channel changes. With
+        # all channels precomputed by zstats, a C change just rebinds the
+        # mean image from the per-channel cache — no recompute needed.
+        # `indices` is case-sensitive; resolve canonical names from the
+        # slider list before indexing (isoview uses upper, LBM uses lower).
         names = self.image_widget._slider_dim_names or ()
+        z_name = next((n for n in names if n.lower() == "z"), None)
+        c_name = next((n for n in names if n.lower() == "c"), None)
         try:
-            z_idx = self.image_widget.indices["z"] if "z" in names else 0
+            z_idx = self.image_widget.indices[z_name] if z_name else 0
         except (IndexError, KeyError):
             z_idx = 0
+        try:
+            c_idx = self.image_widget.indices[c_name] if c_name else 0
+        except (IndexError, KeyError):
+            c_idx = 0
 
-        if z_idx != self._last_z_idx:
+        if z_idx != self._last_z_idx or c_idx != getattr(self, "_last_c_idx", 0):
             self._last_z_idx = z_idx
+            self._last_c_idx = c_idx
             # rebuild mean-sub (if active) and reset contrast (if auto) are
             # independent concerns — both can apply on the same z change.
             if self._mean_subtraction:
@@ -1144,4 +1200,4 @@ class PreviewDataWidget(EdgeWindow):
         if hasattr(self, "_s2p_folder_dialog"):
             self._s2p_folder_dialog = None
 
-        self.logger.info("GUI cleanup complete")
+        self.logger.debug("GUI cleanup complete")

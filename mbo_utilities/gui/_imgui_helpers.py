@@ -464,7 +464,14 @@ def fmt_value(x) -> str:
         return f"[len={len(x)}]"
     if hasattr(x, "shape") and hasattr(x, "dtype"):
         try:
-            if x.size <= 8:
+            # only inline tiny arrays of plain scalar dtypes. object arrays
+            # (suite2p Vmap is shape=(5,), dtype=object, each element a
+            # different 2D float array per pyramid level) would otherwise
+            # take the size<=8 fast path and dump every inner array via
+            # repr(tolist()) — pages of numbers in the metadata viewer
+            # instead of a one-line summary.
+            scalar_kinds = "biufcSU"  # bool / int / uint / float / complex / str
+            if x.size <= 8 and getattr(x.dtype, "kind", "") in scalar_kinds:
                 return repr(x.tolist())
             return f"<shape={tuple(x.shape)}, dtype={x.dtype}>"
         except Exception:

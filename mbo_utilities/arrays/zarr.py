@@ -704,12 +704,24 @@ def merge_zarr_zplanes(
         shutil.rmtree(output_path)
 
     root = zarr.open_group(str(output_path), mode="w", zarr_format=3)
-    image_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    # Chunk by (frame, z-plane); pack all T at one z into a single shard
+    # so a fixed-(c, z) T-scrub touches one file per z. File count = Z
+    # instead of T*Z. Benchmark (D:/demo/zarr_chunking_benchmark): same
+    # ~5.5 ms/frame as unsharded, ~50x fewer files at typical sizes.
+    from zarr.codecs import ShardingCodec, Crc32cCodec
+    inner_codecs = [BytesCodec(), GzipCodec(level=compression_level)]
+    image_codecs = [
+        ShardingCodec(
+            chunk_shape=(1, 1, Y, X),
+            codecs=inner_codecs,
+            index_codecs=[BytesCodec(), Crc32cCodec()],
+        )
+    ]
     image = zarr.create(
         store=root.store,
         path="0",
         shape=(T, Z, Y, X),
-        chunks=(1, 1, Y, X),  # Chunk by frame and z-plane
+        chunks=(T, 1, Y, X),  # outer = shard shape: all T at one z
         dtype=dtype,
         codecs=image_codecs,
         overwrite=True,

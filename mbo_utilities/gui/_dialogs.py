@@ -221,7 +221,7 @@ def _try_hydrate_s2p_from_binary(parent: Any, path: str | Path) -> bool:
     # plane subdir in place.
     parent._s2p_outdir = str(plane_dir.parent)
 
-    parent.logger.info(
+    parent.logger.debug(
         f"suite2p hydrate: loaded {n_settings} settings + {n_db} db + "
         f"{n_extras} mbo-extras fields from {' + '.join(sources)}; "
         f"output dir set to {parent._s2p_outdir}"
@@ -294,7 +294,7 @@ def load_new_data(parent: Any, path: str):
     Uses iw.set_data() to swap data arrays, which handles shape changes.
     """
     from mbo_utilities.arrays import TiffArray
-    from mbo_utilities.gui.run_gui import _SqueezeSingletonDims
+    from mbo_utilities.gui.run_gui import _SqueezeSingletonDims, _ScrubTimingProxy
 
     path_obj = Path(path)
     if not path_obj.exists():
@@ -324,6 +324,7 @@ def load_new_data(parent: Any, path: str):
             new_data = _SqueezeSingletonDims(raw_data)
         else:
             new_data = raw_data
+        new_data = _ScrubTimingProxy(new_data)
 
         # Reset stale per-data display state via the standalone helper
         # so the reset contract can be tested in isolation.
@@ -389,7 +390,7 @@ def load_new_data(parent: Any, path: str):
 
         parent._load_status_msg = f"Loaded: {path_obj.name}"
         parent._load_status_color = imgui.ImVec4(0.3, 1.0, 0.3, 1.0)
-        parent.logger.info(f"Loaded successfully, shape: {new_data.shape}")
+        parent.logger.debug(f"Loaded successfully, shape: {new_data.shape}")
         parent.set_context_info()
 
         # update image widget subplot title with new filename
@@ -417,7 +418,7 @@ def load_new_data(parent: Any, path: str):
         viewer_cls = get_viewer_class(new_data)
         parent._viewer = viewer_cls(parent.image_widget, parent.fpath, parent=parent)
         parent._viewer.on_data_loaded()
-        parent.logger.info(f"Viewer switched to: {parent._viewer.name}")
+        parent.logger.debug(f"Viewer switched to: {parent._viewer.name}")
 
         # Automatically recompute z-stats for new data (only for time series)
         if isinstance(parent._viewer, TimeSeriesViewer):

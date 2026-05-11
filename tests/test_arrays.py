@@ -349,6 +349,171 @@ class TestSuite2pArray:
         assert frame_np.shape[-2:] == expected_data[0].shape[-2:]
 
 
+class TestSuite2pRegTif:
+    """Test Suite2pArray reg_tif/ folder support (registered tiffs in
+    place of data.bin)."""
+
+    @staticmethod
+    def _write_reg_tif_plane(plane_dir: Path, data: np.ndarray, *,
+                             channel: int = 0, frames_per_file: int = 7) -> list[Path]:
+        """Write `data` (T, Y, X) into plane_dir/reg_tif/ as suite2p-style
+        chunks, returning the list of files in write order."""
+        import tifffile
+
+        reg_dir = plane_dir / "reg_tif"
+        reg_dir.mkdir(parents=True, exist_ok=True)
+        files = []
+        nframes = data.shape[0]
+        for start in range(0, nframes, frames_per_file):
+            stop = min(start + frames_per_file, nframes)
+            fname = reg_dir / f"file{start:05d}_chan{channel}.tif"
+            tifffile.imwrite(fname, data[start:stop])
+            files.append(fname)
+        return files
+
+    @pytest.fixture
+    def suite2p_reg_tif_dir(self, synthetic_3d_data, tmp_path):
+        """Plane dir with reg_tif/ files but no data.bin."""
+        plane_dir = tmp_path / "suite2p_regtif" / "plane0"
+        plane_dir.mkdir(parents=True)
+
+        files = self._write_reg_tif_plane(plane_dir, synthetic_3d_data,
+                                          frames_per_file=7)
+
+        ops = {
+            "Ly": synthetic_3d_data.shape[1],
+            "Lx": synthetic_3d_data.shape[2],
+            "nframes": synthetic_3d_data.shape[0],
+        }
+        np.save(plane_dir / "ops.npy", ops)
+        return plane_dir, synthetic_3d_data, files
+
+    def test_find_reg_tif_files_sorted(self, suite2p_reg_tif_dir):
+        """Files are returned sorted by numeric frame_start, not lexicographic
+        (so file00010 sorts after file00007)."""
+        from mbo_utilities.arrays.suite2p import find_suite2p_reg_tif_files
+
+        plane_dir, _, expected_files = suite2p_reg_tif_dir
+        found = find_suite2p_reg_tif_files(plane_dir, channel=0)
+        assert found == expected_files
+
+    def test_find_reg_tif_files_filters_channel(self, suite2p_reg_tif_dir, tmp_path):
+        """Only the requested channel's files come back."""
+        from mbo_utilities.arrays.suite2p import find_suite2p_reg_tif_files
+        import tifffile
+
+        plane_dir, data, _ = suite2p_reg_tif_dir
+        # add a chan1 file that should be excluded
+        tifffile.imwrite(plane_dir / "reg_tif" / "file00000_chan1.tif", data[:2])
+
+        chan0 = find_suite2p_reg_tif_files(plane_dir, channel=0)
+        chan1 = find_suite2p_reg_tif_files(plane_dir, channel=1)
+        assert all("chan0" in p.name for p in chan0)
+        assert len(chan1) == 1 and "chan1" in chan1[0].name
+
+    def test_fallback_to_reg_tif_when_no_bin(self, suite2p_reg_tif_dir):
+        """Suite2pArray loads reg_tif/ when no data.bin exists."""
+        plane_dir, expected, _ = suite2p_reg_tif_dir
+        arr = Suite2pArray(plane_dir / "ops.npy")
+
+        assert arr.shape == (expected.shape[0], 1, 1, expected.shape[1], expected.shape[2])
+        assert arr.dtype == np.int16
+
+    def test_reg_tif_frame_values_across_boundaries(self, suite2p_reg_tif_dir):
+        """Frames read back match what was written, including across file
+        boundaries (frames_per_file=7 with 20 total frames produces 3 files)."""
+        plane_dir, expected, _ = suite2p_reg_tif_dir
+        arr = Suite2pArray(plane_dir / "ops.npy")
+
+        # frame 0 (first file)
+        f0 = np.asarray(arr[0]).squeeze()
+        assert np.array_equal(f0, expected[0])
+
+        # frame 8 (second file - crosses boundary)
+        f8 = np.asarray(arr[8]).squeeze()
+        assert np.array_equal(f8, expected[8])
+
+        # T-slice spanning file boundaries
+        sl = np.asarray(arr[5:15]).squeeze()  # squeeze C=1, Z=1
+        assert sl.shape == (10, expected.shape[1], expected.shape[2])
+        assert np.array_equal(sl, expected[5:15])
+
+    def test_use_reg_tif_overrides_data_bin(self, synthetic_3d_data, tmp_path):
+        """When both data.bin and reg_tif exist with different content,
+        use_reg_tif=True picks reg_tif; default picks data.bin."""
+        plane_dir = tmp_path / "suite2p_both" / "plane0"
+        plane_dir.mkdir(parents=True)
+
+        # data.bin gets `synthetic_3d_data`
+        bin_path = plane_dir / "data.bin"
+        mmap = np.memmap(bin_path, mode="w+", dtype=np.int16,
+                         shape=synthetic_3d_data.shape)
+        mmap[:] = synthetic_3d_data
+        mmap.flush()
+        del mmap
+
+        # reg_tif gets a *different* array (negated) so the two sources
+        # are distinguishable
+        reg_data = (-synthetic_3d_data).astype(np.int16)
+        self._write_reg_tif_plane(plane_dir, reg_data, frames_per_file=7)
+
+        np.save(plane_dir / "ops.npy", {
+            "Ly": synthetic_3d_data.shape[1],
+            "Lx": synthetic_3d_data.shape[2],
+            "nframes": synthetic_3d_data.shape[0],
+        })
+
+        # default: data.bin wins
+        arr_bin = Suite2pArray(plane_dir / "ops.npy")
+        f0_bin = np.asarray(arr_bin[0]).squeeze()
+        assert np.array_equal(f0_bin, synthetic_3d_data[0])
+
+        # explicit opt-in: reg_tif wins
+        arr_tif = Suite2pArray(plane_dir / "ops.npy", use_reg_tif=True)
+        f0_tif = np.asarray(arr_tif[0]).squeeze()
+        assert np.array_equal(f0_tif, reg_data[0])
+
+    def test_imread_on_reg_tif_folder_routes_to_suite2p(self, suite2p_reg_tif_dir):
+        """imread() pointed at a reg_tif/ folder must route through
+        Suite2pArray (numeric sort) — NOT TiffArray (lexicographic glob),
+        which would scramble variable-width suite2p filenames like
+        file00500_chan0.tif vs file001000_chan0.tif."""
+        plane_dir, expected, _ = suite2p_reg_tif_dir
+        reg_dir = plane_dir / "reg_tif"
+
+        arr = mbo.imread(reg_dir)
+
+        # Must be a Suite2pArray (5D, int16) — TiffArray would give a
+        # different shape contract.
+        assert isinstance(arr, Suite2pArray), f"Got {type(arr).__name__}, expected Suite2pArray"
+        assert arr.shape == (expected.shape[0], 1, 1, expected.shape[1], expected.shape[2])
+        assert arr.dtype == np.int16
+
+        # Frame order must match the original — verifies numeric sort.
+        for t in (0, 8, 14, 19):
+            frame = np.asarray(arr[t]).squeeze()
+            assert np.array_equal(frame, expected[t]), f"Frame {t} mismatch"
+
+    def test_use_reg_tif_raises_if_missing(self, tmp_path, synthetic_3d_data):
+        """use_reg_tif=True with no reg_tif/ raises FileNotFoundError."""
+        plane_dir = tmp_path / "suite2p_bin_only" / "plane0"
+        plane_dir.mkdir(parents=True)
+        bin_path = plane_dir / "data.bin"
+        mmap = np.memmap(bin_path, mode="w+", dtype=np.int16,
+                         shape=synthetic_3d_data.shape)
+        mmap[:] = synthetic_3d_data
+        mmap.flush()
+        del mmap
+        np.save(plane_dir / "ops.npy", {
+            "Ly": synthetic_3d_data.shape[1],
+            "Lx": synthetic_3d_data.shape[2],
+            "nframes": synthetic_3d_data.shape[0],
+        })
+
+        with pytest.raises(FileNotFoundError, match="use_reg_tif"):
+            Suite2pArray(plane_dir / "ops.npy", use_reg_tif=True)
+
+
 class TestTiffVolumeAutoDetection:
     """Test TiffArray auto-detection of volume directories."""
 

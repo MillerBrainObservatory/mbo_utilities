@@ -1,2955 +1,1326 @@
-"""Lazy array loader for isoview lightsheet microscopy data."""
+"""Lazy 5D array reader for isoview lightsheet microscopy data.
+
+A single :class:`IsoviewArray` class handles all four output trees of
+the Keller-lab IsoView pipeline. The ``kind`` argument (auto-detected by
+default) selects which scanner and channel-labeling scheme to use:
+
+- ``"corrected"`` — per-camera corrected output at
+  ``<root>.corrected/SPM##/TM######/SPM##_TM######_CM##.<ext>``.
+- ``"fused"`` — multi-fused output at
+  ``<root>.corrected/Results/MultiFused_*/SPM##/TM######/
+  SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>``.
+- ``"raw"`` — raw acquisition stacks at
+  ``<root>/SPC##_TM#####_ANG###_CM#_CHN##_PH#.stack``.
+- ``"clusterpt"`` — clusterPT KLB outputs at
+  ``<root>/TM######/SPM##_TM######_CM##_CHN##.klb``.
+
+All four kinds expose the same ``(T, C, Z, Y, X)`` shape, indexing, and
+metadata interface — the per-kind variation lives in a small registry,
+not in subclasses.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
 import logging
+import re
+from pathlib import Path
 
 import numpy as np
 
 from mbo_utilities.arrays._base import Shape5DMixin
+from mbo_utilities.log import get as _get_logger
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
 
-logger = logging.getLogger(__name__)
+logger = _get_logger("arrays.isoview")
 
-# regex pattern for TM folders - matches TM###### anywhere in name
-import re
+
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
-_TL_PATTERN = re.compile(r"TL(\d+)")
-_TILED_RAW_PATTERN = re.compile(r"(.+)_CM(\d+)\.stack")
-_TILED_CORRECTED_PATTERN = re.compile(
-    r"SPM(\d+)_TL(\d+)_CM(\d+)_VW(\d+)\.(ome\.)?tif$"
+_SPM_PATTERN = re.compile(r"^SPM\d+$")
+_METHOD_PATTERN = re.compile(r"^MultiFused_")
+_AUX_PATTERNS = (
+    "Mask", "mask", "minIntensity", "coords", "Projection", "configuration",
+    "transformation", "intensityCorrection", "referenceMinIntensity",
+    "scores", "jobCompleted", "Background_", "transformedMask", "mask2D",
 )
-_TILED_FUSED_PATTERN = re.compile(
-    r"SPM(\d+)_TL(\d+)_CM(\d+)_CM(\d+)_VW(\d+)\.fusedStack\.(ome\.)?tif$"
-)
 
 
-def _find_tm_folders(base_path: Path) -> list[Path]:
-    """Find folders containing TM###### pattern in their name.
-
-    Supports both:
-    - TM000000 (standard naming)
-    - Dme_E1.TM000000_multiFused_blending (embedded)
-
-    Returns folders sorted by timepoint number.
-    """
-    tm_folders = []
-    for d in base_path.iterdir():
-        if not d.is_dir():
-            continue
-        match = _TM_PATTERN.search(d.name)
-        if match:
-            tm_folders.append((int(match.group(1)), d))
-
-    # sort by timepoint number and return just the paths
-    tm_folders.sort(key=lambda x: x[0])
-    return [p for _, p in tm_folders]
-
-
-def _extract_timepoint(folder_name: str) -> int:
-    """Extract timepoint number from folder name containing TM######."""
-    match = _TM_PATTERN.search(folder_name)
-    if match:
-        return int(match.group(1))
-    raise ValueError(f"No TM pattern found in folder name: {folder_name}")
+def _is_aux(path: Path) -> bool:
+    return any(tag in path.name for tag in _AUX_PATTERNS)
 
 
 def _has_tm_pattern(name: str) -> bool:
-    """Check if name contains TM###### pattern."""
     return _TM_PATTERN.search(name) is not None
 
 
-# register isoview pipeline info
-_ISOVIEW_INFO = PipelineInfo(
-    name="isoview",
-    description="Isoview lightsheet microscopy data",
-    input_patterns=[
-        "**/data_TM??????_SPM??.zarr",
-        "**/SPM??_TM??????_CM??_VW??.zarr",
-        "**/SPM??_TM??????_CM??_CHN??.zarr",
-        "**/TM??????/",
-        "**/SPC??_TM?????_ANG???_CM?_CHN??_PH?.stack",
-    ],
-    output_patterns=[],
-    input_extensions=["zarr", "stack"],
-    output_extensions=[],
-    marker_files=["ch00_spec00.xml", "ch0.xml"],
-    category="reader",
-)
-register_pipeline(_ISOVIEW_INFO)
+def _extract_timepoint(folder_name: str) -> int:
+    m = _TM_PATTERN.search(folder_name)
+    if m is None:
+        raise ValueError(f"No TM pattern in folder name: {folder_name}")
+    return int(m.group(1))
+
+
+def _find_tm_folders(base_path: Path) -> list[Path]:
+    """Return TM###### subfolders sorted by timepoint."""
+    folders = []
+    for d in base_path.iterdir():
+        if d.is_dir() and _has_tm_pattern(d.name):
+            folders.append((_extract_timepoint(d.name), d))
+    folders.sort(key=lambda x: x[0])
+    return [p for _, p in folders]
+
+
+def _chunks_touched(shape, chunks, key) -> int:
+    n = 1
+    for d, c, k in zip(shape, chunks, key):
+        if isinstance(k, int):
+            continue
+        if isinstance(k, slice):
+            start, stop, _ = k.indices(d)
+            if stop <= start:
+                return 0
+            n *= (stop - 1) // c - start // c + 1
+        else:
+            n *= max(1, (d + c - 1) // c)
+    return n
+
+
+class LazyVolume:
+    """Lazy 3D volume reader for one zarr/tif/klb/stack file.
+
+    Adapted from ``isoview/io.py``. Reports a ``(Z, Y, X)`` shape and
+    forwards ``__getitem__`` to the backing format's native indexing so
+    callers can read narrow Y×X slabs without materializing the full
+    volume.
+
+    .stack inputs need a ``dimensions=(width, height, depth)`` tuple
+    because the raw binary carries no shape header.
+    """
+
+    def __init__(self, path: str | Path, dimensions: tuple[int, int, int] | None = None):
+        self._path = Path(path)
+        self._dimensions = dimensions
+        self._arr = None
+        self._shape: tuple[int, int, int] | None = None
+        self._dtype: np.dtype | None = None
+        self._attrs: dict = {}
+        self._init()
+
+    @staticmethod
+    def _is_tiff(name: str) -> bool:
+        n = name.lower()
+        return n.endswith((".tif", ".tiff"))
+
+    def _init(self) -> None:
+        p = self._path
+        if p.suffix.lower() == ".zarr":
+            import zarr
+            store = zarr.storage.LocalStore(str(p))
+            root = zarr.open_group(store=store, mode="r")
+            arr = root["0"] if "0" in root else zarr.open_array(store=store, mode="r")
+            shape = tuple(int(s) for s in arr.shape)
+            while len(shape) > 3 and shape[0] == 1:
+                shape = shape[1:]
+            self._shape = shape
+            self._dtype = arr.dtype
+            self._arr = arr
+            try:
+                self._attrs = dict(root.attrs)
+            except Exception:
+                self._attrs = {}
+        elif self._is_tiff(p.name):
+            import tifffile
+            tf = tifffile.TiffFile(str(p))
+            series = tf.series[0]
+            shape = tuple(int(s) for s in series.shape)
+            while len(shape) > 3 and shape[0] == 1:
+                shape = shape[1:]
+            if len(shape) == 2:
+                shape = (1,) + shape
+            self._shape = shape
+            self._dtype = series.dtype
+            self._arr = tf
+        elif p.suffix.lower() == ".klb":
+            import pyklb
+            header = pyklb.readheader(str(p))
+            dims = [int(d) for d in header["imagesize_tczyx"] if int(d) > 1]
+            if len(dims) >= 3:
+                self._shape = tuple(dims[-3:])
+            else:
+                self._shape = (1,) * (3 - len(dims)) + tuple(dims)
+            self._dtype = np.dtype(header["datatype"])
+            self._attrs["_klb_header"] = header
+        elif p.suffix.lower() == ".stack":
+            if self._dimensions is None:
+                raise ValueError(f"dimensions=(W,H,D) required for .stack: {p}")
+            width, height, _ = self._dimensions
+            total = p.stat().st_size // 2
+            depth = total // (height * width)
+            self._shape = (depth, int(height), int(width))
+            self._dtype = np.dtype("<u2")
+            self._arr = np.memmap(p, dtype="<u2", mode="r", shape=self._shape)
+        else:
+            raise ValueError(f"unsupported volume format: {p.suffix}")
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return self._shape
+
+    @property
+    def ndim(self) -> int:
+        return 3
+
+    @property
+    def dtype(self) -> np.dtype:
+        return self._dtype
+
+    @property
+    def attrs(self) -> dict:
+        return self._attrs
+
+    @property
+    def chunks(self):
+        return getattr(self._arr, "chunks", None)
+
+    def __getitem__(self, key):
+        if isinstance(self._arr, (np.ndarray, np.memmap)):
+            return np.asarray(self._arr[key])
+
+        if self._is_tiff(self._path.name):
+            return self._read_tiff(key)
+
+        if self._path.suffix.lower() == ".zarr":
+            ndim_extra = len(self._arr.shape) - len(self._shape)
+            if isinstance(key, tuple):
+                user_key = key
+            else:
+                user_key = (key,)
+            if ndim_extra > 0:
+                full_key = (0,) * ndim_extra + user_key
+            else:
+                full_key = user_key
+            return np.asarray(self._arr[full_key])
+
+        # klb fallback — materialize then slice
+        if self._arr is None and self._path.suffix.lower() == ".klb":
+            import pyklb
+            self._arr = pyklb.readfull(str(self._path))
+        return np.asarray(self._arr[key])
+
+    def _read_tiff(self, key):
+        nz = self._shape[0]
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (3 - len(key))
+        z_key, y_key, x_key = key
+
+        if isinstance(z_key, (int, np.integer)):
+            z_idx = int(z_key) if z_key >= 0 else nz + int(z_key)
+            page = self._arr.pages[z_idx].asarray()
+            return page[y_key, x_key]
+        if isinstance(z_key, slice):
+            zs = range(*z_key.indices(nz))
+        elif isinstance(z_key, (list, np.ndarray)):
+            zs = list(z_key)
+        else:
+            zs = range(nz)
+        stacked = np.stack(
+            [self._arr.pages[int(zi)].asarray() for zi in zs], axis=0
+        )
+        return stacked[:, y_key, x_key]
+
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        out = np.asarray(self[:])
+        if dtype is not None:
+            out = out.astype(dtype)
+        return out
+
+    def close(self) -> None:
+        close = getattr(self._arr, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+        self._arr = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __repr__(self):
+        return f"LazyVolume({self._path.name}, shape={self._shape}, dtype={self._dtype})"
 
 
 def _parse_isoview_xml(xml_path: Path) -> dict:
-    """Parse isoview XML metadata file for dimensions and camera info.
+    """Parse an isoview ``push_config`` XML metadata sidecar.
 
-    extracts:
-    - dimensions, z_step, exposure_time, detection_objective
-    - specimen_name, timestamp, data_header
-    - camera info: camera_type, camera_roi, wavelength
-    - illumination: illumination_arms, illumination_filter, detection_filter
-    - computed: objective_mag, pixel_resolution_um, fps, vps, zplanes
+    Extracts the full attribute set written by the microscope plus
+    derived fields used by the metadata viewer. Mirrors the field set in
+    isoview/io.py:read_xml_metadata.
+
+    Keys produced (when present in source XML):
+      data_header, specimen_name, timestamp, time_point, specimen_XYZT
+      (+ parsed stage_x/stage_y/stage_z), angle, camera_index, camera_type,
+      camera_roi, wavelength, illumination_arms, illumination_filter,
+      exposure_time, detection_filter, detection_objective (+ objective_mag),
+      dimensions (np.ndarray, n_cameras × 3), z_step, y_step,
+      stack_direction, planes, laser_power, experiment_notes.
+
+    Derived: zplanes, fps, vps, camera_pixel_size_um, pixel_resolution_um.
     """
-    import re
     import xml.etree.ElementTree as ET
 
     tree = ET.parse(xml_path)
     root = tree.getroot()
+    meta: dict = {}
+    CAMERA_PX_UM = 6.5
 
-    metadata = {}
-
-    # default camera pixel size (C11440-22C camera = 6.5 um)
-    CAMERA_PIXEL_SIZE = 6.5
-
-    # find info elements
     for info in root.iter("info"):
-        attribs = info.attrib
-
-        # dimensions: "1848x768x38" or "1848x768x38, 1848x768x38" for multi-camera
-        if "dimensions" in attribs:
-            dims_str = attribs["dimensions"]
-            camera_dims = []
-            for cam_dims in dims_str.split(","):
-                parts = [int(x) for x in cam_dims.strip().split("x")]
+        a = info.attrib
+        # dimensions: "WxHxD" possibly comma-separated for multi-camera
+        if "dimensions" in a:
+            cam_dims = []
+            for cam in a["dimensions"].split(","):
+                parts = [int(x) for x in cam.strip().split("x")]
                 if len(parts) == 3:
-                    camera_dims.append(tuple(parts))
-            metadata["dimensions"] = camera_dims
+                    cam_dims.append(parts)
+            if cam_dims:
+                meta["dimensions"] = np.array(cam_dims)
 
-        # z spacing
-        if "z_step" in attribs:
-            metadata["z_step"] = float(attribs["z_step"])
+        # plain attribute lifts (key, type cast)
+        for key, cast in (
+            ("z_step", float), ("y_step", float),
+            ("exposure_time", float), ("angle", float),
+            ("time_point", int), ("time_step", float),
+            ("specimen_name", str), ("data_header", str), ("timestamp", str),
+            ("specimen_XYZT", str), ("camera_index", str),
+            ("camera_type", str), ("camera_roi", str), ("wavelength", str),
+            ("illumination_arms", str), ("illumination_filter", str),
+            ("detection_filter", str), ("detection_objective", str),
+            ("stack_direction", str), ("planes", str),
+            ("laser_power", str), ("experiment_notes", str),
+            ("software_version", str), ("z_offset_planes", str),
+            ("specimen_drift", str),
+        ):
+            if key in a:
+                try:
+                    meta[key] = cast(a[key])
+                except (ValueError, TypeError):
+                    meta[key] = a[key]
 
-        # exposure time (ms)
-        if "exposure_time" in attribs:
-            metadata["exposure_time"] = float(attribs["exposure_time"])
+        # stage coords from specimen_XYZT: "X=3000.000_Y=770.000_Z=770.000_T=0.0"
+        if "specimen_XYZT" in a:
+            try:
+                parts = dict(p.split("=") for p in a["specimen_XYZT"].split("_"))
+                meta["stage_x"] = float(parts.get("X", 0))
+                meta["stage_y"] = float(parts.get("Y", 0))
+                meta["stage_z"] = float(parts.get("Z", 0))
+            except (ValueError, KeyError):
+                pass
 
-        # detection objective - extract magnification
-        if "detection_objective" in attribs:
-            metadata["detection_objective"] = attribs["detection_objective"]
-            obj_str = attribs["detection_objective"].split(",")[0]
-            mag_match = re.search(r'(\d+(?:\.\d+)?)x', obj_str, re.IGNORECASE)
-            if mag_match:
-                metadata["objective_mag"] = float(mag_match.group(1))
+    # detection_objective magnification: "SpecialOptics 16x/0.70" -> 16.0
+    if "detection_objective" in meta:
+        obj = str(meta["detection_objective"]).split(",")[0]
+        m = re.search(r"(\d+(?:\.\d+)?)x", obj, re.IGNORECASE)
+        if m:
+            meta["objective_mag"] = float(m.group(1))
 
-        # specimen info
-        if "specimen_name" in attribs:
-            metadata["specimen_name"] = attribs["specimen_name"]
-        if "data_header" in attribs:
-            metadata["data_header"] = attribs["data_header"]
-        if "timestamp" in attribs:
-            metadata["timestamp"] = attribs["timestamp"]
-        if "time_point" in attribs:
-            metadata["time_point"] = int(attribs["time_point"])
-        if "specimen_XYZT" in attribs:
-            metadata["specimen_XYZT"] = attribs["specimen_XYZT"]
-        if "angle" in attribs:
-            metadata["angle"] = float(attribs["angle"])
+    if "dimensions" in meta:
+        dims = meta["dimensions"]
+        if dims.ndim > 1:
+            dims = dims[0]
+        meta["zplanes"] = int(dims[-1])
 
-        # camera info
-        if "camera_index" in attribs:
-            metadata["camera_index"] = attribs["camera_index"]
-        if "camera_type" in attribs:
-            metadata["camera_type"] = attribs["camera_type"]
-        if "camera_roi" in attribs:
-            metadata["camera_roi"] = attribs["camera_roi"]
+    if "exposure_time" in meta and meta["exposure_time"] > 0:
+        meta["fps"] = round(1000.0 / meta["exposure_time"], 2)
+        if "zplanes" in meta:
+            meta["vps"] = round(meta["fps"] / meta["zplanes"], 2)
 
-        # illumination/detection
-        if "wavelength" in attribs:
-            metadata["wavelength"] = attribs["wavelength"]
-        if "illumination_arms" in attribs:
-            metadata["illumination_arms"] = attribs["illumination_arms"]
-        if "illumination_filter" in attribs:
-            metadata["illumination_filter"] = attribs["illumination_filter"]
-        if "detection_filter" in attribs:
-            metadata["detection_filter"] = attribs["detection_filter"]
+    meta["camera_pixel_size_um"] = CAMERA_PX_UM
+    if "objective_mag" in meta:
+        meta["pixel_resolution_um"] = CAMERA_PX_UM / meta["objective_mag"]
 
-    # computed fields
-    if "dimensions" in metadata and metadata["dimensions"]:
-        dims = metadata["dimensions"][0]
-        metadata["zplanes"] = dims[-1]
-
-    # fps = 1000 / exposure_time_ms
-    if "exposure_time" in metadata:
-        metadata["fps"] = 1000.0 / metadata["exposure_time"]
-        if "zplanes" in metadata:
-            metadata["vps"] = metadata["fps"] / metadata["zplanes"]
-
-    # pixel resolution = camera pixel size / magnification
-    metadata["camera_pixel_size_um"] = CAMERA_PIXEL_SIZE
-    if "objective_mag" in metadata:
-        metadata["pixel_resolution_um"] = CAMERA_PIXEL_SIZE / metadata["objective_mag"]
-
-    return metadata
+    return meta
 
 
 def _find_isoview_xml(base_path: Path) -> Path | None:
-    """Find XML metadata file in isoview raw data directory."""
-    # try common patterns
-    patterns = [
+    for pattern in (
         "ch00_spec00.xml", "ch0.xml", "ch*.xml",
-        "TL*_ch*.xml", "SPM*_TL*_VW*.xml", "SPM*_TM*_VW*.xml",
-        "*.xml",
-    ]
-    for pattern in patterns:
+        "TL*_ch*.xml", "SPM*_TL*_VW*.xml", "SPM*_TM*_VW*.xml", "*.xml",
+    ):
         matches = list(base_path.glob(pattern))
         if matches:
             return matches[0]
     return None
 
 
-class _PagedTiffReader:
-    """lazy page-based reader for large tif volumes.
+def _find_xml_channel(stem: str) -> int | None:
+    """Infer channel number from an XML filename.
 
-    reads individual z-planes on demand via tifffile.TiffFile.pages[z].asarray()
-    instead of loading the entire file into memory. supports [z, y, x] indexing
-    matching the interface used by memmap/zarr in IsoviewArray.__getitem__.
+    Tries ``ch##`` (raw root), ``CHN##`` (corrected/fused copies),
+    then legacy ``VW##``. Returns ``None`` when no channel marker found.
     """
-
-    def __init__(self, path: Path):
-        import tifffile
-        self._tif = tifffile.TiffFile(str(path))
-        page0 = self._tif.pages[0]
-        self._n_pages = len(self._tif.pages)
-        self._page_shape = (page0.shape[-2], page0.shape[-1])
-        self._dtype = page0.dtype
-
-    @property
-    def shape(self):
-        return (self._n_pages, *self._page_shape)
-
-    @property
-    def dtype(self):
-        return self._dtype
-
-    def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key, slice(None), slice(None))
-        while len(key) < 3:
-            key = (*key, slice(None))
-
-        z_key, y_key, x_key = key
-
-        # resolve z indices
-        if isinstance(z_key, int):
-            z_indices = [z_key if z_key >= 0 else self._n_pages + z_key]
-            squeeze_z = True
-        elif isinstance(z_key, slice):
-            z_indices = list(range(*z_key.indices(self._n_pages)))
-            squeeze_z = False
-        elif isinstance(z_key, (list, np.ndarray)):
-            z_indices = list(z_key)
-            squeeze_z = False
-        else:
-            z_indices = list(range(self._n_pages))
-            squeeze_z = False
-
-        # read requested pages
-        pages = []
-        for zi in z_indices:
-            page_data = self._tif.pages[zi].asarray()
-            pages.append(page_data[y_key, x_key])
-
-        result = np.stack(pages, axis=0)
-
-        if squeeze_z:
-            result = result[0]
-
-        return result
-
-    def close(self):
-        self._tif.close()
-
-    def __del__(self):
-        try:
-            self._tif.close()
-        except Exception:
-            pass
+    for tag in ("ch", "CHN", "VW"):
+        m = re.search(rf"{tag}(\d+)", stem)
+        if m:
+            return int(m.group(1))
+    return None
 
 
-class IsoviewArray(Shape5DMixin):
+def _collect_isoview_xmls(input_dir: Path, specimen: int) -> list[Path]:
+    """Find per-channel XML files under one directory.
+
+    Glob priority (first non-empty wins):
+      1. ``ch*_spec{specimen:02d}.xml`` — raw acquisition root.
+      2. ``ch*.xml`` without ``_spec`` suffix — single-specimen raw root.
+      3. ``*_CHN*.xml`` — corrected/fused copies in the current dir.
+      4. ``*_VW*.xml`` — legacy CHN naming.
+      5. Same patterns under ``SPM{specimen:02d}/``.
+      6. Same patterns under each ``TM######/`` child (covers
+         timelapse-corrected layouts where XML lives per timepoint).
     """
-    Lazy loader for isoview lightsheet microscopy data.
+    if not input_dir.is_dir():
+        return []
 
-    Conforms to LazyArrayProtocol for compatibility with mbo_utilities imread/imwrite
-    and downstream processing pipelines.
+    out: list[Path] = []
 
-    Parameters
-    ----------
-    path : str or Path
-        Path to directory containing .stack files or TM* folders with .zarr files.
+    spec_xmls = sorted(input_dir.glob(f"ch*_spec{specimen:02d}.xml"))
+    if spec_xmls:
+        return spec_xmls
 
-    Examples
-    --------
-    >>> arr = IsoviewArray("path/to/raw_data")  # with .stack files
-    >>> arr.shape
-    (61, 38, 4, 1848, 768)  # (t, z, vw, y, x)
-    >>> arr.dims
-    ('t', 'z', 'vw', 'y', 'x')
-    >>> arr.views
-    [(0, 0), (1, 0), (2, 1), (3, 1)]  # (camera, view) per entry
-    >>> frame = arr[0, 10, 0]  # t=0, z=10, vw=0
+    for f in sorted(input_dir.glob("ch*.xml")):
+        if "_spec" not in f.stem:
+            out.append(f)
+    if out:
+        return out
+
+    out.extend(sorted(input_dir.glob("*_CHN*.xml")))
+    if out:
+        return out
+    out.extend(sorted(input_dir.glob("*_VW*.xml")))
+    if out:
+        return out
+
+    spm_dir = input_dir / f"SPM{specimen:02d}"
+    if spm_dir.is_dir():
+        out.extend(sorted(spm_dir.glob("*_CHN*.xml")))
+        if out:
+            return out
+        out.extend(sorted(spm_dir.glob("*_VW*.xml")))
+        if out:
+            return out
+
+    # timelapse-corrected: XML lives inside each TM######/, identical
+    # across timepoints — sample the first one.
+    tm_dirs = _find_tm_folders(input_dir) if input_dir.is_dir() else []
+    if not tm_dirs and spm_dir.is_dir():
+        tm_dirs = _find_tm_folders(spm_dir)
+    if tm_dirs:
+        first_tm = tm_dirs[0]
+        out.extend(sorted(first_tm.glob("*_CHN*.xml")))
+        if out:
+            return out
+        out.extend(sorted(first_tm.glob("*_VW*.xml")))
+
+    return out
+
+
+def _read_all_isoview_xml(
+    candidate_dirs: list[Path],
+    specimen: int = 0,
+) -> tuple[dict, dict]:
+    """Read XMLs across one or more candidate directories, split by camera.
+
+    ``candidate_dirs`` is tried in order. The first directory yielding any
+    XML files wins (downstream dirs are not merged) — this matches isoview's
+    expectation that the raw acquisition root is the canonical source and
+    corrected/fused copies are byte-identical fallbacks.
+
+    Returns ``(common_metadata, per_camera_metadata)`` where:
+      - ``common_metadata`` carries every field whose value matches across
+        all parsed XMLs (numpy arrays compared with ``np.allclose``).
+      - ``per_camera_metadata[cam_idx]`` carries the channel-specific
+        fields when at least one XML disagrees on that key.
+
+    Two convenience fields are synthesized when possible:
+      - ``camera_view_map``: ``{0:0, 1:0}`` for Z-scan and ``{2:90, 3:90}``
+        for Y-scan, derived from ``stack_direction`` across all XMLs.
+      - ``axial_step``: the first non-empty ``z_step`` or ``y_step`` value
+        (same physical spacing, axis renamed by acquisition mode).
     """
+    xml_files: list[Path] = []
+    for d in candidate_dirs:
+        if d is None:
+            continue
+        xml_files = _collect_isoview_xmls(d, specimen)
+        if xml_files:
+            break
+    if not xml_files:
+        return {}, {}
 
-    def __init__(self, path: str | Path):
-        self.base_path = Path(path)
-        if not self.base_path.exists():
-            raise FileNotFoundError(f"Path does not exist: {self.base_path}")
-
-        # check for raw .stack files first
-        stack_files = list(self.base_path.glob("*.stack"))
-        if stack_files:
-            self._zarr_cache = {}
-            if self._is_tiled_raw(stack_files):
-                self._structure = "tiled-raw"
-                self._discover_tiled_raw()
-            else:
-                self._structure = "raw"
-                self._discover_raw(self.base_path)
-            return
-
-        # check for tiled corrected/fused TIF files (no TM folders)
-        if self._find_tiled_tifs():
-            self._zarr_cache = {}
-            return
-
-        # otherwise check for zarr-based structures
+    parsed: list[dict] = []
+    channels: list[int | None] = []
+    for xml_file in xml_files:
         try:
-            import zarr
-        except ImportError:
-            raise ImportError("zarr>=3.0 required for zarr files: pip install zarr")
+            meta = _parse_isoview_xml(xml_file)
+        except Exception as exc:
+            logger.warning("failed to parse %s: %s", xml_file, exc)
+            continue
+        parsed.append(meta)
+        channels.append(_find_xml_channel(xml_file.stem))
 
-        # detect if single TM or multi-TM
-        # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
-        if _has_tm_pattern(self.base_path.name):
-            zarr_files_in_path = list(self.base_path.glob("*.zarr"))
-            if zarr_files_in_path:
-                self._single_timepoint = True
-                self.tm_folders = [self.base_path]
-            else:
-                raise ValueError(f"TM folder {self.base_path} contains no .zarr files")
+    if not parsed:
+        return {}, {}
+
+    # synthesize camera_view_map from stack_direction when present.
+    # Fall back to the canonical 4-camera default for datasets whose XML
+    # omits stack_direction but uses two scan-aligned channels (the
+    # IsoView Z+Y dual-view setup, ~2015 vintage).
+    camera_view_map: dict[int, int] = {}
+    for meta in parsed:
+        direction = str(meta.get("stack_direction", "")).upper()
+        if "Z" in direction:
+            camera_view_map[0] = 0
+            camera_view_map[1] = 0
+        elif "Y" in direction:
+            camera_view_map[2] = 90
+            camera_view_map[3] = 90
+    if not camera_view_map and len(parsed) >= 2:
+        arms_seen = {str(m.get("illumination_arms")) for m in parsed if m.get("illumination_arms") is not None}
+        if len(arms_seen) >= 2:
+            camera_view_map = {0: 0, 1: 0, 2: 90, 3: 90}
+
+    def _eq(v1, v2) -> bool:
+        if isinstance(v1, np.ndarray) and isinstance(v2, np.ndarray):
+            return v1.shape == v2.shape and np.allclose(v1, v2)
+        return v1 == v2
+
+    all_keys: set[str] = set()
+    for meta in parsed:
+        all_keys.update(meta.keys())
+
+    common: dict = {}
+    per_cam: dict[int, dict] = {}
+    for key in all_keys:
+        values = [meta.get(key) for meta in parsed if key in meta]
+        if not values:
+            continue
+        if all(_eq(values[0], v) for v in values[1:]):
+            common[key] = values[0]
         else:
-            self.tm_folders = _find_tm_folders(self.base_path)
-            self._single_timepoint = False
-
-            if not self.tm_folders:
-                raise ValueError(f"No TM* folders or .stack files found in {self.base_path}")
-
-        # detect structure type and discover views
-        first_tm = self.tm_folders[0]
-        self._detect_structure(first_tm)
-
-        # cache for opened zarr arrays: (t_idx, view_idx) -> zarr array
-        self._zarr_cache = {}
-
-    def _discover_raw(self, base_path: Path):
-        """Discover raw .stack files and parse metadata from XML.
-
-        Filename pattern: SPC{specimen}_TM{time}_ANG{angle}_CM{camera}_CHN{channel}_PH{phase}.stack
-        """
-        import re
-
-        # find xml for dimensions
-        xml_path = _find_isoview_xml(base_path)
-        if xml_path is None:
-            raise ValueError(f"No XML metadata file found in {base_path}")
-
-        xml_meta = _parse_isoview_xml(xml_path)
-        self._zarr_attrs = xml_meta
-
-        if "dimensions" not in xml_meta or not xml_meta["dimensions"]:
-            raise ValueError(f"No dimensions found in XML: {xml_path}")
-
-        # dimensions from xml: [width, height, depth] = [768, 1848, 38]
-        # width = X = 768, height = Y = 1848
-        xml_width, xml_height, _ = xml_meta["dimensions"][0]
-        self._xml_width = xml_width  # X = 768
-        self._xml_height = xml_height  # Y = 1848
-
-        # parse all .stack files
-        stack_files = sorted(base_path.glob("*.stack"))
-        if not stack_files:
-            raise ValueError(f"No .stack files in {base_path}")
-
-        # pattern: SPC00_TM00000_ANG000_CM0_CHN01_PH0.stack
-        pattern = re.compile(
-            r"SPC(\d+)_TM(\d+)_ANG(\d+)_CM(\d+)_CHN(\d+)_PH(\d+)\.stack"
-        )
-
-        # organize by timepoint and (camera, channel) — raw files use CHN naming
-        self._stack_files = {}  # {timepoint: {(camera, channel): Path}}
-        timepoints = set()
-        views = set()
-
-        for sf in stack_files:
-            match = pattern.match(sf.name)
-            if not match:
-                logger.warning(f"Skipping unrecognized file: {sf.name}")
-                continue
-
-            specimen, timepoint, angle, camera, channel, phase = map(int, match.groups())
-            timepoints.add(timepoint)
-            views.add((camera, channel))
-
-            if timepoint not in self._stack_files:
-                self._stack_files[timepoint] = {}
-            self._stack_files[timepoint][(camera, channel)] = sf
-
-        # sort timepoints and views
-        self._timepoints = sorted(timepoints)
-        self._views = sorted(views)
-
-        if not self._views:
-            raise ValueError(f"No valid camera/view combinations in {base_path}")
-
-        # calculate depth from file size
-        first_file = next(iter(self._stack_files[self._timepoints[0]].values()))
-        file_size = first_file.stat().st_size
-        total_pixels = file_size // 2  # uint16 = 2 bytes
-        depth = total_pixels // (xml_width * xml_height)
-
-        # store shape as (Z, Y, X) where Y=height=1848, X=width=768
-        self._single_shape = (depth, xml_height, xml_width)  # (Z=38, Y=1848, X=768)
-        self._dtype = np.dtype("uint16")
-        self._single_timepoint = len(self._timepoints) == 1
-        self._consolidated_path = None
-        self._pipeline_stage = "isoview-raw"
-
-        # create tm_folders-like list for compatibility
-        self.tm_folders = [base_path] * len(self._timepoints)
-
-        logger.info(
-            f"IsoviewArray: structure=raw, pipeline_stage={self._pipeline_stage}, "
-            f"timepoints={len(self._timepoints)}, views={len(self._views)}, "
-            f"shape={self._single_shape}"
-        )
-
-    def _extract_ome_metadata_isoview(self, tif):
-        """Extract stage position and crop info from OME-XML into _ome_meta."""
-        try:
-            import xml.etree.ElementTree as ET
-
-            ome_xml = tif.ome_metadata
-            if not ome_xml:
-                return
-
-            root = ET.fromstring(ome_xml)
-
-            # stage position from Plane elements
-            for plane in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Plane"):
-                pos_x = plane.get("PositionX")
-                pos_y = plane.get("PositionY")
-                pos_z = plane.get("PositionZ")
-                if pos_x is not None:
-                    self._ome_meta["stage_x"] = float(pos_x)
-                if pos_y is not None:
-                    self._ome_meta["stage_y"] = float(pos_y)
-                if pos_z is not None:
-                    self._ome_meta["stage_z"] = float(pos_z)
-                break
-
-            # wavelength from Channel
-            for channel in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Channel"):
-                em_wl = channel.get("EmissionWavelength")
-                if em_wl:
-                    self._ome_meta["wavelength"] = float(em_wl)
-                break
-
-            # crop provenance from Description
-            for img in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Image"):
-                desc = img.get("Description", "")
-                if not desc:
-                    desc_el = img.find("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Description")
-                    if desc_el is not None and desc_el.text:
-                        desc = desc_el.text
-                if "raw_shape" in desc:
-                    self._ome_meta["crop_provenance"] = desc
-                break
-
-        except Exception:
-            pass
-
-    def _is_tiled_raw(self, stack_files: list[Path]) -> bool:
-        """check if .stack files are tiled (TL) rather than timelapse (TM)."""
-        for sf in stack_files:
-            if _TILED_RAW_PATTERN.match(sf.name):
-                return True
-        return False
-
-    def _find_tiled_tifs(self) -> bool:
-        """detect tiled corrected/fused TIF files in current directory."""
-        tif_files = [
-            f for f in self.base_path.glob("*.tif")
-            if not any(x in f.name for x in EXCLUDE_PATTERNS)
-        ]
-        if not tif_files:
-            return False
-
-        # check fused pattern first (more specific)
-        fused = [f for f in tif_files if _TILED_FUSED_PATTERN.match(f.name)]
-        if fused:
-            self._structure = "tiled-fused"
-            self._discover_tiled_fused(fused)
-            return True
-
-        corrected = [f for f in tif_files if _TILED_CORRECTED_PATTERN.match(f.name)]
-        if corrected:
-            self._structure = "tiled-corrected"
-            self._discover_tiled_corrected(corrected)
-            return True
-
-        return False
-
-    def _discover_tiled_raw(self):
-        """discover tiled raw .stack files: {folder}_CM#.stack pattern."""
-        stack_files = sorted(self.base_path.glob("*.stack"))
-
-        self._views = []
-        self._tiled_files = {}
-
-        for sf in stack_files:
-            match = _TILED_RAW_PATTERN.match(sf.name)
-            if not match:
-                continue
-            cam_idx = int(match.group(2))
-            if cam_idx not in self._views:
-                self._views.append(cam_idx)
-            self._tiled_files[cam_idx] = sf
-
-        self._views = sorted(self._views)
-        if not self._views:
-            raise ValueError(f"No valid tiled raw .stack files in {self.base_path}")
-
-        # parse xml for dimensions
-        xml_path = _find_isoview_xml(self.base_path)
-        if xml_path is None:
-            # try parent directory
-            xml_path = _find_isoview_xml(self.base_path.parent)
-
-        if xml_path is not None:
-            xml_meta = _parse_isoview_xml(xml_path)
-            self._zarr_attrs = xml_meta
-            if "dimensions" in xml_meta and xml_meta["dimensions"]:
-                xml_width, xml_height, _ = xml_meta["dimensions"][0]
-                self._xml_width = xml_width
-                self._xml_height = xml_height
-            else:
-                self._zarr_attrs = {}
-                self._xml_width = None
-                self._xml_height = None
-        else:
-            self._zarr_attrs = {}
-            self._xml_width = None
-            self._xml_height = None
-
-        # calculate shape from first file
-        first_file = self._tiled_files[self._views[0]]
-        file_size = first_file.stat().st_size
-
-        if self._xml_width is not None:
-            total_pixels = file_size // 2  # uint16
-            depth = total_pixels // (self._xml_width * self._xml_height)
-            self._single_shape = (depth, self._xml_height, self._xml_width)
-        else:
-            # no xml: try to infer from file, assume square pages
-            total_pixels = file_size // 2
-            # rough guess: common isoview sizes
-            import math
-            side = int(math.sqrt(total_pixels / 100))  # assume ~100 z-planes
-            self._single_shape = (100, side, side)
-            logger.warning("No XML metadata found, shape is approximate")
-
-        self._dtype = np.dtype("uint16")
-        self._single_timepoint = True
-        self._consolidated_path = None
-        self._pipeline_stage = "isoview-tiled-raw"
-
-        # extract tile id from folder name
-        tl_match = _TL_PATTERN.search(self.base_path.name)
-        self._tile_id = int(tl_match.group(1)) if tl_match else None
-
-        logger.info(
-            f"IsoviewArray: structure=tiled-raw, views={len(self._views)}, "
-            f"shape={self._single_shape}, tile={self._tile_id}"
-        )
-
-    def _discover_tiled_corrected(self, tif_files: list[Path]):
-        """discover tiled corrected TIF files: SPM##_TL#_CM##_VW##.ome.tif."""
-        self._views = []
-        self._tiled_files = {}
-
-        for tf in sorted(tif_files):
-            match = _TILED_CORRECTED_PATTERN.match(tf.name)
-            if not match:
-                continue
-            specimen = int(match.group(1))
-            tile = int(match.group(2))
-            camera = int(match.group(3))
-            view_idx = int(match.group(4))
-            view = (camera, view_idx)
-            if view not in self._views:
-                self._views.append(view)
-            self._tiled_files[view] = tf
-
-        self._views = sorted(self._views)
-        if not self._views:
-            raise ValueError(f"No valid tiled corrected TIF files in {self.base_path}")
-
-        # read shape from first file
-        first_path = self._tiled_files[self._views[0]]
-        reader = _PagedTiffReader(first_path)
-        self._single_shape = reader.shape
-        self._dtype = reader.dtype
-        reader.close()
-
-        self._single_timepoint = True
-        self._consolidated_path = None
-        self._pipeline_stage = "isoview-tiled-corrected"
-
-        # try to parse xml metadata
-        xml_path = _find_isoview_xml(self.base_path)
-        if xml_path is None:
-            xml_path = _find_isoview_xml(self.base_path.parent)
-        self._zarr_attrs = _parse_isoview_xml(xml_path) if xml_path else {}
-
-        # extract OME-TIFF metadata (stage position, crop provenance)
-        try:
-            import tifffile
-            with tifffile.TiffFile(str(first_path)) as tif:
-                self._ome_meta = {}
-                self._extract_ome_metadata_isoview(tif)
-                if self._ome_meta:
-                    self._zarr_attrs.update(self._ome_meta)
-        except Exception:
-            pass
-
-        # extract tile id
-        tl_match = _TL_PATTERN.search(self.base_path.name)
-        if tl_match is None:
-            # try parent folder
-            tl_match = _TL_PATTERN.search(self.base_path.parent.name)
-        self._tile_id = int(tl_match.group(1)) if tl_match else None
-
-        logger.info(
-            f"IsoviewArray: structure=tiled-corrected, views={len(self._views)}, "
-            f"shape={self._single_shape}, tile={self._tile_id}"
-        )
-
-    def _discover_tiled_fused(self, tif_files: list[Path]):
-        """discover tiled fused TIF files: SPM##_TL#_CM##_CM##_VW##.fusedStack.ome.tif."""
-        self._views = []
-        self._tiled_files = {}
-
-        for tf in sorted(tif_files):
-            match = _TILED_FUSED_PATTERN.match(tf.name)
-            if not match:
-                continue
-            specimen = int(match.group(1))
-            tile = int(match.group(2))
-            cam0 = int(match.group(3))
-            cam1 = int(match.group(4))
-            view_idx = int(match.group(5))
-            view = ((cam0, cam1), view_idx)
-            if view not in self._views:
-                self._views.append(view)
-            self._tiled_files[view] = tf
-
-        self._views = sorted(self._views)
-        if not self._views:
-            raise ValueError(f"No valid tiled fused TIF files in {self.base_path}")
-
-        # read shape from first file
-        first_path = self._tiled_files[self._views[0]]
-        reader = _PagedTiffReader(first_path)
-        self._single_shape = reader.shape
-        self._dtype = reader.dtype
-        reader.close()
-
-        self._single_timepoint = True
-        self._consolidated_path = None
-        self._pipeline_stage = "isoview-tiled-fused"
-
-        # try to parse xml metadata
-        xml_path = _find_isoview_xml(self.base_path)
-        if xml_path is None:
-            xml_path = _find_isoview_xml(self.base_path.parent)
-        self._zarr_attrs = _parse_isoview_xml(xml_path) if xml_path else {}
-
-        # extract tile id
-        tl_match = _TL_PATTERN.search(self.base_path.name)
-        if tl_match is None:
-            tl_match = _TL_PATTERN.search(self.base_path.parent.name)
-        self._tile_id = int(tl_match.group(1)) if tl_match else None
-
-        logger.info(
-            f"IsoviewArray: structure=tiled-fused, views={len(self._views)}, "
-            f"shape={self._single_shape}, tile={self._tile_id}"
-        )
-
-    def _detect_structure(self, tm_folder: Path):
-        """Detect consolidated vs separate structure and discover views."""
-        import zarr
-
-        # Check for consolidated .zarr files (contain camera_N subdirs)
-        consolidated_zarrs = []
-        for zf in tm_folder.glob("*.zarr"):
-            try:
-                z = zarr.open(zf, mode="r")
-                if isinstance(z, zarr.Group):
-                    if any(k.startswith("camera_") for k in z.group_keys()):
-                        consolidated_zarrs.append(zf)
-            except:
-                continue
-
-        if consolidated_zarrs:
-            self._structure = "consolidated"
-            self._discover_consolidated(tm_folder, consolidated_zarrs[0])
-        else:
-            self._structure = "separate"
-            self._discover_separate(tm_folder)
-
-        logger.info(
-            f"IsoviewArray: structure={self._structure}, "
-            f"timepoints={len(self.tm_folders)}, views={len(self._views)}"
-        )
-
-    def _discover_separate(self, tm_folder: Path):
-        """Parse SPM00_TM000000_CM00_VW01.zarr filenames.
-
-        Detects pipeline stage from filename patterns:
-        - isoview-pt: SPM00_TM000000_CM00_VW01.zarr (single camera per file)
-        - isoview-mf: SPM00_TM000000_CM00_CM01_VW01.zarr (fused cameras)
-        - isoview-mfc: SPM00_TM000000_VW00.zarr or VW00_VW01 (view-only or fused views)
-
-        Also supports legacy CHN naming for backward compatibility.
-        """
-        import re
-        import zarr
-
-        zarr_files = sorted(tm_folder.glob("*.zarr"))
-        if not zarr_files:
-            raise ValueError(f"No .zarr files in {tm_folder}")
-
-        self._views = []  # [(camera, view), ...] or [(view,), ...] for mfc
-        self._pipeline_stage = "isoview-pt"  # default
-
-        # patterns for different stages (support both VW and legacy CHN)
-        # mf: CM##_CM## with VW## or CHN##
-        pattern_mf = re.compile(r"CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)")
-        # pt: single CM## with VW## or CHN##
-        pattern_pt = re.compile(r"_CM(\d+)_(?:VW|CHN)(\d+)(?:\.zarr)?$")
-        # mfc: VW##_VW## or CHN##_CHN## (fused views) or just VW## / CHN## (no cameras)
-        pattern_mfc_fused = re.compile(r"(?:VW|CHN)(\d+)_(?:VW|CHN)(\d+)")
-        pattern_mfc_single = re.compile(r"_(?:VW|CHN)(\d+)(?:\.zarr)?$")
-
-        has_fused_cameras = False
-        has_fused_views = False
-        has_single_cameras = False
-
-        for zf in zarr_files:
-            name = zf.stem
-
-            # skip mask files
-            if any(x in name for x in ["Mask", "mask", "coords"]):
-                continue
-
-            # check for fused cameras (mf stage)
-            match_mf = pattern_mf.search(name)
-            if match_mf:
-                has_fused_cameras = True
-                cam0, cam1, vw = int(match_mf.group(1)), int(match_mf.group(2)), int(match_mf.group(3))
-                view = ((cam0, cam1), vw)
-                if view not in self._views:
-                    self._views.append(view)
-                continue
-
-            # check for fused views (mfc stage)
-            match_mfc = pattern_mfc_fused.search(name)
-            if match_mfc:
-                has_fused_views = True
-                vw0, vw1 = int(match_mfc.group(1)), int(match_mfc.group(2))
-                view = (vw0, vw1)
-                if view not in self._views:
-                    self._views.append(view)
-                continue
-
-            # check for single camera (pt stage)
-            match_pt = pattern_pt.search(name)
-            if match_pt:
-                has_single_cameras = True
-                cm_idx, vw_idx = int(match_pt.group(1)), int(match_pt.group(2))
-                view = (cm_idx, vw_idx)
-                if view not in self._views:
-                    self._views.append(view)
-                continue
-
-            # check for view-only (mfc stage, single view output)
-            match_vw = pattern_mfc_single.search(name)
-            if match_vw and "CM" not in name:
-                has_fused_views = True
-                vw = int(match_vw.group(1))
-                view = (vw,)
-                if view not in self._views:
-                    self._views.append(view)
-
-        # determine pipeline stage
-        if has_fused_views:
-            self._pipeline_stage = "isoview-mfc"
-        elif has_fused_cameras:
-            self._pipeline_stage = "isoview-mf"
-        elif has_single_cameras:
-            self._pipeline_stage = "isoview-pt"
-
-        if not self._views:
-            raise ValueError(f"No valid camera/view combinations in {tm_folder}")
-
-        # open first valid (non-mask) file to get shape/dtype/metadata
-        first_valid = None
-        for zf in zarr_files:
-            if not any(x in zf.stem for x in ["Mask", "mask", "coords"]):
-                first_valid = zf
-                break
-
-        if first_valid is None:
-            raise ValueError(f"No valid data files in {tm_folder}")
-
-        first_z = zarr.open(first_valid, mode="r")
-        if isinstance(first_z, zarr.Group):
-            if "0" in first_z:
-                first_arr = first_z["0"]
-            else:
-                raise ValueError(f"OME-Zarr group missing '0' array: {zarr_files[0]}")
-            self._zarr_attrs = dict(first_z.attrs)
-            # extract pixel spacing from OME-Zarr multiscales
-            self._extract_pixel_spacing_from_zarr(first_z)
-        else:
-            first_arr = first_z
-            self._zarr_attrs = dict(first_arr.attrs) if hasattr(first_arr, "attrs") else {}
-
-        self._single_shape = first_arr.shape  # (Z, Y, X)
-        self._dtype = first_arr.dtype
-        self._consolidated_path = None
-
-    def _extract_pixel_spacing_from_zarr(self, zarr_group):
-        """Extract dx, dy, dz from OME-Zarr multiscales metadata."""
-        multiscales = zarr_group.attrs.get("multiscales", [])
-        if not multiscales:
-            return
-
-        # get first multiscale entry
-        ms = multiscales[0] if isinstance(multiscales, list) else multiscales
-        datasets = ms.get("datasets", [])
-        if not datasets:
-            return
-
-        # get coordinate transformations from first dataset
-        transforms = datasets[0].get("coordinateTransformations", [])
-        for t in transforms:
-            if t.get("type") == "scale":
-                scale = t.get("scale", [])
-                # scale is [z, y, x] for 3D data
-                if len(scale) >= 3:
-                    self._zarr_attrs["dz"] = float(scale[0])
-                    self._zarr_attrs["dy"] = float(scale[1])
-                    self._zarr_attrs["dx"] = float(scale[2])
-                    # also store z_step for compatibility
-                    self._zarr_attrs["z_step"] = float(scale[0])
-                    self._zarr_attrs["pixel_resolution_um"] = float(scale[1])
-                break
-
-    def _discover_consolidated(self, tm_folder: Path, consolidated_zarr: Path):
-        """Parse camera_N subgroups from consolidated zarr."""
-        import zarr
-
-        self._consolidated_path = consolidated_zarr
-        self._pipeline_stage = "isoview-pt"  # consolidated is from process_timepoint
-        z = zarr.open(consolidated_zarr, mode="r")
-
-        # find all camera_N groups
-        camera_groups = sorted(
-            [k for k in z.group_keys() if k.startswith("camera_")],
-            key=lambda x: int(x.split("_")[1])
-        )
-
-        if not camera_groups:
-            raise ValueError(f"No camera_N groups in {consolidated_zarr}")
-
-        # for now, assume each camera has one channel (channel 0)
-        self._views = []
-        for cam_group in camera_groups:
-            cam_idx = int(cam_group.split("_")[1])
-            self._views.append((cam_idx, 0))
-
-        # get shape/dtype from first camera
-        first_cam_group = z[camera_groups[0]]
-        first_arr = first_cam_group["0"]
-        self._single_shape = first_arr.shape  # (Z, Y, X)
-        self._dtype = first_arr.dtype
-
-        # store root attrs as metadata
-        self._zarr_attrs = dict(z.attrs)
-
-        # extract pixel spacing from camera group's multiscales
-        self._extract_pixel_spacing_from_zarr(first_cam_group)
-
-    def _read_stack_file(self, stack_path: Path) -> np.memmap:
-        """Memory-map raw binary .stack file for lazy access.
-
-        Format: BSQ (band sequential), little-endian uint16
-
-        For XML dims [768, 1848, 38] = [width, height, depth]:
-        - reshape to (Z, Y, X) = (38, 1848, 768)
-
-        Uses memory mapping for efficient slice access without loading entire file.
-        """
-        depth, height, width = self._single_shape  # (Z=38, Y=1848, X=768)
-        volume = np.memmap(
-            stack_path,
-            dtype="<u2",  # little-endian uint16
-            mode="r",
-            shape=(depth, height, width),  # (Z, Y, X) = (38, 1848, 768)
-        )
-        return volume
-
-    def _get_zarr(self, t_idx: int, view_idx: int):
-        """Get or open array data for timepoint and view index.
-
-        For raw structure: reads .stack file into memory
-        For zarr structures: returns lazy zarr array
-        """
-        cache_key = (t_idx, view_idx)
-        if cache_key in self._zarr_cache:
-            return self._zarr_cache[cache_key]
-
-        # tiled structures use _tiled_files keyed by view value
-        if self._structure == "tiled-raw":
-            view = self._views[view_idx]
-            stack_path = self._tiled_files[view]
-            arr = self._read_stack_file(stack_path)
-            self._zarr_cache[cache_key] = arr
-            return arr
-
-        if self._structure in ("tiled-corrected", "tiled-fused"):
-            view = self._views[view_idx]
-            tif_path = self._tiled_files[view]
-            reader = _PagedTiffReader(tif_path)
-            self._zarr_cache[cache_key] = reader
-            return reader
-
-        camera, channel = self._views[view_idx]
-
-        if self._structure == "raw":
-            # get timepoint from sorted list
-            timepoint = self._timepoints[t_idx]
-            if timepoint not in self._stack_files:
-                raise FileNotFoundError(f"No data for timepoint {timepoint}")
-            if (camera, channel) not in self._stack_files[timepoint]:
-                raise FileNotFoundError(
-                    f"No data for camera={camera}, channel={channel} at timepoint {timepoint}"
-                )
-
-            stack_path = self._stack_files[timepoint][(camera, channel)]
-            arr = self._read_stack_file(stack_path)
-            self._zarr_cache[cache_key] = arr
-            return arr
-
-        # zarr-based structures
-        import zarr
-        tm_folder = self.tm_folders[t_idx]
-
-        if self._structure == "consolidated":
-            # find consolidated zarr in this TM folder
-            zarr_files = []
-            for zf in tm_folder.glob("*.zarr"):
-                try:
-                    z = zarr.open(zf, mode="r")
-                    if isinstance(z, zarr.Group):
-                        if any(k.startswith("camera_") for k in z.group_keys()):
-                            zarr_files.append(zf)
-                except:
+            for ch, meta in zip(channels, parsed):
+                if ch is None or key not in meta:
                     continue
+                per_cam.setdefault(ch, {})[key] = meta[key]
 
-            if not zarr_files:
-                raise FileNotFoundError(f"No consolidated zarr in {tm_folder}")
+    if camera_view_map:
+        common["camera_view_map"] = camera_view_map
 
-            z = zarr.open(zarr_files[0], mode="r")
-            arr = z[f"camera_{camera}/0"]
+    # z_step and y_step are the same physical spacing under different
+    # acquisition orientations — collapse to axial_step for callers that
+    # don't want to special-case scan direction.
+    if "axial_step" not in common:
+        for meta in parsed:
+            if "z_step" in meta:
+                common["axial_step"] = meta["z_step"]
+                break
+            if "y_step" in meta:
+                common["axial_step"] = meta["y_step"]
+                break
 
-        else:  # separate
-            # try VW naming first, fall back to legacy CHN
-            pattern = f"*_CM{camera:02d}_VW{channel:02d}.zarr"
-            matches = list(tm_folder.glob(pattern))
-            if not matches:
-                pattern = f"*_CM{camera:02d}_CHN{channel:02d}.zarr"
-                matches = list(tm_folder.glob(pattern))
+    return common, per_cam
 
-            if not matches:
-                raise FileNotFoundError(f"No *_CM{camera:02d}_VW{channel:02d}.zarr in {tm_folder}")
 
-            z = zarr.open(matches[0], mode="r")
-            if isinstance(z, zarr.Group):
-                if "0" in z:
-                    arr = z["0"]
-                else:
-                    raise ValueError(f"OME-Zarr group missing '0' array: {matches[0]}")
-            else:
-                arr = z
+def _extract_zarr_scale(zarr_attrs: dict) -> dict:
+    """Pull dz/dy/dx from OME-Zarr multiscales coordinateTransformations."""
+    out: dict = {}
+    multiscales = zarr_attrs.get("multiscales") if zarr_attrs else None
+    if not multiscales:
+        return out
+    ms = multiscales[0] if isinstance(multiscales, list) else multiscales
+    datasets = ms.get("datasets", []) if isinstance(ms, dict) else []
+    if not datasets:
+        return out
+    for t in datasets[0].get("coordinateTransformations", []):
+        if t.get("type") == "scale":
+            scale = t.get("scale", [])
+            if len(scale) >= 3:
+                out["dz"] = float(scale[-3])
+                out["dy"] = float(scale[-2])
+                out["dx"] = float(scale[-1])
+            break
+    return out
 
-        self._zarr_cache[cache_key] = arr
-        return arr
 
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """
-        Array shape.
-
-        Returns
-        -------
-        - Single TM: (Z, Views, Y, X) - 4D
-        - Multi TM: (T, Z, Views, Y, X) - 5D
-        """
-        z, y, x = self._single_shape
-        if self._single_timepoint:
-            return (z, len(self._views), y, x)
-        # for raw structure, use _timepoints length
-        num_t = len(self._timepoints) if self._structure == "raw" else len(self.tm_folders)
-        return (num_t, z, len(self._views), y, x)
-
-    @property
-    def dtype(self):
-        """Array data type."""
-        return self._dtype
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        z, y, x = self._single_shape
-        nv = len(self._views)
-        if self._single_timepoint:
-            return (1, nv, z, y, x)
-        num_t = len(self._timepoints) if self._structure == "raw" else len(self.tm_folders)
-        return (num_t, nv, z, y, x)
-
-    @property
-    def ndim(self) -> int:
-        """Number of dimensions."""
-        return 4 if self._single_timepoint else 5
-
-    @property
-    def size(self) -> int:
-        """Total number of elements."""
-        return int(np.prod(self.shape))
-
-    @property
-    def min(self) -> float:
-        """
-        Minimum value across all data.
-
-        For consolidated structure, uses min_intensity from camera metadata.
-        Otherwise computes lazily from first view.
-        """
-        if self._structure == "consolidated" and hasattr(self, "_consolidated_path"):
-            import zarr
-            z = zarr.open(self._consolidated_path, mode="r")
-            # Get min from first camera metadata
-            for cam_group in z.group_keys():
-                if cam_group.startswith("camera_"):
-                    cam_attrs = dict(z[cam_group].attrs)
-                    if "min_intensity" in cam_attrs:
-                        return float(cam_attrs["min_intensity"])
-
-        # Fallback: compute from first view
-        first_arr = self._get_zarr(0, 0)
-        return float(np.min(first_arr))
-
-    @property
-    def max(self) -> float:
-        """
-        Maximum value across all data.
-
-        Computed lazily from first view.
-        """
-        first_arr = self._get_zarr(0, 0)
-        return float(np.max(first_arr))
-
-    @property
-    def metadata(self) -> dict:
-        """
-        Return metadata as dict. Always returns dict, never None.
-
-        Imaging parameters (displayed in green in metadata viewer):
-        - fs: frame rate in Hz (computed from exposure_time)
-        - dx, dy: pixel size in micrometers (camera_pixel_size / objective_mag)
-        - dz: z step in micrometers
-        - Lx, Ly: image dimensions in pixels
-        - num_zplanes: number of z-planes per volume
-        - num_timepoints: number of timepoints
-        - dtype: data type
-
-        Acquisition parameters (displayed in orange):
-        - exposure_time: camera exposure in ms
-        - detection_objective: objective lens description
-        - objective_mag: objective magnification (e.g., 16.0)
-        - camera_type, camera_roi: camera hardware info
-        - wavelength, illumination_arms, illumination_filter, detection_filter
-        - specimen_name, data_header, timestamp
-        - vps: volumes per second (fps / zplanes)
-
-        Plus isoview-specific fields:
-        - views: list of (camera, view) tuples
-        - structure: 'raw', 'consolidated', or 'separate'
-        - cameras: per-camera metadata dict (for consolidated structure)
-        """
-        meta = dict(self._zarr_attrs) if self._zarr_attrs else {}
-
-        # === IMAGING PARAMETERS ===
-        # pixel resolution: pixel_resolution_um -> dx, dy
-        px_res = meta.get("pixel_resolution_um")
-        if px_res is not None:
-            meta["dx"] = float(px_res)
-            meta["dy"] = float(px_res)
-
-        # z step: z_step -> dz
-        z_step = meta.get("z_step")
-        if z_step is not None:
-            meta["dz"] = float(z_step)
-
-        # frame rate: fps -> fs (volume rate for lightsheet)
-        fps = meta.get("fps")
-        if fps is not None:
-            meta["fs"] = float(fps)
-
-        # image dimensions from shape
-        meta["Ly"] = self._single_shape[1]
-        meta["Lx"] = self._single_shape[2]
-
-        # z-planes from shape (not timepoints!)
-        meta["num_zplanes"] = self._single_shape[0]
-        meta["nplanes"] = self._single_shape[0]
-        meta["num_planes"] = self._single_shape[0]
-
-        # timepoints
-        num_t = self.num_timepoints
-        meta["num_timepoints"] = num_t
-        meta["nframes"] = num_t  # suite2p alias
-        meta["num_frames"] = num_t  # legacy alias
-
-        # dtype
-        meta["dtype"] = str(self._dtype)
-
-        # === ACQUISITION PARAMETERS ===
-        # these are already in meta from _zarr_attrs if available:
-        # exposure_time, detection_objective, objective_mag, camera_type,
-        # camera_roi, wavelength, illumination_arms, illumination_filter,
-        # detection_filter, specimen_name, data_header, timestamp, vps
-
-        # stack type based on pipeline stage:
-        # isoview-raw, isoview-pt, isoview-mf, isoview-mfc
-        meta["stack_type"] = getattr(self, "_pipeline_stage", "isoview")
-
-        # number of views (cameras x views)
-        meta["num_views"] = len(self._views)
-
-        # === ISOVIEW-SPECIFIC FIELDS ===
-        meta["views"] = self._views
-        meta["pipeline_stage"] = getattr(self, "_pipeline_stage", "unknown")
-        meta["shape"] = self.shape
-        meta["structure"] = self._structure
-        meta["single_timepoint"] = self._single_timepoint
-
-        # tiled acquisition info
-        if self._structure.startswith("tiled"):
-            meta["acquisition_type"] = "tiled"
-            tile_id = getattr(self, "_tile_id", None)
-            if tile_id is not None:
-                meta["tile_id"] = tile_id
-        else:
-            meta["acquisition_type"] = "timelapse"
-
-        # add per-camera metadata (consolidated structure only)
-        cam_meta = self.camera_metadata
-        if cam_meta:
-            meta["cameras"] = cam_meta
-            # aggregate per-camera values for display
-            agg_keys = ["zplanes", "min_intensity", "illumination_arms", "vps",
-                        "wavelength", "detection_filter"]
-            for key in agg_keys:
-                values = [cm.get(key) for cm in cam_meta.values() if cm.get(key) is not None]
-                if values:
-                    # if all same, use single value, otherwise use list
-                    if len({str(v) for v in values}) == 1:
-                        meta[key] = values[0]
-                    else:
-                        meta[key] = values
-
-        return meta
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._zarr_attrs.update(value)
-
-    @property
-    def camera_metadata(self) -> dict[int, dict]:
-        """
-        Per-camera metadata (only for consolidated structure).
-
-        Returns dict mapping camera index to camera-specific metadata.
-        """
-        if self._structure != "consolidated":
-            return {}
-
-        import zarr
-        z = zarr.open(self._consolidated_path, mode="r")
-        cam_meta = {}
-
-        for cam_group in z.group_keys():
-            if cam_group.startswith("camera_"):
-                cam_idx = int(cam_group.split("_")[1])
-                cam_meta[cam_idx] = dict(z[cam_group].attrs)
-
-        return cam_meta
-
-    @property
-    def views(self) -> list[tuple[int, int]]:
-        """List of (camera, view) tuples for each view index."""
-        return self._views
-
-    @property
-    def num_views(self) -> int:
-        """Number of camera/view combinations."""
-        return len(self._views)
-
-    @property
-    def num_timepoints(self) -> int:
-        """Number of timepoints."""
-        if self._structure == "raw":
-            return len(self._timepoints)
-        if self._structure.startswith("tiled"):
-            return 1
-        return len(self.tm_folders)
-
-    def __len__(self) -> int:
-        """Length is first dimension (T or Z depending on structure)."""
-        return self.shape[0]
-
-    def view_index(self, camera: int, view: int) -> int:
-        """Get view index for a specific camera/view combination."""
+def _extract_tiff_scale(tif) -> dict:
+    """Pull dz/dy/dx and frame rate from ImageJ TIFF metadata."""
+    out: dict = {}
+    ij = getattr(tif, "imagej_metadata", None) or {}
+    if "spacing" in ij:
         try:
-            return self._views.index((camera, view))
-        except ValueError:
-            raise ValueError(
-                f"No view for camera={camera}, view={view}. "
-                f"Available views: {self._views}"
-            )
-
-    def __getitem__(self, key):
-        """
-        Index the array.
-
-        Shape:
-        - Single TM: (Z, Views, Y, X) - 4D
-        - Multi TM: (T, Z, Views, Y, X) - 5D
-
-        Supports integers, slices, lists, and combinations.
-        """
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        def to_indices(k, max_val):
-            """Convert key to list of indices."""
-            if isinstance(k, int):
-                if k < 0:
-                    k = max_val + k
-                return [k]
-            if isinstance(k, slice):
-                return list(range(*k.indices(max_val)))
-            if isinstance(k, (list, np.ndarray)):
-                return list(k)
-            return list(range(max_val))
-
-        if self._single_timepoint:
-            # 4D indexing: (Z, Views, Y, X)
-            key = key + (slice(None),) * (4 - len(key))
-            z_key, view_key, y_key, x_key = key
-            t_indices = [0]
-            t_key = 0
-        else:
-            # 5D indexing: (T, Z, Views, Y, X)
-            key = key + (slice(None),) * (5 - len(key))
-            t_key, z_key, view_key, y_key, x_key = key
-            t_indices = to_indices(t_key, len(self.tm_folders))
-
-        z_indices = to_indices(z_key, self._single_shape[0])
-        view_indices = to_indices(view_key, len(self._views))
-
-        # Build output array (always 5D internally)
-        out_shape = (
-            len(t_indices),
-            len(z_indices),
-            len(view_indices),
-            *self._single_shape[1:],  # Y, X
-        )
-
-        # Handle Y, X slicing
-        if isinstance(y_key, int):
-            out_shape = (*out_shape[:3], 1, *out_shape[4:])
-        elif isinstance(y_key, slice):
-            y_size = len(range(*y_key.indices(self._single_shape[1])))
-            out_shape = (*out_shape[:3], y_size, *out_shape[4:])
-
-        if isinstance(x_key, int):
-            out_shape = (*out_shape[:4], 1)
-        elif isinstance(x_key, slice):
-            x_size = len(range(*x_key.indices(self._single_shape[2])))
-            out_shape = (*out_shape[:4], x_size)
-
-        result = np.empty(out_shape, dtype=self._dtype)
-
-        for ti, t_idx in enumerate(t_indices):
-            for vi, view_idx in enumerate(view_indices):
-                zarr_arr = self._get_zarr(t_idx, view_idx)
-
-                # Index the zarr array (Z, Y, X)
-                data = zarr_arr[z_key, y_key, x_key]
-
-                # Handle dimension reduction from integer indexing
-                if isinstance(z_key, int):
-                    data = data[np.newaxis, ...]
-                if isinstance(y_key, int):
-                    data = data[:, np.newaxis, :]
-                if isinstance(x_key, int):
-                    data = data[:, :, np.newaxis]
-
-                result[ti, :, vi, ...] = data
-
-        # Squeeze out singleton dimensions from integer indexing
-        if self._single_timepoint:
-            # Always squeeze out T dimension
-            result = np.squeeze(result, axis=0)
-            int_indexed = [
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            # Squeeze in reverse order
-            for ax in range(3, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-        else:
-            int_indexed = [
-                isinstance(t_key, int),
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            # Squeeze in reverse order
-            for ax in range(4, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-
-        return result
-
-    def __array__(self) -> np.ndarray:
-        """Materialize full array into memory."""
-        return self[:]
-
-    @property
-    def filenames(self) -> list[Path]:
-        """
-        Source file paths for LazyArrayProtocol.
-
-        Returns
-        -------
-        list[Path]
-            For raw: list of .stack file paths
-            For zarr: list of TM folder paths
-        """
-        if self._structure == "raw":
-            files = []
-            for t in self._timepoints:
-                for path in self._stack_files[t].values():
-                    files.append(path)
-            return files
-        if self._structure.startswith("tiled"):
-            return list(self._tiled_files.values())
-        return list(self.tm_folders)
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        """
-        Dimension labels for LazyArrayProtocol.
-
-        Returns
-        -------
-        tuple[str, ...]
-            ('z', 'vw', 'y', 'x') for single timepoint
-            ('t', 'z', 'vw', 'y', 'x') for multi-timepoint
-        """
-        if self._single_timepoint:
-            return ("z", "vw", "Y", "X")
-        return ("t", "z", "vw", "Y", "X")
-
-    @property
-    def num_planes(self) -> int:
-        """
-        Number of Z-planes for LazyArrayProtocol.
-
-        Returns
-        -------
-        int
-            Number of Z slices in each volume.
-        """
-        return self._single_shape[0]
-
-    def close(self) -> None:
-        """Release resources (close readers and clear cache)."""
-        for v in self._zarr_cache.values():
-            if isinstance(v, _PagedTiffReader):
-                v.close()
-        self._zarr_cache.clear()
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite: bool = False,
-        target_chunk_mb: int = 50,
-        ext: str = ".tiff",
-        progress_callback=None,
-        debug: bool = False,
-        planes: list[int] | int | None = None,
-        **kwargs,
-    ):
-        """(WIP) Write IsoviewArray to disk."""
-        from mbo_utilities.arrays._base import _imwrite_base
-
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-    def __repr__(self):
-        return (
-            f"IsoviewArray(shape={self.shape}, dtype={self.dtype}, "
-            f"views={self._views}, structure={self._structure})"
-        )
-
-
-# patterns to exclude (masks, projections, auxiliary files)
-EXCLUDE_PATTERNS = [
-    "Mask",
-    "mask",
-    "minIntensity",
-    "coords",
-    "Projection",
-    "configuration",
-    "transformation",
-    "intensityCorrection",
-    "referenceMinIntensity",
-    "scores",
-    "jobCompleted",
-    "segmentationMask",
-    "xyMask",
-    "xzMask",
-    "fusionMask",
-    "xyProjection",
-    "xzProjection",
-    "yzProjection",
-    "Background_",
-    "transformedMask",
-    "mask2D",
-    "mask.tif",
-]
-
-# patterns that identify data files (for fusedStack naming)
-DATA_PATTERNS = [
-    ".fusedStack.",  # multifuse output: CM00_CM01_VW01.fusedStack.klb
-]
-
-
-class IsoViewOutputArray(Shape5DMixin):
-    """
-    Generic lazy array for IsoView pipeline outputs.
-
-    Handles TM folder structure with various file formats (.tif, .klb, .zarr)
-    and view dimensions (cameras, channels, or custom groupings).
-
-    Shape: (T, Z, Views, Y, X) or (Z, Views, Y, X) for single timepoint
-
-    Parameters
-    ----------
-    path : str or Path
-        Path to directory containing TM* folders or a single TM folder
-    view_dim : str, optional
-        Name for view dimension in dims tuple. Default auto-detects:
-        - 'vw' if CM##_VW## pattern found in filenames
-        - 'cm' if legacy CM##_CHN## pattern found
-        - 'view' otherwise
-
-    Examples
-    --------
-    >>> arr = IsoViewOutputArray("path/to/output")
-    >>> arr.shape
-    (4, 38, 4, 1848, 768)  # (t, z, views, y, x)
-    >>> arr.dims
-    ('t', 'z', 'vw', 'y', 'x')
-    >>> arr.views
-    [0, 1, 2, 3]  # view indices
-    >>> frame = arr[0, 10, 0]  # t=0, z=10, view=0
-    """
-
-    def __init__(self, path: str | Path, view_dim: str | None = None):
-        self.base_path = Path(path)
-        if not self.base_path.exists():
-            raise FileNotFoundError(f"Path does not exist: {self.base_path}")
-
-        # initialize metadata before discovery (extraction happens during _read_shape)
-        self._metadata = {}
-        self._cache = {}
-
-        # discover structure
-        self._discover_structure()
-
-        # auto-detect or use provided view dimension name
-        self._view_dim = view_dim or self._detect_view_dim()
-
-    def _discover_structure(self):
-        """Find TM folders, file type, and views."""
-        # detect if single TM or multi-TM
-        # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
-        if _has_tm_pattern(self.base_path.name):
-            self._single_timepoint = True
-            self.tm_folders = [self.base_path]
-        else:
-            self.tm_folders = _find_tm_folders(self.base_path)
-            self._single_timepoint = len(self.tm_folders) == 1
-
-            if not self.tm_folders:
-                raise ValueError(f"No TM* folders found in {self.base_path}")
-
-        # detect file type from first TM folder
-        first_tm = self.tm_folders[0]
-        self._detect_file_type(first_tm)
-
-        # discover views
-        self._discover_views(first_tm)
-
-    def _detect_file_type(self, tm_folder: Path):
-        """Detect file type (.tif, .klb, or .zarr) in TM folder.
-
-        Also detects fusedStack naming convention (e.g., .fusedStack.klb).
-        """
-        # check for each type, excluding mask files
-        tif_files = [f for f in tm_folder.glob("*.tif")
-                     if not any(x in f.name for x in EXCLUDE_PATTERNS)]
-        klb_files = [f for f in tm_folder.glob("*.klb")
-                     if not any(x in f.name for x in EXCLUDE_PATTERNS)]
-        zarr_files = [f for f in tm_folder.glob("*.zarr")
-                      if not any(x in f.name for x in EXCLUDE_PATTERNS)]
-
-        # detect fusedStack naming (multifuse output)
-        self._fused_stack_naming = False
-
-        if tif_files:
-            # OME-TIFF outputs use the compound extension `.ome.tif`; preserve
-            # it so reconstructed filenames in `_get_file_path` actually exist.
-            if any(f.name.endswith(".ome.tif") for f in tif_files):
-                self._file_ext = ".ome.tif"
-            else:
-                self._file_ext = ".tif"
-            self._data_files = tif_files
-        elif klb_files:
-            self._file_ext = ".klb"
-            # check for fusedStack naming
-            fused_files = [f for f in klb_files if ".fusedStack." in f.name]
-            if fused_files:
-                self._fused_stack_naming = True
-                self._data_files = fused_files
-            else:
-                self._data_files = klb_files
-        elif zarr_files:
-            self._file_ext = ".zarr"
-            self._data_files = zarr_files
-        else:
-            raise ValueError(
-                f"No supported data files (.tif, .klb, .zarr) in {tm_folder}"
-            )
-
-        logger.info(f"IsoViewOutputArray: detected {self._file_ext} files, fusedStack={self._fused_stack_naming}")
-
-    def _discover_views(self, tm_folder: Path):
-        """Parse filenames to find views and determine shape.
-
-        Detects pipeline stage from filename patterns:
-        - isoview-pt: SPM00_TM000000_CM00_VW01 (single camera per file)
-        - isoview-mf: SPM00_TM000000_CM00_CM01_VW01 (fused cameras)
-        - isoview-mfc: SPM00_TM000000_VW00 (view-only, fully fused)
-
-        Supports both VW and legacy CHN naming.
-        Handles both standard naming (.klb) and fusedStack naming (.fusedStack.klb).
-        """
-        import re
-
-        # patterns for extracting view info (support both VW and legacy CHN)
-        # SPM00_TM000000_CM00_VW01.tif -> camera=0, view=1
-        # SPM00_TM000000_CM00_CM01_VW01.fusedStack.klb -> fused cameras 0+1, view=1
-        # SPM00_TM000000_VW00.tif -> view=0 (no camera)
-        # SPM00_TM000000_CM00.zarr -> camera=0 (corrected per-camera, no VW)
-        pattern_cm = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
-        )
-        pattern_fused_cm = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
-        )
-        pattern_vw = re.compile(
-            r"SPM(\d+)_TM(\d+)_(?:VW|CHN)(\d+)(?:\.[a-zA-Z]+)+" + "$"
-        )
-        pattern_cm_only = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)(?:\.[a-zA-Z]+)+" + "$"
-        )
-
-        self._views = []
-        self._view_type = None  # 'vw', 'fused', or 'view'
-        self._specimen = None
-        self._file_map = {}  # view_idx -> filename pattern parts
-        self._pipeline_stage = "isoview-pt"  # default
-
-        for f in sorted(self._data_files):
-            # try fused camera pattern first (CM##_CM##)
-            match = pattern_fused_cm.match(f.name)
-            if match:
-                specimen, timepoint, cam0, cam1, view_idx = map(int, match.groups())
-                self._specimen = specimen
-                self._view_type = "fused"
-                self._pipeline_stage = "isoview-mf"
-                view_key = (cam0, cam1)
-                if view_key not in self._views:
-                    self._views.append(view_key)
-                    self._file_map[view_key] = {"cam0": cam0, "cam1": cam1, "view": view_idx}
-                continue
-
-            # try single CM pattern
-            match = pattern_cm.match(f.name)
-            if match:
-                specimen, timepoint, camera, view_idx = map(int, match.groups())
-                self._specimen = specimen
-                self._view_type = "vw"
-                self._pipeline_stage = "isoview-pt"
-                if camera not in self._views:
-                    self._views.append(camera)
-                    self._file_map[camera] = {"camera": camera, "view": view_idx}
-                continue
-
-            # try VW-only pattern (fully fused)
-            match = pattern_vw.match(f.name)
-            if match:
-                specimen, timepoint, view_idx = map(int, match.groups())
-                self._specimen = specimen
-                self._view_type = "view"
-                self._pipeline_stage = "isoview-mfc"
-                if view_idx not in self._views:
-                    self._views.append(view_idx)
-                    self._file_map[view_idx] = {"view": view_idx}
-                continue
-
-            # try CM-only pattern (corrected per-camera output, no VW suffix)
-            match = pattern_cm_only.match(f.name)
-            if match:
-                specimen, timepoint, camera = map(int, match.groups())
-                self._specimen = specimen
-                self._view_type = "cm"
-                self._pipeline_stage = "isoview-corrected"
-                if camera not in self._views:
-                    self._views.append(camera)
-                    self._file_map[camera] = {"camera": camera}
-                continue
-
-        if not self._views:
-            raise ValueError(f"No valid data files found in {tm_folder}")
-
-        # sort views
-        self._views = sorted(self._views)
-
-        # get shape from first file
-        first_file = self._get_file_path(0, 0)
-        self._read_shape(first_file)
-
-        logger.info(
-            f"IsoViewOutputArray: views={self._views}, shape={self._single_shape}, "
-            f"view_type={self._view_type}, pipeline_stage={self._pipeline_stage}"
-        )
-
-    def _read_shape(self, file_path: Path):
-        """Read shape, dtype, and pixel spacing from first file."""
-        if self._file_ext in (".tif", ".ome.tif"):
-            import tifffile
-            with tifffile.TiffFile(str(file_path)) as tif:
-                # get shape from first series
-                shape = tif.series[0].shape
-                self._dtype = tif.series[0].dtype
-                # try to extract pixel spacing from ImageJ metadata
-                self._extract_tiff_metadata(tif)
-        elif self._file_ext == ".klb":
-            import pyklb
-            header = pyklb.readheader(str(file_path))
-            dims = header['imagesize_tczyx']
-            spatial_dims = [d for d in dims if d > 1]
-            if len(spatial_dims) >= 3:
-                # klb header stores as (Z, Y, X) but Y/X are swapped relative to raw isoview
-                # raw .stack files: Y=1848 (long axis), X=768 (short axis)
-                # klb header reports: Y=768, X=1848 - need to swap back
-                z, y, x = spatial_dims[-3:]
-                shape = (z, x, y)  # swap Y and X to match raw convention
-            else:
-                shape = (1,) * (3 - len(spatial_dims)) + tuple(spatial_dims)
-            self._dtype = np.dtype(header['datatype'])
-            # extract pixel spacing from klb header
-            spacing = header.get('pixelspacing_tczyx', [1.0, 1.0, 1.0, 1.0, 1.0])
-            if len(spacing) >= 5:
-                # klb spacing is [t, c, z, y, x]
-                self._metadata["dz"] = float(spacing[2])
-                self._metadata["dy"] = float(spacing[3])
-                self._metadata["dx"] = float(spacing[4])
-        elif self._file_ext == ".zarr":
-            import zarr
-            z = zarr.open(file_path, mode="r")
-            if isinstance(z, zarr.Group):
-                arr = z["0"] if "0" in z else list(z.values())[0]
-                # extract pixel spacing from OME-Zarr multiscales
-                self._extract_zarr_metadata(z)
-            else:
-                arr = z
-            shape = arr.shape
-            self._dtype = arr.dtype
-        else:
-            raise ValueError(f"Unsupported file type: {self._file_ext}")
-
-        # shape should be (Z, Y, X)
-        if len(shape) == 3:
-            self._single_shape = shape
-        elif len(shape) == 2:
-            self._single_shape = (1,) + shape
-        else:
-            # take last 3 dims
-            self._single_shape = shape[-3:]
-
-    def _extract_tiff_metadata(self, tif):
-        """Extract pixel spacing, timing, and OME metadata from TIFF.
-
-        For isoview TIFFs:
-        - dz comes from ImageJ 'spacing' metadata (in um)
-        - dx, dy come from XResolution/YResolution tags
-        - fs comes from ImageJ 'finterval' (1/finterval) or 'fps' if present
-        - OME-XML: stage_x/y/z from Plane PositionX/Y/Z
-        - OME-XML: wavelength and exposure_time from Channel
-        - OME-XML: crop provenance from Description (raw_shape, crop params)
-        """
-        try:
-            ij_meta = getattr(tif, "imagej_metadata", None) or {}
-
-            # extract dz from ImageJ spacing
-            if "spacing" in ij_meta:
-                self._metadata["dz"] = float(ij_meta["spacing"])
-
-            # extract frame rate from ImageJ metadata
-            if "finterval" in ij_meta and ij_meta["finterval"] > 0:
-                self._metadata["fs"] = 1.0 / float(ij_meta["finterval"])
-            elif "fps" in ij_meta:
-                self._metadata["fs"] = float(ij_meta["fps"])
-
-            # extract dx, dy from resolution tags
-            for page in tif.pages[:1]:
-                x_res_tag = page.tags.get("XResolution")
-                y_res_tag = page.tags.get("YResolution")
-
-                if x_res_tag:
-                    x_res = x_res_tag.value
-                    if x_res and x_res[0] > 0:
-                        px_per_um = float(x_res[0]) / float(x_res[1])
-                        self._metadata["dx"] = 1.0 / px_per_um
-
-                if y_res_tag:
-                    y_res = y_res_tag.value
-                    if y_res and y_res[0] > 0:
-                        px_per_um = float(y_res[0]) / float(y_res[1])
-                        self._metadata["dy"] = 1.0 / px_per_um
-
-            # extract OME-XML metadata (stage position, crop provenance)
-            self._extract_ome_metadata(tif)
-
-        except Exception:
+            out["dz"] = float(ij["spacing"])
+        except (ValueError, TypeError):
             pass
-
-    def _extract_ome_metadata(self, tif):
-        """Extract stage position, wavelength, and crop info from OME-XML."""
-        try:
-            import xml.etree.ElementTree as ET
-
-            ome_xml = tif.ome_metadata
-            if not ome_xml:
-                return
-
-            root = ET.fromstring(ome_xml)
-            ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
-
-            # stage position from Plane elements
-            for plane in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Plane"):
-                pos_x = plane.get("PositionX")
-                pos_y = plane.get("PositionY")
-                pos_z = plane.get("PositionZ")
-                if pos_x is not None:
-                    self._metadata["stage_x"] = float(pos_x)
-                if pos_y is not None:
-                    self._metadata["stage_y"] = float(pos_y)
-                if pos_z is not None:
-                    self._metadata["stage_z"] = float(pos_z)
-                break  # only need first plane
-
-            # wavelength and exposure from Channel
-            for channel in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Channel"):
-                name = channel.get("Name")
-                if name:
-                    self._metadata["channel_name"] = name
-                em_wl = channel.get("EmissionWavelength")
-                if em_wl:
-                    self._metadata["wavelength"] = float(em_wl)
-                break
-
-            # crop provenance from Description
-            for img in root.iter("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Image"):
-                desc = img.get("Description", "")
-                if not desc:
-                    desc_el = img.find("{http://www.openmicroscopy.org/Schemas/OME/2016-06}Description")
-                    if desc_el is not None and desc_el.text:
-                        desc = desc_el.text
-                if "raw_shape" in desc:
-                    self._metadata["crop_provenance"] = desc
-                break
-
-        except Exception:
-            pass
-
-    def _extract_zarr_metadata(self, zarr_group):
-        """Extract pixel spacing and timing from OME-Zarr multiscales metadata."""
-        # check for isoview-specific attrs (fps, exposure_time, etc)
-        attrs = zarr_group.attrs
-        if "fps" in attrs:
-            self._metadata["fs"] = float(attrs["fps"])
-        if "vps" in attrs:
-            self._metadata["vps"] = float(attrs["vps"])
-        if "exposure_time" in attrs and "fs" not in self._metadata:
-            # exposure_time in ms, convert to Hz
-            self._metadata["fs"] = 1000.0 / float(attrs["exposure_time"])
-
-        multiscales = attrs.get("multiscales", [])
-        if not multiscales:
-            return
-
-        # get first multiscale entry
-        ms = multiscales[0] if isinstance(multiscales, list) else multiscales
-        datasets = ms.get("datasets", [])
-        if not datasets:
-            return
-
-        # get coordinate transformations from first dataset
-        transforms = datasets[0].get("coordinateTransformations", [])
-        for t in transforms:
-            if t.get("type") == "scale":
-                scale = t.get("scale", [])
-                # scale is [z, y, x] for 3D data
-                if len(scale) >= 3:
-                    self._metadata["dz"] = float(scale[0])
-                    self._metadata["dy"] = float(scale[1])
-                    self._metadata["dx"] = float(scale[2])
-                break
-
-    def _get_file_path(self, t_idx: int, view_idx: int) -> Path:
-        """Get file path for timepoint and view index."""
-        tm_folder = self.tm_folders[t_idx]
-        tp = _extract_timepoint(tm_folder.name)
-        sp = self._specimen if self._specimen is not None else 0
-        view = self._views[view_idx]
-
-        # handle fusedStack naming (e.g., .fusedStack.klb for multifuse output)
-        ext = ".fusedStack" + self._file_ext if self._fused_stack_naming else self._file_ext
-
-        if self._view_type == "fused":
-            info = self._file_map[view]
-            # try VW naming first, fall back to CHN
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_VW{info['view']:02d}{ext}"
-            if not (tm_folder / filename).exists():
-                filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['cam0']:02d}_CM{info['cam1']:02d}_CHN{info['view']:02d}{ext}"
-        elif self._view_type == "vw":
-            info = self._file_map[view]
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_VW{info['view']:02d}{ext}"
-            if not (tm_folder / filename).exists():
-                filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}_CHN{info['view']:02d}{ext}"
-        elif self._view_type == "cm":
-            info = self._file_map[view]
-            filename = f"SPM{sp:02d}_TM{tp:06d}_CM{info['camera']:02d}{ext}"
-        else:  # view
-            filename = f"SPM{sp:02d}_TM{tp:06d}_VW{view:02d}{ext}"
-            if not (tm_folder / filename).exists():
-                filename = f"SPM{sp:02d}_TM{tp:06d}_CHN{view:02d}{ext}"
-
-        return tm_folder / filename
-
-    def _read_volume(self, t_idx: int, view_idx: int) -> np.ndarray:
-        """Read 3D volume for timepoint and view."""
-        cache_key = (t_idx, view_idx)
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        path = self._get_file_path(t_idx, view_idx)
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-
-        if self._file_ext in (".tif", ".ome.tif"):
-            import tifffile
-            data = tifffile.imread(str(path))
-        elif self._file_ext == ".klb":
-            import pyklb
-            data = pyklb.readfull(str(path))
-            # klb data has Y/X swapped relative to raw isoview - transpose to match
-            if data.ndim == 3:
-                data = data.transpose(0, 2, 1)  # (Z, Y, X) -> (Z, X, Y) -> becomes (Z, Y, X) after swap
-        elif self._file_ext == ".zarr":
-            import zarr
-            z = zarr.open(path, mode="r")
-            if isinstance(z, zarr.Group):
-                arr = z["0"] if "0" in z else list(z.values())[0]
-            else:
-                arr = z
-            data = arr[:]
-            # multiscale OME-Zarr stores per-volume arrays as (1, 1, Z, Y, X);
-            # downstream slicing assumes (Z, Y, X), so peel singleton T/C.
-            while data.ndim > 3 and data.shape[0] == 1:
-                data = data[0]
-        else:
-            raise ValueError(f"Unsupported file type: {self._file_ext}")
-
-        # ensure 3d
-        if data.ndim == 2:
-            data = data[np.newaxis, ...]
-
-        self._cache[cache_key] = data
-        return data
-
-    def _detect_view_dim(self) -> str:
-        """Auto-detect view dimension name from file pattern."""
-        if self._view_type == "cm":
-            return "cm"
-        if self._view_type == "vw":
-            return "vw"
-        elif self._view_type == "view":
-            return "vw"
-        elif self._view_type == "fused":
-            return "vw"
-        return "vw"
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """Array shape: (T, Z, Views, Y, X) or (Z, Views, Y, X)."""
-        z, y, x = self._single_shape
-        if self._single_timepoint:
-            return (z, len(self._views), y, x)
-        return (len(self.tm_folders), z, len(self._views), y, x)
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        z, y, x = self._single_shape
-        nv = len(self._views)
-        if self._single_timepoint:
-            return (1, nv, z, y, x)
-        return (len(self.tm_folders), nv, z, y, x)
-
-    @property
-    def dtype(self):
-        """Array data type."""
-        return self._dtype
-
-    @property
-    def ndim(self) -> int:
-        """Number of dimensions."""
-        return 4 if self._single_timepoint else 5
-
-    @property
-    def size(self) -> int:
-        """Total number of elements."""
-        return int(np.prod(self.shape))
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        """Dimension labels for sliders.
-
-        Spatial dims (Y, X) are uppercase per mbo_utilities convention.
-        Slider dims (t, z, vw) are lowercase for fastplotlib.
-        """
-        if self._single_timepoint:
-            return ("z", self._view_dim, "Y", "X")
-        return ("t", "z", self._view_dim, "Y", "X")
-
-    @property
-    def views(self) -> list[int]:
-        """List of view indices (camera or channel numbers)."""
-        return self._views
-
-    @property
-    def num_views(self) -> int:
-        """Number of views."""
-        return len(self._views)
-
-    @property
-    def num_timepoints(self) -> int:
-        """Number of timepoints."""
-        return len(self.tm_folders)
-
-    @property
-    def num_planes(self) -> int:
-        """Number of Z-planes."""
-        return self._single_shape[0]
-
-    @property
-    def metadata(self) -> dict:
-        """
-        Return metadata as dict. Always returns dict, never None.
-
-        Imaging parameters (displayed in green in metadata viewer):
-        - fs: frame rate in Hz (if available from source metadata)
-        - dx, dy: pixel size in micrometers (from file metadata)
-        - dz: z step in micrometers (from file metadata)
-        - Lx, Ly: image dimensions in pixels
-        - num_zplanes: number of z-planes per volume
-        - num_timepoints: number of timepoints
-        - dtype: data type
-
-        Acquisition parameters (displayed in orange):
-        - stack_type: pipeline stage (isoview-pt, isoview-mf, isoview-mfc)
-        - file_type: output file format (.tif, .klb, .zarr)
-        - view_type: 'vw' (camera+view), 'fused', or 'view'
-        - specimen: specimen number
-
-        Plus isoview output-specific fields:
-        - views: list of view indices
-        - view_dim: dimension name for views ('vw')
-        - pipeline_stage: same as stack_type
-        """
-        meta = dict(self._metadata)
-
-        # === IMAGING PARAMETERS ===
-        # dx, dy, dz are already in _metadata if extracted from file
-
-        # image dimensions from shape
-        meta["Ly"] = self._single_shape[1]
-        meta["Lx"] = self._single_shape[2]
-
-        # z-planes from shape
-        meta["num_zplanes"] = self._single_shape[0]
-        meta["nplanes"] = self._single_shape[0]
-        meta["num_planes"] = self._single_shape[0]
-
-        # timepoints
-        meta["num_timepoints"] = self.num_timepoints
-        meta["nframes"] = self.num_timepoints
-        meta["num_frames"] = self.num_timepoints
-
-        # dtype
-        meta["dtype"] = str(self._dtype)
-
-        # === ACQUISITION PARAMETERS ===
-        # stack_type based on pipeline stage
-        meta["stack_type"] = getattr(self, "_pipeline_stage", "isoview-pt")
-        meta["pipeline_stage"] = getattr(self, "_pipeline_stage", "isoview-pt")
-        meta["file_type"] = self._file_ext
-        meta["view_type"] = self._view_type
-        meta["num_views"] = len(self._views)
-        meta["specimen"] = self._specimen
-
-        # === ISOVIEW OUTPUT-SPECIFIC FIELDS ===
-        meta["views"] = self._views
-        meta["view_dim"] = self._view_dim
-        meta["shape"] = self.shape
-        meta["single_timepoint"] = self._single_timepoint
-
-        return meta
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata.update(value)
-
-    def __len__(self) -> int:
-        """Length is first dimension (T or Z)."""
-        return self.shape[0]
-
-    def __getitem__(self, key):
-        """Index the array: (T, Z, Views, Y, X) or (Z, Views, Y, X)."""
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        def to_indices(k, max_val):
-            if isinstance(k, int):
-                if k < 0:
-                    k = max_val + k
-                return [k]
-            if isinstance(k, slice):
-                return list(range(*k.indices(max_val)))
-            if isinstance(k, (list, np.ndarray)):
-                return list(k)
-            return list(range(max_val))
-
-        if self._single_timepoint:
-            key = key + (slice(None),) * (4 - len(key))
-            z_key, view_key, y_key, x_key = key
-            t_indices = [0]
-            t_key = 0
-        else:
-            key = key + (slice(None),) * (5 - len(key))
-            t_key, z_key, view_key, y_key, x_key = key
-            t_indices = to_indices(t_key, len(self.tm_folders))
-
-        z_indices = to_indices(z_key, self._single_shape[0])
-        view_indices = to_indices(view_key, len(self._views))
-
-        out_shape = (
-            len(t_indices),
-            len(z_indices),
-            len(view_indices),
-            *self._single_shape[1:],
-        )
-
-        if isinstance(y_key, int):
-            out_shape = (*out_shape[:3], 1, out_shape[4])
-        elif isinstance(y_key, slice):
-            y_size = len(range(*y_key.indices(self._single_shape[1])))
-            out_shape = (*out_shape[:3], y_size, out_shape[4])
-
-        if isinstance(x_key, int):
-            out_shape = (*out_shape[:4], 1)
-        elif isinstance(x_key, slice):
-            x_size = len(range(*x_key.indices(self._single_shape[2])))
-            out_shape = (*out_shape[:4], x_size)
-
-        result = np.empty(out_shape, dtype=self._dtype)
-
-        for ti, t_idx in enumerate(t_indices):
-            for vi, view_idx in enumerate(view_indices):
-                data = self._read_volume(t_idx, view_idx)
-                sliced = data[z_key, y_key, x_key]
-
-                if isinstance(z_key, int):
-                    sliced = sliced[np.newaxis, ...]
-                if isinstance(y_key, int):
-                    sliced = sliced[:, np.newaxis, :]
-                if isinstance(x_key, int):
-                    sliced = sliced[:, :, np.newaxis]
-
-                result[ti, :, vi, ...] = sliced
-
-        # squeeze singleton dimensions
-        if self._single_timepoint:
-            result = np.squeeze(result, axis=0)
-            int_indexed = [
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            for ax in range(3, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-        else:
-            int_indexed = [
-                isinstance(t_key, int),
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            for ax in range(4, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-
-        return result
-
-    def __array__(self) -> np.ndarray:
-        """Materialize full array into memory."""
-        return self[:]
-
-    @property
-    def filenames(self) -> list[Path]:
-        """Source file paths."""
-        files = []
-        for ti in range(len(self.tm_folders)):
-            for vi in range(len(self._views)):
-                path = self._get_file_path(ti, vi)
-                if path.exists():
-                    files.append(path)
-        return files
-
-    def close(self) -> None:
-        """Release resources (clear cache)."""
-        self._cache.clear()
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite: bool = False,
-        target_chunk_mb: int = 50,
-        ext: str = ".tiff",
-        progress_callback=None,
-        debug: bool = False,
-        planes: list[int] | int | None = None,
-        **kwargs,
-    ):
-        """Write array to disk."""
-        from mbo_utilities.arrays._base import _imwrite_base
-
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-    def __repr__(self):
-        return (
-            f"IsoViewOutputArray(shape={self.shape}, dtype={self.dtype}, "
-            f"views={self._views}, dims={self.dims}, file_type='{self._file_ext}')"
-        )
-
-
-# register clusterpt pipeline info
-_CLUSTERPT_INFO = PipelineInfo(
-    name="clusterpt",
-    description="IsoView-Processing clusterPT corrected data (KLB)",
-    input_patterns=[
-        "**/TM??????/SPM??_TM??????_CM??_VW??.klb",
-        "**/TM??????/SPM??_TM??????_CM??_CHN??.klb",
-        "**/SPM??/*.corrected/*/TM??????/",
-    ],
-    output_patterns=[],
-    input_extensions=["klb"],
-    output_extensions=[],
-    marker_files=["*.configuration.mat"],
-    category="reader",
-)
-register_pipeline(_CLUSTERPT_INFO)
-
-
-def _check_pyklb():
-    """Check if pyklb is available."""
+    if "finterval" in ij and ij.get("finterval", 0) > 0:
+        out["fs"] = 1.0 / float(ij["finterval"])
+    elif "fps" in ij:
+        out["fs"] = float(ij["fps"])
     try:
-        import pyklb
-        return pyklb
-    except ImportError:
-        raise ImportError(
-            "pyklb is required for KLB files. Install with: "
-            "pip install mbo_utilities[isoview]"
-        )
+        page = tif.pages[0]
+        for tag, key in (("XResolution", "dx"), ("YResolution", "dy")):
+            t = page.tags.get(tag)
+            if t and t.value and t.value[0] > 0:
+                ppum = float(t.value[0]) / float(t.value[1])
+                out[key] = 1.0 / ppum
+    except Exception:
+        pass
+    return out
 
 
-class ClusterPTArray(Shape5DMixin):
+def _resolve_corrected_spm_dir(p: Path) -> Path | None:
+    """Locate the SPM## directory under a .corrected/ tree.
+
+    Accepts the SPM## itself, a TM###### child, a ``.corrected/`` root,
+    or any descendant inside one. Returns ``None`` when no SPM## under a
+    .corrected ancestor is found.
     """
-    Lazy loader for clusterPT (IsoView-Processing) KLB output files.
-
-    Conforms to LazyArrayProtocol for compatibility with mbo_utilities imread/imwrite.
-
-    clusterPT output structure:
-        outputFolder/
-            TM000000/
-                SPM00_TM000000_CM00_CHN00.klb
-                SPM00_TM000000_CM01_CHN00.klb
-                SPM00_TM000000.configuration.mat
-                SPM00_TM000000_CHN00.xml
-            TM000001/
-                ...
-
-    Shape: (T, Z, Views, Y, X) for multi-timepoint, (Z, Views, Y, X) for single.
-    Views are (camera, channel) combinations.
-
-    Parameters
-    ----------
-    path : str or Path
-        Path to directory containing TM* folders with .klb files.
-
-    Examples
-    --------
-    >>> arr = ClusterPTArray("path/to/corrected")
-    >>> arr.shape
-    (100, 38, 2, 1848, 768)  # (t, z, views, y, x)
-    >>> arr.dims
-    ('t', 'z', 'cm', 'y', 'x')
-    >>> arr.views
-    [(0, 0), (1, 0)]  # (camera, channel) per view
-    >>> frame = arr[0, 10, 0]  # t=0, z=10, view=0
-    """
-
-    def __init__(self, path: str | Path):
-        self.base_path = Path(path)
-        if not self.base_path.exists():
-            raise FileNotFoundError(f"Path does not exist: {self.base_path}")
-
-        # check for pyklb
-        _check_pyklb()
-
-        # initialize metadata before discovery (extraction happens during _discover_views)
-        self._metadata = {}
-        self._cache = {}
-
-        # detect if single TM or multi-TM
-        # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
-        if _has_tm_pattern(self.base_path.name):
-            klb_files = list(self.base_path.glob("*.klb"))
-            if klb_files:
-                self._single_timepoint = True
-                self.tm_folders = [self.base_path]
-            else:
-                raise ValueError(f"TM folder {self.base_path} contains no .klb files")
-        else:
-            self.tm_folders = _find_tm_folders(self.base_path)
-            self._single_timepoint = len(self.tm_folders) == 1
-
-            if not self.tm_folders:
-                raise ValueError(f"No TM* folders found in {self.base_path}")
-
-        # discover views from first timepoint
-        self._discover_views(self.tm_folders[0])
-
-    def _discover_views(self, tm_folder: Path):
-        """Parse KLB files to find camera/channel combinations and shape."""
-        import re
-        import pyklb
-
-        # pattern: SPM00_TM000000_CM00_CHN00.klb
-        pattern = re.compile(
-            r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)\.klb"
-        )
-
-        klb_files = sorted(tm_folder.glob("*.klb"))
-        if not klb_files:
-            raise ValueError(f"No .klb files in {tm_folder}")
-
-        self._views = []  # [(camera, channel), ...]
-        self._specimen = None
-
-        for kf in klb_files:
-            match = pattern.match(kf.name)
-            if not match:
-                # skip mask files, projections, etc
-                continue
-
-            specimen, timepoint, camera, channel = map(int, match.groups())
-            self._specimen = specimen
-
-            view = (camera, channel)
-            if view not in self._views:
-                self._views.append(view)
-
-        if not self._views:
-            raise ValueError(f"No valid KLB data files in {tm_folder}")
-
-        # sort views by (camera, channel)
-        self._views = sorted(self._views)
-
-        # read first file to get shape/dtype and pixel spacing
-        first_view = self._views[0]
-        first_file = self._get_klb_path(tm_folder, first_view)
-        header = pyklb.readheader(str(first_file))
-
-        # klb stores as (x, y, z) so we need to reverse
-        # header['imagesize_tczyx'] gives size in t,c,z,y,x order
-        # but for our 3d volumes it's typically just spatial dims
-        dims = header['imagesize_tczyx']
-        # filter out singleton dimensions at front
-        spatial_dims = [d for d in dims if d > 1]
-        if len(spatial_dims) >= 3:
-            self._single_shape = tuple(spatial_dims[-3:])  # (z, y, x)
-        else:
-            # might be 2d, pad with 1
-            self._single_shape = (1,) * (3 - len(spatial_dims)) + tuple(spatial_dims)
-
-        self._dtype = np.dtype(header['datatype'])
-
-        # extract pixel spacing from klb header
-        # pixelspacing_tczyx is [t, c, z, y, x]
-        spacing = header.get('pixelspacing_tczyx', [1.0, 1.0, 1.0, 1.0, 1.0])
-        if len(spacing) >= 5:
-            self._metadata["dz"] = float(spacing[2])
-            self._metadata["dy"] = float(spacing[3])
-            self._metadata["dx"] = float(spacing[4])
-
-        logger.info(
-            f"ClusterPTArray: timepoints={len(self.tm_folders)}, views={len(self._views)}, "
-            f"shape={self._single_shape}, dtype={self._dtype}"
-        )
-
-    def _get_klb_path(self, tm_folder: Path, view: tuple[int, int]) -> Path:
-        """Get path to KLB file for a timepoint folder and view."""
-        camera, channel = view
-        tp = _extract_timepoint(tm_folder.name)
-        sp = self._specimen if self._specimen is not None else 0
-
-        filename = f"SPM{sp:02d}_TM{tp:06d}_CM{camera:02d}_CHN{channel:02d}.klb"
-        return tm_folder / filename
-
-    def _read_klb(self, t_idx: int, view_idx: int) -> np.ndarray:
-        """Read KLB file for timepoint and view index."""
-        cache_key = (t_idx, view_idx)
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        import pyklb
-
-        view = self._views[view_idx]
-        tm_folder = self.tm_folders[t_idx]
-        klb_path = self._get_klb_path(tm_folder, view)
-
-        if not klb_path.exists():
-            raise FileNotFoundError(f"KLB file not found: {klb_path}")
-
-        # pyklb returns array in (z, y, x) order
-        data = pyklb.readfull(str(klb_path))
-
-        # ensure 3d
-        if data.ndim == 2:
-            data = data[np.newaxis, ...]
-
-        self._cache[cache_key] = data
-        return data
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """
-        Array shape.
-
-        Returns
-        -------
-        - Single TM: (Z, Views, Y, X) - 4D
-        - Multi TM: (T, Z, Views, Y, X) - 5D
-        """
-        z, y, x = self._single_shape
-        if self._single_timepoint:
-            return (z, len(self._views), y, x)
-        return (len(self.tm_folders), z, len(self._views), y, x)
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        z, y, x = self._single_shape
-        nv = len(self._views)
-        if self._single_timepoint:
-            return (1, nv, z, y, x)
-        return (len(self.tm_folders), nv, z, y, x)
-
-    @property
-    def dtype(self):
-        """Array data type."""
-        return self._dtype
-
-    @property
-    def ndim(self) -> int:
-        """Number of dimensions."""
-        return 4 if self._single_timepoint else 5
-
-    @property
-    def size(self) -> int:
-        """Total number of elements."""
-        return int(np.prod(self.shape))
-
-    @property
-    def metadata(self) -> dict:
-        """
-        Return metadata as dict. Always returns dict, never None.
-
-        Imaging parameters (displayed in green in metadata viewer):
-        - fs: frame rate in Hz (if available from source metadata)
-        - dx, dy: pixel size in micrometers (if available)
-        - dz: z step in micrometers (if available)
-        - Lx, Ly: image dimensions in pixels
-        - num_zplanes: number of z-planes per volume
-        - num_timepoints: number of timepoints
-        - dtype: data type
-
-        Acquisition parameters (displayed in orange):
-        - structure: 'clusterpt' (IsoView-Processing corrected data)
-        - file_type: .klb
-        - specimen: specimen number
-
-        Plus clusterpt-specific fields:
-        - views: list of (camera, channel) tuples (legacy CHN naming)
-        """
-        meta = dict(self._metadata)
-
-        # === IMAGING PARAMETERS ===
-        # image dimensions from shape
-        meta["Ly"] = self._single_shape[1]
-        meta["Lx"] = self._single_shape[2]
-
-        # z-planes from shape
-        meta["num_zplanes"] = self._single_shape[0]
-        meta["nplanes"] = self._single_shape[0]
-        meta["num_planes"] = self._single_shape[0]
-
-        # timepoints
-        num_t = self.num_timepoints
-        meta["num_timepoints"] = num_t
-        meta["nframes"] = num_t
-        meta["num_frames"] = num_t
-
-        # dtype
-        meta["dtype"] = str(self._dtype)
-
-        # === ACQUISITION PARAMETERS ===
-        # clusterpt is from the old IsoView-Processing MATLAB pipeline
-        meta["stack_type"] = "isoview-pt"
-        meta["pipeline_stage"] = "isoview-pt"
-        meta["structure"] = "clusterpt"
-        meta["file_type"] = ".klb"
-        meta["num_views"] = len(self._views)
-        meta["specimen"] = self._specimen
-
-        # === CLUSTERPT-SPECIFIC FIELDS ===
-        meta["views"] = self._views
-        meta["shape"] = self.shape
-        meta["single_timepoint"] = self._single_timepoint
-
-        return meta
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata.update(value)
-
-    @property
-    def views(self) -> list[tuple[int, int]]:
-        """List of (camera, channel) tuples for each view index."""
-        return self._views
-
-    @property
-    def num_views(self) -> int:
-        """Number of camera/channel views."""
-        return len(self._views)
-
-    @property
-    def num_timepoints(self) -> int:
-        """Number of timepoints."""
-        return len(self.tm_folders)
-
-    def __len__(self) -> int:
-        """Length is first dimension (T or Z)."""
-        return self.shape[0]
-
-    def view_index(self, camera: int, channel: int) -> int:
-        """Get view index for a specific camera/channel combination."""
-        try:
-            return self._views.index((camera, channel))
-        except ValueError:
-            raise ValueError(
-                f"No view for camera={camera}, channel={channel}. "
-                f"Available views: {self._views}"
-            )
-
-    def __getitem__(self, key):
-        """
-        Index the array.
-
-        Shape:
-        - Single TM: (Z, Views, Y, X) - 4D
-        - Multi TM: (T, Z, Views, Y, X) - 5D
-        """
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        def to_indices(k, max_val):
-            """Convert key to list of indices."""
-            if isinstance(k, int):
-                if k < 0:
-                    k = max_val + k
-                return [k]
-            if isinstance(k, slice):
-                return list(range(*k.indices(max_val)))
-            if isinstance(k, (list, np.ndarray)):
-                return list(k)
-            return list(range(max_val))
-
-        if self._single_timepoint:
-            # 4D indexing: (Z, Views, Y, X)
-            key = key + (slice(None),) * (4 - len(key))
-            z_key, view_key, y_key, x_key = key
-            t_indices = [0]
-            t_key = 0
-        else:
-            # 5D indexing: (T, Z, Views, Y, X)
-            key = key + (slice(None),) * (5 - len(key))
-            t_key, z_key, view_key, y_key, x_key = key
-            t_indices = to_indices(t_key, len(self.tm_folders))
-
-        z_indices = to_indices(z_key, self._single_shape[0])
-        view_indices = to_indices(view_key, len(self._views))
-
-        # build output array (5D internally)
-        out_shape = (
-            len(t_indices),
-            len(z_indices),
-            len(view_indices),
-            *self._single_shape[1:],  # Y, X
-        )
-
-        # handle Y, X slicing
-        if isinstance(y_key, int):
-            out_shape = (*out_shape[:3], 1, out_shape[4])
-        elif isinstance(y_key, slice):
-            y_size = len(range(*y_key.indices(self._single_shape[1])))
-            out_shape = (*out_shape[:3], y_size, out_shape[4])
-
-        if isinstance(x_key, int):
-            out_shape = (*out_shape[:4], 1)
-        elif isinstance(x_key, slice):
-            x_size = len(range(*x_key.indices(self._single_shape[2])))
-            out_shape = (*out_shape[:4], x_size)
-
-        result = np.empty(out_shape, dtype=self._dtype)
-
-        for ti, t_idx in enumerate(t_indices):
-            for vi, view_idx in enumerate(view_indices):
-                data = self._read_klb(t_idx, view_idx)
-
-                # index (Z, Y, X)
-                sliced = data[z_key, y_key, x_key]
-
-                # handle dimension reduction
-                if isinstance(z_key, int):
-                    sliced = sliced[np.newaxis, ...]
-                if isinstance(y_key, int):
-                    sliced = sliced[:, np.newaxis, :]
-                if isinstance(x_key, int):
-                    sliced = sliced[:, :, np.newaxis]
-
-                result[ti, :, vi, ...] = sliced
-
-        # squeeze singleton dimensions from integer indexing
-        if self._single_timepoint:
-            result = np.squeeze(result, axis=0)
-            int_indexed = [
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            for ax in range(3, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-        else:
-            int_indexed = [
-                isinstance(t_key, int),
-                isinstance(z_key, int),
-                isinstance(view_key, int),
-                isinstance(y_key, int),
-                isinstance(x_key, int),
-            ]
-            for ax in range(4, -1, -1):
-                if int_indexed[ax] and ax < result.ndim and result.shape[ax] == 1:
-                    result = np.squeeze(result, axis=ax)
-
-        return result
-
-    def __array__(self) -> np.ndarray:
-        """Materialize full array into memory."""
-        return self[:]
-
-    @property
-    def filenames(self) -> list[Path]:
-        """Source file paths for LazyArrayProtocol."""
-        files = []
-        for tm in self.tm_folders:
-            for view in self._views:
-                path = self._get_klb_path(tm, view)
-                if path.exists():
-                    files.append(path)
-        return files
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        """
-        Dimension labels for LazyArrayProtocol.
-
-        Returns
-        -------
-        tuple[str, ...]
-            ('z', 'vw', 'y', 'x') for single timepoint
-            ('t', 'z', 'vw', 'y', 'x') for multi-timepoint
-        """
-        if self._single_timepoint:
-            return ("z", "vw", "Y", "X")
-        return ("t", "z", "vw", "Y", "X")
-
-    @property
-    def num_planes(self) -> int:
-        """Number of Z-planes."""
-        return self._single_shape[0]
-
-    def close(self) -> None:
-        """Release resources (clear cache)."""
-        self._cache.clear()
-
-    def _imwrite(
-        self,
-        outpath: Path | str,
-        overwrite: bool = False,
-        target_chunk_mb: int = 50,
-        ext: str = ".tiff",
-        progress_callback=None,
-        debug: bool = False,
-        planes: list[int] | int | None = None,
-        **kwargs,
-    ):
-        """Write ClusterPTArray to disk."""
-        from mbo_utilities.arrays._base import _imwrite_base
-
-        return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
-        )
-
-    def __repr__(self):
-        return (
-            f"ClusterPTArray(shape={self.shape}, dtype={self.dtype}, "
-            f"views={self._views}, timepoints={len(self.tm_folders)})"
-        )
-
-
-def _find_isoview_corrected_root(p: Path) -> Path | None:
-    """Return the `*.corrected/` directory associated with `p`.
-
-    The Keller-lab pipeline emits `<dataset>.corrected/` as the top-level
-    output, with per-camera zarrs under `SPM00/` and fused-view OME-TIFFs
-    under `Results/MultiFused_geometric/SPM00/`. Acceptable inputs:
-        1. the `.corrected` directory itself
-        2. its parent (dataset root)
-        3. any descendant inside the tree (e.g. `.corrected/SPM00` or
-           `.corrected/SPM00/TM000000`) — walk up until we hit the
-           `.corrected` ancestor.
-    """
-    if not p.is_dir():
-        return None
-
-    if p.name.endswith(".corrected") and (p / "SPM00").is_dir():
+    if p.is_file():
+        p = p.parent
+    if _SPM_PATTERN.match(p.name):
         return p
-
-    for child in p.iterdir():
-        if (
-            child.is_dir()
-            and child.name.endswith(".corrected")
-            and (child / "SPM00").is_dir()
-        ):
-            return child
-
+    if _has_tm_pattern(p.name) and p.parent and _SPM_PATTERN.match(p.parent.name):
+        return p.parent
+    if p.name.endswith(".corrected"):
+        spms = sorted(
+            d for d in p.iterdir()
+            if d.is_dir() and _SPM_PATTERN.match(d.name)
+        )
+        return spms[0] if spms else None
     for ancestor in p.parents:
-        if (
-            ancestor.name.endswith(".corrected")
-            and (ancestor / "SPM00").is_dir()
-        ):
-            return ancestor
+        if ancestor.name.endswith(".corrected"):
+            spms = sorted(
+                d for d in ancestor.iterdir()
+                if d.is_dir() and _SPM_PATTERN.match(d.name)
+            )
+            if spms:
+                return spms[0]
+            return None
+    return None
+
+
+def _resolve_fused_method_dir(p: Path) -> Path | None:
+    """Locate the MultiFused_<method>/ directory holding fused outputs.
+
+    Accepts the method dir itself, an SPM## child, a TM###### grandchild,
+    a ``Results/`` directory, or a ``.corrected/`` root (prefers
+    MultiFused_geometric when present). Returns ``None`` when no such
+    method dir is reachable.
+    """
+    if p.is_file():
+        p = p.parent
+    if _METHOD_PATTERN.match(p.name):
+        return p
+    parents = list(p.parents)
+    if (
+        _SPM_PATTERN.match(p.name)
+        and parents
+        and _METHOD_PATTERN.match(parents[0].name)
+    ):
+        return parents[0]
+    if (
+        _has_tm_pattern(p.name)
+        and len(parents) >= 2
+        and _SPM_PATTERN.match(parents[0].name)
+        and _METHOD_PATTERN.match(parents[1].name)
+    ):
+        return parents[1]
+    if p.name == "Results" and p.is_dir():
+        return _first_method_dir(p)
+    if p.name.endswith(".corrected") and (p / "Results").is_dir():
+        return _first_method_dir(p / "Results")
+    for ancestor in parents:
+        if ancestor.name == "Results" and ancestor.is_dir():
+            return _first_method_dir(ancestor)
+    return None
+
+
+def _first_method_dir(results_dir: Path) -> Path | None:
+    if not results_dir.is_dir():
+        return None
+    candidates = sorted(
+        d for d in results_dir.iterdir()
+        if d.is_dir() and _METHOD_PATTERN.match(d.name)
+    )
+    if not candidates:
+        return None
+    for c in candidates:
+        if c.name == "MultiFused_geometric":
+            return c
+    return candidates[0]
+
+
+_CORRECTED_RE = re.compile(
+    r"SPM(\d+)_TM(\d+)_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|zarr|klb)$"
+)
+_FUSED_RE = re.compile(
+    r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)"
+    r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|zarr|klb)$"
+)
+_RAW_STACK_RE = re.compile(
+    r"SPC(\d+)_TM(\d+)_ANG\d+_CM(\d+)_CHN(\d+)_PH\d+\.stack$"
+)
+_KLB_TM_RE = re.compile(r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)\.klb$")
+
+_PROJ_FLAT_RE = re.compile(
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)\.(xy|xz|yz)Projection\.tif$", re.IGNORECASE
+)
+_PROJ_FUSED_RE = re.compile(
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)\.(xy|xz|yz)Projection\.tif$",
+    re.IGNORECASE,
+)
+_PROJ_VW_ONLY_RE = re.compile(
+    r"^SPM(\d+)_TM(\d+)_(?:VW|CHN)(\d+)\.(xy|xz|yz)Projection\.tif$",
+    re.IGNORECASE,
+)
+_AXIS_ORDER = ("xy", "xz", "yz")
+
+
+def _finalize_projections(
+    axes: set, views: set, files: dict
+) -> dict | None:
+    if not files:
+        return None
+    return {
+        "axes": [a for a in _AXIS_ORDER if a in axes],
+        "views": sorted(views),
+        "files": files,
+    }
+
+
+def _scan_flat_projections(proj_dir: Path) -> dict | None:
+    """Scan a flat ``*.{raw,corrected}.projections/`` directory.
+
+    Files look like ``SPM##_TM##_CM##.{xy,xz,yz}Projection.tif`` with no
+    nested TM folders. Returns the standard
+    ``{"axes", "views", "files"}`` dict or ``None`` when empty.
+    """
+    axes: set[str] = set()
+    views: set[str] = set()
+    files: dict[tuple[str, str, int], Path] = {}
+    if not proj_dir.is_dir():
+        return None
+    for f in proj_dir.iterdir():
+        if not f.is_file():
+            continue
+        m = _PROJ_FLAT_RE.match(f.name)
+        if not m:
+            continue
+        _, tm, cm, axis = m.groups()
+        axis = axis.lower()
+        view = f"CM{int(cm):02d}"
+        axes.add(axis)
+        views.add(view)
+        files[(axis, view, int(tm))] = f
+    return _finalize_projections(axes, views, files)
+
+
+def _scan_fused_projections(method_dir: Path) -> dict | None:
+    """Scan a ``MultiFused_*`` tree for projection TIFFs.
+
+    Walks ``SPM##/TM######/*.{xy,xz,yz}Projection.tif`` — both the
+    ``CM##_CM##_VW##`` and the ``VW##``-only naming variants. View is
+    labeled by the fused VW number (``VW00``, ``VW90``).
+    """
+    if not method_dir.is_dir():
+        return None
+    axes: set[str] = set()
+    views: set[str] = set()
+    files: dict[tuple[str, str, int], Path] = {}
+    for spm_dir in method_dir.iterdir():
+        if not (spm_dir.is_dir() and _SPM_PATTERN.match(spm_dir.name)):
+            continue
+        for tm_dir in spm_dir.iterdir():
+            if not (tm_dir.is_dir() and _has_tm_pattern(tm_dir.name)):
+                continue
+            t = _extract_timepoint(tm_dir.name)
+            for f in tm_dir.iterdir():
+                if not f.is_file() or "Projection" not in f.name:
+                    continue
+                m = _PROJ_FUSED_RE.match(f.name)
+                vw_only = False
+                if not m:
+                    m = _PROJ_VW_ONLY_RE.match(f.name)
+                    vw_only = m is not None
+                if not m:
+                    continue
+                if vw_only:
+                    _, _, vw, axis = m.groups()
+                else:
+                    _, _, _cm0, _cm1, vw, axis = m.groups()
+                axis = axis.lower()
+                view = f"VW{int(vw):02d}"
+                axes.add(axis)
+                views.add(view)
+                files[(axis, view, t)] = f
+    return _finalize_projections(axes, views, files)
+
+
+def _scan_corrected(spm_dir: Path):
+    """Discover per-camera corrected volumes under one SPM## tree.
+
+    Layout::
+
+        <root>.corrected/SPM##/TM######/SPM##_TM######_CM##(_VW##)?.<ext>
+
+    Returns ``(tp_paths, view_keys, channel_names)`` where:
+      - tp_paths: dict[int, dict[int, Path]] keyed by timepoint index
+        then camera index.
+      - view_keys: sorted list of camera indices.
+      - channel_names: ``["CM00", "CM01", ...]``.
+    """
+    if _has_tm_pattern(spm_dir.name):
+        tm_dirs = [spm_dir]
+    else:
+        tm_dirs = _find_tm_folders(spm_dir)
+    if not tm_dirs:
+        return {}, [], []
+
+    tp_paths: dict[int, dict[int, Path]] = {}
+    cams: set[int] = set()
+
+    for ti, tm in enumerate(tm_dirs):
+        for f in sorted(tm.iterdir()):
+            if not (f.is_file() or f.suffix.lower() == ".zarr"):
+                continue
+            if _is_aux(f):
+                continue
+            m = _CORRECTED_RE.match(f.name)
+            if not m:
+                continue
+            cam = int(m.group(3))
+            tp_paths.setdefault(ti, {})[cam] = f
+            cams.add(cam)
+
+    view_keys = sorted(cams)
+    channel_names = [f"CM{c:02d}" for c in view_keys]
+    return tp_paths, view_keys, channel_names
+
+
+def _scan_fused(method_dir: Path):
+    """Discover fused-view volumes under one MultiFused_* tree.
+
+    Layout::
+
+        <method>/SPM##/TM######/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
+
+    Returns ``(tp_paths, view_keys, channel_names)`` where ``view_keys``
+    are ``(cam0, cam1, vw)`` tuples and channel names are
+    ``["VW00_fused", ...]``.
+    """
+    spm_dirs = sorted(
+        d for d in method_dir.iterdir()
+        if d.is_dir() and _SPM_PATTERN.match(d.name)
+    )
+    if not spm_dirs:
+        return {}, [], []
+    spm_dir = spm_dirs[0]
+
+    tm_dirs = _find_tm_folders(spm_dir)
+    if not tm_dirs:
+        return {}, [], []
+
+    tp_paths: dict[int, dict[tuple, Path]] = {}
+    views: set[tuple[int, int, int]] = set()
+
+    for ti, tm in enumerate(tm_dirs):
+        for f in sorted(tm.iterdir()):
+            if not (f.is_file() or f.suffix.lower() == ".zarr"):
+                continue
+            if _is_aux(f):
+                continue
+            m = _FUSED_RE.match(f.name)
+            if not m:
+                continue
+            key = (int(m.group(3)), int(m.group(4)), int(m.group(5)))
+            tp_paths.setdefault(ti, {})[key] = f
+            views.add(key)
+
+    view_keys = sorted(views)
+    channel_names = [f"VW{vw:02d}_fused" for _, _, vw in view_keys]
+    return tp_paths, view_keys, channel_names
+
+
+def _scan_raw(base_path: Path):
+    """Discover flat raw acquisition stacks.
+
+    Layout::
+
+        <root>/SPC##_TM#####_ANG###_CM#_CHN##_PH#.stack
+
+    Requires a sibling XML metadata file (``ch00_spec00.xml`` etc.) so
+    we can compute the per-volume (Z, Y, X) shape from the binary size.
+    """
+    tm_to_files: dict[int, dict[tuple[int, int], Path]] = {}
+    views: set[tuple[int, int]] = set()
+    for f in sorted(base_path.iterdir()):
+        if not f.is_file():
+            continue
+        m = _RAW_STACK_RE.match(f.name)
+        if not m:
+            continue
+        tm = int(m.group(2))
+        cam = int(m.group(3))
+        chn = int(m.group(4))
+        tm_to_files.setdefault(tm, {})[(cam, chn)] = f
+        views.add((cam, chn))
+
+    if not tm_to_files:
+        return {}, [], []
+
+    sorted_tms = sorted(tm_to_files)
+    tp_paths = {ti: tm_to_files[tm] for ti, tm in enumerate(sorted_tms)}
+    view_keys = sorted(views)
+    channel_names = [f"CM{cm}_CHN{ch:02d}" for cm, ch in view_keys]
+    return tp_paths, view_keys, channel_names
+
+
+def _scan_klb_tm(base_path: Path):
+    """Discover clusterPT KLB outputs.
+
+    Layout::
+
+        <root>/TM######/SPM##_TM######_CM##_CHN##.klb
+    """
+    if _has_tm_pattern(base_path.name):
+        tm_dirs = [base_path]
+    else:
+        tm_dirs = _find_tm_folders(base_path)
+    if not tm_dirs:
+        return {}, [], []
+
+    tp_paths: dict[int, dict[tuple, Path]] = {}
+    views: set[tuple[int, int]] = set()
+    for ti, tm in enumerate(tm_dirs):
+        for f in sorted(tm.glob("*.klb")):
+            m = _KLB_TM_RE.match(f.name)
+            if not m:
+                continue
+            key = (int(m.group(3)), int(m.group(4)))
+            tp_paths.setdefault(ti, {})[key] = f
+            views.add(key)
+
+    view_keys = sorted(views)
+    channel_names = [f"CM{cm:02d}_CHN{ch:02d}" for cm, ch in view_keys]
+    return tp_paths, view_keys, channel_names
+
+
+_PIPELINE_INFOS = (
+    PipelineInfo(
+        name="isoview-corrected",
+        description="IsoView corrected per-camera output",
+        input_patterns=[
+            "**/*.corrected/SPM??/TM??????/SPM??_TM??????_CM??.zarr",
+            "**/*.corrected/SPM??/TM??????/SPM??_TM??????_CM??.tif",
+        ],
+        output_patterns=[], input_extensions=["zarr", "tif"],
+        output_extensions=[], marker_files=[], category="reader",
+    ),
+    PipelineInfo(
+        name="isoview-fused",
+        description="IsoView MultiFused output",
+        input_patterns=[
+            "**/Results/MultiFused_*/SPM??/TM??????/*.fusedStack.*",
+            "**/Results/MultiFused_*/SPM??/TM??????/SPM??_TM??????_CM??_CM??_VW??.*",
+        ],
+        output_patterns=[], input_extensions=["klb", "tif", "zarr"],
+        output_extensions=[], marker_files=[], category="reader",
+    ),
+    PipelineInfo(
+        name="isoview-raw",
+        description="IsoView raw acquisition stacks",
+        input_patterns=["**/SPC??_TM?????_ANG???_CM?_CHN??_PH?.stack"],
+        output_patterns=[], input_extensions=["stack"],
+        output_extensions=[], marker_files=["ch00_spec00.xml", "ch0.xml"],
+        category="reader",
+    ),
+    PipelineInfo(
+        name="isoview-clusterpt",
+        description="IsoView clusterPT KLB output",
+        input_patterns=["**/TM??????/SPM??_TM??????_CM??_CHN??.klb"],
+        output_patterns=[], input_extensions=["klb"],
+        output_extensions=[], marker_files=[], category="reader",
+    ),
+)
+for _info in _PIPELINE_INFOS:
+    register_pipeline(_info)
+
+
+def _sibling_raw_root(arr: "IsoviewArray") -> Path | None:
+    """Locate the raw acquisition root next to a ``.corrected/`` tree.
+
+    For arr.scan_root = ``<dataset>.corrected/SPM##`` (corrected) or
+    ``<dataset>.corrected/Results/MultiFused_*/`` (fused), the sibling
+    raw root is ``<dataset>/`` — the directory holding the original
+    ``ch*_spec##.xml`` and ``SPC##_TM*.stack`` files.
+
+    Returns ``None`` when the path is not under a ``.corrected/`` tree.
+    """
+    for ancestor in arr.scan_root.parents:
+        if ancestor.name.endswith(".corrected"):
+            sibling = ancestor.parent / ancestor.name[: -len(".corrected")]
+            return sibling if sibling.is_dir() else None
+    if arr.scan_root.name.endswith(".corrected"):
+        sibling = arr.scan_root.parent / arr.scan_root.name[: -len(".corrected")]
+        return sibling if sibling.is_dir() else None
+    return None
+
+
+def _corrected_xml_dirs(arr: "IsoviewArray") -> list[Path]:
+    """Candidate XML dirs for the corrected kind."""
+    raw = _sibling_raw_root(arr)
+    dirs: list[Path] = []
+    if raw is not None:
+        dirs.append(raw)
+    dirs.append(arr.scan_root)
+    return dirs
+
+
+def _fused_xml_dirs(arr: "IsoviewArray") -> list[Path]:
+    """Candidate XML dirs for the fused kind."""
+    raw = _sibling_raw_root(arr)
+    dirs: list[Path] = []
+    if raw is not None:
+        dirs.append(raw)
+    # fused tree: SPM##/TM######/ holds per-channel XMLs alongside volumes
+    for spm in sorted(arr.scan_root.iterdir()):
+        if spm.is_dir() and _SPM_PATTERN.match(spm.name):
+            dirs.append(spm)
+            break
+    return dirs
+
+
+def _raw_xml_dirs(arr: "IsoviewArray") -> list[Path]:
+    return [arr.scan_root]
+
+
+def _klb_xml_dirs(arr: "IsoviewArray") -> list[Path]:
+    """clusterPT XMLs may live at TM/SPM level; raw root if reachable."""
+    dirs: list[Path] = [arr.scan_root]
+    raw = _sibling_raw_root(arr)
+    if raw is not None:
+        dirs.append(raw)
+    return dirs
+
+
+def _corrected_projections(arr: "IsoviewArray") -> dict | None:
+    corrected_root = arr.scan_root.parent
+    if not corrected_root.name.endswith(".corrected"):
+        return None
+    return _scan_flat_projections(
+        corrected_root.parent / f"{corrected_root.name}.projections"
+    )
+
+
+def _fused_projections(arr: "IsoviewArray") -> dict | None:
+    return _scan_fused_projections(arr.scan_root)
+
+
+def _raw_projections(arr: "IsoviewArray") -> dict | None:
+    return _scan_flat_projections(
+        arr.scan_root.parent / f"{arr.scan_root.name}.raw.projections"
+    )
+
+
+_KINDS: dict[str, dict] = {
+    "corrected": {
+        "stack_type": "isoview-corrected",
+        "resolve": _resolve_corrected_spm_dir,
+        "scan": _scan_corrected,
+        "projections": _corrected_projections,
+        "xml_dirs": _corrected_xml_dirs,
+        "needs_raw_dims": False,
+    },
+    "fused": {
+        "stack_type": "isoview-fused",
+        "resolve": _resolve_fused_method_dir,
+        "scan": _scan_fused,
+        "projections": _fused_projections,
+        "xml_dirs": _fused_xml_dirs,
+        "needs_raw_dims": False,
+    },
+    "raw": {
+        "stack_type": "isoview-raw",
+        "resolve": lambda p: p if p.is_dir() else p.parent,
+        "scan": _scan_raw,
+        "projections": _raw_projections,
+        "xml_dirs": _raw_xml_dirs,
+        "needs_raw_dims": True,
+    },
+    "clusterpt": {
+        "stack_type": "isoview-clusterpt",
+        "resolve": lambda p: p if p.is_dir() else p.parent,
+        "scan": _scan_klb_tm,
+        "projections": None,
+        "xml_dirs": _klb_xml_dirs,
+        "needs_raw_dims": False,
+    },
+}
+
+
+def detect_isoview_kind(path: str | Path) -> str | None:
+    """Pick the kind string for a directory, or ``None`` when nothing matches.
+
+    Resolution order (most specific first):
+      1. anywhere inside a ``Results/MultiFused_*/`` tree → ``"fused"``
+      2. inside a ``.corrected/SPM##`` tree (not under Results) → ``"corrected"``
+      3. ``.stack`` files at the top level → ``"raw"``
+      4. TM######/*.klb tree → ``"clusterpt"``
+    """
+    p = Path(path)
+    if not p.exists():
+        return None
+    if p.is_file():
+        p = p.parent
+
+    if _resolve_fused_method_dir(p) is not None and (
+        p.name.startswith("MultiFused_")
+        or p.name == "Results"
+        or any(
+            a.name.startswith("MultiFused_") or a.name == "Results"
+            for a in p.parents
+        )
+        or (
+            p.name.endswith(".corrected")
+            and (p / "Results").is_dir()
+            and not (p / "SPM00").is_dir()
+        )
+    ):
+        return "fused"
+
+    if _resolve_corrected_spm_dir(p) is not None:
+        return "corrected"
+
+    if any(_RAW_STACK_RE.match(f.name) for f in p.iterdir() if f.is_file()):
+        return "raw"
+
+    tm_dirs = _find_tm_folders(p) if p.is_dir() else []
+    if not tm_dirs and _has_tm_pattern(p.name):
+        tm_dirs = [p]
+    if tm_dirs and any(d.glob("*.klb") for d in tm_dirs):
+        return "clusterpt"
 
     return None
 
 
-class IsoViewCorrectedArray(Shape5DMixin):
-    """Combined view of a Keller-lab `*.corrected/` isoview pipeline output.
+class IsoviewArray(Shape5DMixin):
+    """Lazy ``(T, C, Z, Y, X)`` reader for any isoview output tree.
 
-    Wraps the per-camera corrected zarrs (`SPM00/TM######/SPM00_TM######_CM##.zarr`)
-    and the fused-view OME-TIFFs (`Results/MultiFused_geometric/SPM00/TM######/
-    SPM00_TM######_CM##_CM##_VW##.ome.tif`) as a single lazy 5D array with a
-    real OME-NGFF channel axis.
-
-    Channels are concatenated as `[CM00, CM01, ..., VW00_fused, VW90_fused, ...]`
-    so the GUI's existing multi-channel paths (napari channel_axis split,
-    save-as channel selection, `num_color_channels` metadata) work without
-    special-casing.
-
-    Shape: ``(T, C, Z, Y, X)``.
-    Dims: ``("T", "C", "Z", "Y", "X")``.
-
-    Parameters
-    ----------
-    path : str | Path
-        Either the `*.corrected/` directory or its dataset-root parent.
+    One class, four kinds (``"corrected"``, ``"fused"``, ``"raw"``,
+    ``"clusterpt"``). ``IsoviewArray(path)`` auto-detects which kind the
+    path belongs to via :func:`detect_isoview_kind`; pass ``kind=`` to
+    force a specific reader. Per-kind logic (scanner, path resolver,
+    projections dir, channel naming) lives in the :data:`_KINDS` table —
+    everything else is shared.
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, kind: str | None = None):
         self.base_path = Path(path)
         if not self.base_path.exists():
             raise FileNotFoundError(f"Path does not exist: {self.base_path}")
 
-        corrected_root = _find_isoview_corrected_root(self.base_path)
-        if corrected_root is None:
+        if kind is None:
+            kind = detect_isoview_kind(self.base_path)
+            if kind is None:
+                raise ValueError(
+                    f"Not an isoview tree (or kind not recognized): {self.base_path}"
+                )
+        if kind not in _KINDS:
             raise ValueError(
-                f"Not an isoview .corrected output: {self.base_path}"
+                f"kind must be one of {sorted(_KINDS)}; got {kind!r}"
             )
-        self.corrected_root = corrected_root
+        self.kind: str = kind
+        self._kind_cfg = _KINDS[kind]
+        self.stack_type: str = self._kind_cfg["stack_type"]
 
-        self._children: list[tuple[str, "IsoViewOutputArray"]] = []
-        self._channel_names: list[str] = []
-        self._chan_to_source: list[tuple[int, int]] = []
+        scan_root = self._kind_cfg["resolve"](self.base_path)
+        if scan_root is None:
+            raise ValueError(f"Not a {self.stack_type} tree: {self.base_path}")
+        self.scan_root: Path = scan_root
+
+        # raw .stack needs the XML sidecar BEFORE we can probe shape.
+        self._raw_dims: tuple[int, int, int] | None = None
         self._metadata: dict = {}
+        self._camera_metadata: dict[int, dict] = {}
+        if self._kind_cfg["needs_raw_dims"]:
+            self._probe_raw_xml()
 
-        self._discover_children()
-        self._validate_alignment()
-        self._merge_metadata()
-
-    def _discover_children(self) -> None:
-        """Locate the camera and fused-view trees and instantiate readers for each."""
-        cam_dir = self.corrected_root / "SPM00"
-        if cam_dir.is_dir() and _find_tm_folders(cam_dir):
-            try:
-                cam_arr = IsoViewOutputArray(cam_dir)
-            except (ValueError, FileNotFoundError) as e:
-                logger.debug(f"camera tree at {cam_dir} unreadable: {e}")
-            else:
-                self._children.append(("cameras", cam_arr))
-
-        fused_dir = (
-            self.corrected_root / "Results" / "MultiFused_geometric" / "SPM00"
-        )
-        if fused_dir.is_dir() and _find_tm_folders(fused_dir):
-            try:
-                view_arr = IsoViewOutputArray(fused_dir)
-            except (ValueError, FileNotFoundError) as e:
-                logger.debug(f"fused-view tree at {fused_dir} unreadable: {e}")
-            else:
-                self._children.append(("views", view_arr))
-
-        if not self._children:
+        tp_paths, view_keys, channel_names = self._kind_cfg["scan"](scan_root)
+        if not tp_paths or not view_keys:
             raise ValueError(
-                f"No isoview camera or fused-view data under {self.corrected_root}"
+                f"No {self.stack_type} volumes discovered under {scan_root}"
             )
 
-        for ci, (label, child) in enumerate(self._children):
-            for vi, view_key in enumerate(child.views):
-                self._chan_to_source.append((ci, vi))
-                self._channel_names.append(
-                    self._channel_label(label, child, view_key)
-                )
+        self._tp_paths = tp_paths
+        self._view_keys = list(view_keys)
+        self._channel_names = list(channel_names)
+        self._timepoints = sorted(tp_paths.keys())
+        self._cache: dict[tuple[int, int], np.ndarray] = {}
 
-    @staticmethod
-    def _channel_label(group_label: str, child: "IsoViewOutputArray", view_key) -> str:
-        """Build a human-readable channel name for a child view.
+        first_tp = self._timepoints[0]
+        first_view = self._view_keys[0]
+        first_path = self._tp_paths[first_tp][first_view]
+        self._probe_shape(first_path)
 
-        Camera trees (`view_type == "cm"`) yield ``CM##``; fused trees
-        (`view_type == "fused"`) yield ``VW##_fused`` using the VW number
-        from the child's `_file_map` rather than the camera-pair tuple.
-        Falls back to a positional label when the source structure is
-        unfamiliar.
+        # XML metadata sweep — common fields merge into self._metadata,
+        # per-camera fields land in self._camera_metadata. Raw kind has
+        # already loaded its XML during _probe_raw_xml; running this
+        # second pass is harmless because it just re-confirms the same
+        # values and populates _camera_metadata with any per-channel
+        # differences.
+        self._load_xml_metadata()
+
+    def _stack_dimensions(self) -> tuple[int, int, int] | None:
+        """(W, H, D) for .stack inputs that need it; None for everything else."""
+        return self._raw_dims
+
+    def _probe_raw_xml(self) -> None:
+        """Pull (W, H) plus metadata from the XML sidecar of a raw .stack tree."""
+        xml_path = _find_isoview_xml(self.scan_root)
+        if xml_path is None and self.scan_root.parent.exists():
+            xml_path = _find_isoview_xml(self.scan_root.parent)
+        if xml_path is None:
+            raise ValueError(
+                f"raw isoview at {self.scan_root}: no XML sidecar with dimensions"
+            )
+        xml_meta = _parse_isoview_xml(xml_path)
+        self._metadata.update(xml_meta)
+        if "dimensions" not in xml_meta:
+            raise ValueError(
+                f"raw isoview at {self.scan_root}: XML has no dimensions field"
+            )
+        w, h, _d = xml_meta["dimensions"][0]
+        self._raw_dims = (int(w), int(h), None)
+
+    def _load_xml_metadata(self) -> None:
+        """Run the per-kind XML sweep and merge results into metadata.
+
+        Always called from ``__init__``; silently no-ops when the kind
+        has no ``xml_dirs`` entry or no XML files are discovered.
+        Populates:
+          - ``self._metadata`` with fields that match across all parsed XMLs
+          - ``self._camera_metadata`` with per-channel fields that differ
         """
-        vt = getattr(child, "_view_type", None)
-        info = child._file_map.get(view_key, {}) if hasattr(child, "_file_map") else {}
-        if vt == "cm" and isinstance(view_key, int):
-            return f"CM{view_key:02d}"
-        if vt == "fused":
-            vw = info.get("view")
-            return f"VW{vw:02d}_fused" if isinstance(vw, int) else f"fused_{view_key}"
-        if vt in ("vw", "view") and isinstance(view_key, int):
-            return f"VW{view_key:02d}"
-        # generic fallback
-        return f"{group_label}_{view_key}"
+        xml_dirs_fn = self._kind_cfg.get("xml_dirs")
+        if xml_dirs_fn is None:
+            return
+        try:
+            candidate_dirs = xml_dirs_fn(self)
+        except Exception as exc:
+            logger.debug("xml_dirs lookup failed for %s: %s", self.kind, exc)
+            return
+        if not candidate_dirs:
+            return
+        common, per_cam = _read_all_isoview_xml(candidate_dirs)
+        # don't clobber raw kind's authoritative dimensions array
+        if "dimensions" in self._metadata:
+            common.pop("dimensions", None)
+        self._metadata.update(common)
+        if per_cam:
+            self._camera_metadata.update(per_cam)
 
-    def _validate_alignment(self) -> None:
-        """Pick T/Z/Y/X for the combined array.
+    def _probe_shape(self, sample_path: Path) -> None:
+        # Finalize raw_dims depth from on-disk file size before LazyVolume needs it.
+        if self._kind_cfg["needs_raw_dims"] and self._raw_dims is not None:
+            w, h, _ = self._raw_dims
+            total = sample_path.stat().st_size // 2
+            depth = total // (h * w)
+            self._raw_dims = (w, h, depth)
 
-        Children may carry differing timepoint counts when one tree is still
-        being processed (common with iso-view: per-camera correction often
-        finishes before fusion). Truncate to the shortest T so missing fused
-        frames don't surface as out-of-range reads. Z, Y, X must still match
-        because they describe a single volume's geometry, not a job's
-        progress, and a mismatch there would silently misregister channels.
-        """
-        ref_label, ref = self._children[0]
-        self._nt = min(child.num_timepoints for _, child in self._children)
-        self._nz = ref.num_planes
-        self._ny = ref._single_shape[1]
-        self._nx = ref._single_shape[2]
-        self._dtype = ref.dtype
-        for label, child in self._children[1:]:
-            if child.num_planes != self._nz:
-                raise ValueError(
-                    f"z-plane mismatch: {label}={child.num_planes} "
-                    f"vs {ref_label}={self._nz}"
-                )
-            if child._single_shape[1:] != (self._ny, self._nx):
-                raise ValueError(
-                    f"YX mismatch: {label}={child._single_shape[1:]} "
-                    f"vs {ref_label}=({self._ny}, {self._nx})"
-                )
-
-    def _merge_metadata(self) -> None:
-        """Pull spatial scale / sampling rate from the first child."""
-        ref_meta = self._children[0][1].metadata
-        for k in ("dx", "dy", "dz", "fs"):
-            if k in ref_meta:
-                self._metadata[k] = ref_meta[k]
+        with LazyVolume(sample_path, dimensions=self._stack_dimensions()) as v:
+            self._nz, self._ny, self._nx = v.shape
+            self._dtype = v.dtype
+            if v.attrs:
+                self._metadata.update(_extract_zarr_scale(v.attrs))
+            if v._path.suffix.lower() in (".tif", ".tiff") and v._arr is not None:
+                self._metadata.update(_extract_tiff_scale(v._arr))
 
     @property
     def shape(self) -> tuple[int, int, int, int, int]:
-        return (self._nt, len(self._chan_to_source), self._nz, self._ny, self._nx)
+        return (len(self._timepoints), len(self._view_keys), self._nz, self._ny, self._nx)
 
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         return self.shape
-
-    @property
-    def dtype(self):
-        return self._dtype
 
     @property
     def ndim(self) -> int:
         return 5
 
     @property
+    def dims(self) -> tuple[str, str, str, str, str]:
+        return ("T", "C", "Z", "Y", "X")
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    @property
     def size(self) -> int:
         return int(np.prod(self.shape))
 
     @property
-    def dims(self) -> tuple[str, ...]:
-        return ("T", "C", "Z", "Y", "X")
+    def num_timepoints(self) -> int:
+        return len(self._timepoints)
+
+    @property
+    def num_planes(self) -> int:
+        return self._nz
+
+    @property
+    def num_views(self) -> int:
+        return len(self._view_keys)
+
+    @property
+    def num_color_channels(self) -> int:
+        return len(self._view_keys)
+
+    @property
+    def views(self) -> list:
+        return list(self._view_keys)
 
     @property
     def channel_names(self) -> list[str]:
         return list(self._channel_names)
 
     @property
-    def num_color_channels(self) -> int:
-        return len(self._chan_to_source)
+    def camera_metadata(self) -> dict[int, dict]:
+        """Per-channel XML metadata, keyed by channel index.
+
+        Only populated for fields that differ between channels (e.g.
+        ``wavelength``, ``illumination_arms``, ``z_step`` vs ``y_step``).
+        Fields that match across every channel live on
+        :attr:`metadata` instead. Returns an empty dict when no XML
+        sidecar was found or every field agreed.
+        """
+        return {k: dict(v) for k, v in self._camera_metadata.items()}
 
     @property
-    def views(self) -> list[int]:
-        return list(range(self.num_color_channels))
-
-    @property
-    def num_timepoints(self) -> int:
-        return self._nt
-
-    @property
-    def num_planes(self) -> int:
-        return self._nz
+    def filenames(self) -> list[Path]:
+        out: list[Path] = []
+        for ti in self._timepoints:
+            for vk in self._view_keys:
+                p = self._tp_paths.get(ti, {}).get(vk)
+                if p is not None and Path(p).exists():
+                    out.append(Path(p))
+        return out
 
     @property
     def metadata(self) -> dict:
@@ -2959,15 +1330,42 @@ class IsoViewCorrectedArray(Shape5DMixin):
         meta["num_zplanes"] = self._nz
         meta["nplanes"] = self._nz
         meta["num_planes"] = self._nz
-        meta["num_timepoints"] = self._nt
-        meta["nframes"] = self._nt
-        meta["num_frames"] = self._nt
+        nt = len(self._timepoints)
+        meta["num_timepoints"] = nt
+        meta["nframes"] = nt
+        meta["num_frames"] = nt
         meta["num_color_channels"] = self.num_color_channels
         meta["channel_names"] = list(self._channel_names)
+        meta["num_views"] = self.num_views
         meta["dtype"] = str(self._dtype)
-        meta["stack_type"] = "isoview-corrected-combined"
-        meta["pipeline_stage"] = "isoview-corrected-combined"
+        meta["stack_type"] = self.stack_type
+        meta["pipeline_stage"] = self.stack_type
         meta["shape"] = self.shape
+        meta["views"] = list(self._view_keys)
+        if "pixel_resolution_um" in meta:
+            px = float(meta["pixel_resolution_um"])
+            meta.setdefault("dx", px)
+            meta.setdefault("dy", px)
+        if "z_step" in meta:
+            meta.setdefault("dz", float(meta["z_step"]))
+        elif "axial_step" in meta:
+            meta.setdefault("dz", float(meta["axial_step"]))
+        elif "y_step" in meta:
+            meta.setdefault("dz", float(meta["y_step"]))
+        # fs is the T-axis rate. For volumetric lightsheet, that's the
+        # volume rate (vps = fps / zplanes), not the per-plane camera
+        # rate (fps = 1000/exposure_time_ms). Fall back to fps only when
+        # zplanes is unknown / vps wasn't derived.
+        if "vps" in meta:
+            meta.setdefault("fs", float(meta["vps"]))
+        elif "fps" in meta:
+            meta.setdefault("fs", float(meta["fps"]))
+        if self._camera_metadata:
+            # The GUI metadata viewer renders a dedicated "Cameras" panel
+            # from metadata["cameras"]. Surface per-camera fields there;
+            # the IsoviewArray.camera_metadata property is the programmatic
+            # accessor for the same data.
+            meta["cameras"] = {k: dict(v) for k, v in self._camera_metadata.items()}
         return meta
 
     @metadata.setter
@@ -2976,82 +1374,99 @@ class IsoViewCorrectedArray(Shape5DMixin):
             raise TypeError(f"metadata must be a dict, got {type(value)}")
         self._metadata.update(value)
 
-    @property
-    def filenames(self) -> list[Path]:
-        out: list[Path] = []
-        for _, child in self._children:
-            out.extend(child.filenames)
-        return out
-
     def __len__(self) -> int:
-        return self._nt
+        return len(self._timepoints)
 
     def __getitem__(self, key):
-        """Index as ``(T, C, Z, Y, X)``."""
         if not isinstance(key, tuple):
             key = (key,)
         key = key + (slice(None),) * (5 - len(key))
         t_key, c_key, z_key, y_key, x_key = key
 
-        def to_indices(k, max_val):
-            if isinstance(k, int):
-                return [k if k >= 0 else max_val + k]
-            if isinstance(k, slice):
-                return list(range(*k.indices(max_val)))
-            if isinstance(k, (list, np.ndarray)):
-                return list(k)
-            return list(range(max_val))
+        nt = len(self._timepoints)
+        nc = len(self._view_keys)
+        t_indices = _to_indices(t_key, nt)
+        c_indices = _to_indices(c_key, nc)
 
-        c_indices = to_indices(c_key, self.num_color_channels)
+        z_size = _axis_size(z_key, self._nz)
+        y_size = _axis_size(y_key, self._ny)
+        x_size = _axis_size(x_key, self._nx)
 
-        # use the slice form of t/z/y/x to delegate to children — children
-        # natively support int/slice/list keys per axis. we just iterate
-        # channels and stack along the C axis.
-        slabs: list[np.ndarray] = []
-        for ci in c_indices:
-            child_idx, view_idx = self._chan_to_source[ci]
-            child = self._children[child_idx][1]
-            # IsoViewOutputArray natural shape is (T, Z, Views, Y, X);
-            # pin the view to the child-local index, forward T/Z/Y/X.
-            chunk = child[t_key, z_key, view_idx, y_key, x_key]
-            slabs.append(np.asarray(chunk))
+        out_shape = (len(t_indices), len(c_indices), z_size, y_size, x_size)
+        result = np.empty(out_shape, dtype=self._dtype)
 
-        if not slabs:
-            empty_shape = self._materialize_shape(t_key, z_key, y_key, x_key)
-            return np.empty((*empty_shape[:1], 0, *empty_shape[1:]), dtype=self._dtype)
+        # narrow zarr reads only pay off when one (t, view) is hit per call;
+        # bulk reads (zstats striding T at fixed Z) benefit from the cached
+        # full volume so the same (t, view) isn't re-decompressed at every Z.
+        single_tv = len(t_indices) == 1 and len(c_indices) == 1
 
-        # All slabs share the chunk shape returned by the child for one view:
-        # the chunk has T/Z/Y/X axes with int-indexed dims already squeezed.
-        # Stacking along axis 0 puts C at the front; the C axis in our
-        # (T, C, Z, Y, X) contract sits *just after* T, so move C to slot 1
-        # only when T survived (T was a slice/list). Otherwise C stays at 0.
-        stacked = np.stack(slabs, axis=0)
-        target_c_axis = 0 if isinstance(t_key, int) else 1
-        if target_c_axis != 0:
-            stacked = np.moveaxis(stacked, 0, target_c_axis)
+        for ti, t_idx in enumerate(t_indices):
+            for ci, c_idx in enumerate(c_indices):
+                view_key = self._view_keys[c_idx]
+                path = self._tp_paths.get(self._timepoints[t_idx], {}).get(view_key)
+                if path is None:
+                    raise FileNotFoundError(
+                        f"missing volume at t={t_idx} view={view_key} "
+                        f"in {self.scan_root}"
+                    )
 
-        if isinstance(c_key, int):
-            stacked = np.take(stacked, 0, axis=target_c_axis)
+                if single_tv:
+                    slab = self._read_slab(path, t_idx, c_idx, z_key, y_key, x_key)
+                else:
+                    vol = self._read_volume(path, t_idx, c_idx)
+                    slab = vol[z_key, y_key, x_key]
 
-        return stacked
+                if isinstance(z_key, int):
+                    slab = slab[np.newaxis, ...]
+                if isinstance(y_key, int):
+                    slab = slab[:, np.newaxis, :]
+                if isinstance(x_key, int):
+                    slab = slab[:, :, np.newaxis]
+                result[ti, ci, ...] = slab
 
-    def _materialize_shape(self, t_key, z_key, y_key, x_key):
-        def length(k, max_val):
-            if isinstance(k, int):
-                return None  # int dims are squeezed
-            if isinstance(k, slice):
-                return len(range(*k.indices(max_val)))
-            if isinstance(k, (list, np.ndarray)):
-                return len(k)
-            return max_val
-
-        dims = [
-            length(t_key, self._nt),
-            length(z_key, self._nz),
-            length(y_key, self._ny),
-            length(x_key, self._nx),
+        int_indexed = [
+            isinstance(t_key, int), isinstance(c_key, int),
+            isinstance(z_key, int), isinstance(y_key, int),
+            isinstance(x_key, int),
         ]
-        return tuple(d for d in dims if d is not None)
+        for ax in range(4, -1, -1):
+            if int_indexed[ax] and result.shape[ax] == 1:
+                result = np.squeeze(result, axis=ax)
+        return result
+
+    def _read_volume(self, path: Path, t_idx: int, c_idx: int) -> np.ndarray:
+        cache_key = (t_idx, c_idx)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+        with LazyVolume(path, dimensions=self._stack_dimensions()) as v:
+            data = np.asarray(v[:])
+        if data.ndim == 2:
+            data = data[np.newaxis, ...]
+        self._cache[cache_key] = data
+        return data
+
+    def _read_slab(
+        self, path: Path, t_idx: int, c_idx: int, z_key, y_key, x_key
+    ) -> np.ndarray:
+        cached = self._cache.get((t_idx, c_idx))
+        if cached is not None:
+            return cached[z_key, y_key, x_key]
+        with LazyVolume(path, dimensions=self._stack_dimensions()) as v:
+            slab = np.asarray(v[z_key, y_key, x_key])
+            if logger.isEnabledFor(logging.DEBUG) and v.chunks is not None:
+                touched = _chunks_touched(
+                    v._arr.shape, v.chunks,
+                    (0,) * (len(v._arr.shape) - 3) + (z_key, y_key, x_key),
+                )
+                chunk_bytes = int(np.prod(v.chunks)) * v.dtype.itemsize
+                decompressed = touched * chunk_bytes
+                logger.debug(
+                    "%s narrow zarr read: t=%d c=%d returned=%d decompressed=%d ratio=%.1fx",
+                    type(self).__name__, t_idx, c_idx, slab.nbytes, decompressed,
+                    decompressed / max(1, slab.nbytes),
+                )
+        return slab
 
     def __array__(self, dtype=None, copy=None) -> np.ndarray:
         out = self[:]
@@ -3063,10 +1478,7 @@ class IsoViewCorrectedArray(Shape5DMixin):
         return np.asarray(self).astype(dtype, *args, **kwargs)
 
     def close(self) -> None:
-        for _, child in self._children:
-            close = getattr(child, "close", None)
-            if callable(close):
-                close()
+        self._cache.clear()
 
     def _imwrite(
         self,
@@ -3080,30 +1492,60 @@ class IsoViewCorrectedArray(Shape5DMixin):
         **kwargs,
     ):
         from mbo_utilities.arrays._base import _imwrite_base
-
         return _imwrite_base(
-            self,
-            outpath,
-            planes=planes,
-            ext=ext,
-            overwrite=overwrite,
-            target_chunk_mb=target_chunk_mb,
-            progress_callback=progress_callback,
-            debug=debug,
-            **kwargs,
+            self, outpath, planes=planes, ext=ext, overwrite=overwrite,
+            target_chunk_mb=target_chunk_mb, progress_callback=progress_callback,
+            debug=debug, **kwargs,
         )
+
+    def projections(self) -> dict | None:
+        """Return projection TIFFs for this stack, or ``None`` when none exist.
+
+        Each kind points at its own projection directory (sibling
+        ``.projections/`` for raw/corrected, the Results subtree for
+        fused). Result format::
+
+            {"axes": ["xy", "xz", "yz"],
+             "views": ["CM00", ...],
+             "files": {(axis, view, t): Path, ...}}
+        """
+        fn = self._kind_cfg["projections"]
+        if fn is None:
+            return None
+        return fn(self)
 
     def __repr__(self):
         return (
-            f"IsoViewCorrectedArray(shape={self.shape}, dtype={self.dtype}, "
-            f"channels={self._channel_names})"
+            f"IsoviewArray(kind={self.kind!r}, shape={self.shape}, "
+            f"dtype={self.dtype}, channels={self._channel_names})"
         )
+
+
+def _to_indices(k, max_val: int) -> list[int]:
+    if isinstance(k, (int, np.integer)):
+        return [int(k) if k >= 0 else max_val + int(k)]
+    if isinstance(k, slice):
+        return list(range(*k.indices(max_val)))
+    if isinstance(k, (list, np.ndarray)):
+        return list(k)
+    return list(range(max_val))
+
+
+def _axis_size(k, max_val: int) -> int:
+    if isinstance(k, int):
+        return 1
+    if isinstance(k, slice):
+        return len(range(*k.indices(max_val)))
+    if isinstance(k, (list, np.ndarray)):
+        return len(k)
+    return max_val
 
 
 def isoview_to_ome_zarr(
     src: str | Path,
     out: str | Path,
     *,
+    kind: str | None = None,
     timepoints: list[int] | int | None = None,
     channels: list[int] | int | None = None,
     planes: list[int] | int | None = None,
@@ -3121,70 +1563,22 @@ def isoview_to_ome_zarr(
     show_progress: bool = True,
     debug: bool = False,
 ):
-    """Convert an isoview ``*.corrected/`` tree to a single 5D OME-Zarr.
+    """Convert one isoview output tree to an OME-Zarr v0.5 group.
 
-    Wraps :class:`IsoViewCorrectedArray` (per-camera corrected zarrs +
-    fused-view OME-TIFFs under ``Results/MultiFused_geometric/``) and writes
-    a single zarr v3 group with shape ``(T, C, Z, Y, X)`` and NGFF v0.5
-    multiscales. The omero block carries one channel entry per ``CM##`` /
-    ``VW##_fused`` view so napari/OMERO readers can label and tint each one.
-
-    Parameters
-    ----------
-    src : str | Path
-        Path to a ``*.corrected/`` directory or its parent dataset root.
-    out : str | Path
-        Output directory; the zarr filename is generated from the array's
-        dims (timepoint range + planes + channels) plus ``output_suffix``.
-    timepoints, channels, planes : int | list[int] | None
-        1-based selections forwarded to the writer (None = all).
-    overwrite : bool
-        Overwrite an existing zarr at the resolved output path.
-    target_chunk_mb : int
-        Target shard size in MB. Inner chunks are ``(1, 1, 1, Y, X)`` so
-        per-plane scrubbing decompresses only the requested plane.
-    sharded : bool
-        Use zarr v3 sharding (recommended).
-    compressor, compression_level, shuffle :
-        Codec config inside the shard. ``compressor`` is one of
-        ``"none"``, ``"gzip"``, ``"zstd"``, ``"blosc-lz4"``, ``"blosc-zstd"``.
-    pyramid, pyramid_max_layers, pyramid_method :
-        Multi-resolution pyramid config. Only Y/X are downsampled
-        (factors ``(1, 1, 1, 2, 2)`` for 5D output).
-    output_suffix : str | None
-        Filename suffix; defaults to ``"isoview"``.
-
-    Returns
-    -------
-    Path
-        Path to the written ``.zarr`` group.
-
-    Examples
-    --------
-    >>> isoview_to_ome_zarr(
-    ...     "D:/isoview_pipeline_demo/Dme_E1.corrected",
-    ...     "D:/isoview_pipeline_demo/exports",
-    ...     pyramid=True,
-    ... )
+    ``kind`` forces a specific reader (``"corrected"``, ``"fused"``,
+    ``"raw"``, ``"clusterpt"``). When omitted, the path is auto-detected
+    via :func:`detect_isoview_kind`.
     """
-    arr = IsoViewCorrectedArray(src)
+    arr = IsoviewArray(src, kind=kind)
     return arr._imwrite(
-        out,
-        ext=".zarr",
-        overwrite=overwrite,
+        out, ext=".zarr", overwrite=overwrite,
         target_chunk_mb=target_chunk_mb,
         progress_callback=progress_callback,
-        show_progress=show_progress,
-        debug=debug,
-        planes=planes,
-        frames=timepoints,
-        channels=channels,
-        sharded=sharded,
-        compressor=compressor,
-        compression_level=compression_level,
-        shuffle=shuffle,
-        pyramid=pyramid,
-        pyramid_max_layers=pyramid_max_layers,
+        show_progress=show_progress, debug=debug,
+        planes=planes, frames=timepoints, channels=channels,
+        sharded=sharded, compressor=compressor,
+        compression_level=compression_level, shuffle=shuffle,
+        pyramid=pyramid, pyramid_max_layers=pyramid_max_layers,
         pyramid_method=pyramid_method,
-        output_suffix=output_suffix or "isoview",
+        output_suffix=output_suffix or arr.stack_type,
     )

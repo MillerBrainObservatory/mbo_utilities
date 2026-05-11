@@ -237,20 +237,27 @@ def handle_arrow_keys(parent: Any):
             parent.image_widget.indices = current_indices
             return
 
-    # up/down: Z dimension (index 1, only for 4D data)
-    if n_sliders >= 2 and len(shape) >= 4:
-        z_max = shape[1] - 1
-        current_z = current_indices[1]
+    # up/down: Z dimension. Resolve Z by name so 5D TCZYX data (where
+    # indices[1] is C, not Z) scrolls the correct axis. Hardcoding
+    # indices[1] used to make Up/Down scroll C on 5D data.
+    names = tuple(
+        n.lower()
+        for n in (getattr(parent.image_widget, "_slider_dim_names", None) or ())
+    )
+    if "z" in names:
+        z_pos = names.index("z")
+        z_max = shape[z_pos] - 1
+        current_z = current_indices[z_pos]
 
         if imgui.is_key_pressed(imgui.Key.down_arrow):
             new_z = max(0, current_z - step)
             if new_z != current_z:
-                current_indices[1] = new_z
+                current_indices[z_pos] = new_z
                 parent.image_widget.indices = current_indices
                 return
 
         if imgui.is_key_pressed(imgui.Key.up_arrow):
             new_z = min(z_max, current_z + step)
             if new_z != current_z:
-                current_indices[1] = new_z
+                current_indices[z_pos] = new_z
                 parent.image_widget.indices = current_indices
