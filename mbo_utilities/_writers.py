@@ -1260,7 +1260,7 @@ def _write_volumetric_zarr(
     frames: list | None = None,
     channels: list | None = None,
     overwrite: bool = True,
-    target_chunk_mb: int = 50,
+    target_chunk_mb: int = 2048,
     progress_callback=None,
     show_progress: bool = True,
     debug: bool = False,
@@ -1293,7 +1293,13 @@ def _write_volumetric_zarr(
     overwrite : bool
         overwrite existing files
     target_chunk_mb : int
-        target chunk size in MB for streaming writes
+        Maximum shard byte budget in MB. The shard layout aims for one shard
+        per ``(c, z)`` (i.e. ``shards=(T, 1, 1, Y, X)`` for 5D, ``(T, 1, Y, X)``
+        for 4D) so a fixed-``(c, z)`` T-scrub opens a single file. If
+        ``T * Y * X * itemsize`` would exceed ``target_chunk_mb``, the shard's
+        T-extent is truncated and additional shards are added along T. The
+        2 GB default keeps typical multi-thousand-frame recordings to one
+        shard per ``(c, z)``.
     progress_callback : callable
         progress callback(fraction, message)
     show_progress : bool
@@ -1460,33 +1466,37 @@ def _write_volumetric_zarr(
                 f"  Z-step factor: {out_meta.z_step_factor}x (saving every {out_meta.z_step_factor} plane)"
             )
 
-    # determine chunking based on target_chunk_mb. chunk along T;
-    # bytes-per-T includes C only when the output is 5D.
+    # inner chunk shape: one Y×X plane per chunk. This is the unit fpl/the
+    # GUI scrub fetches, so any larger chunk forces zarr to decompress
+    # extra data per frame. For 5D the chunk pins (t, c, z); for 4D it
+    # pins (t, z). Benchmark (D:/demo/zarr_chunking_benchmark): this chunk
+    # shape is ~22x faster than the legacy Z-major (1, 1, Z, 64, 64).
     itemsize = np.dtype(data.dtype).itemsize
     if output_5d:
-        bytes_per_frame = n_channels * n_planes * Ly_out * Lx_out * itemsize
         inner_chunk = (1, 1, 1, Ly_out, Lx_out)
     else:
-        bytes_per_frame = n_planes * Ly_out * Lx_out * itemsize
-        # inner chunk shape: one (t, z) plane per chunk. (1, 1, Y, X) — picking
-        # full Z-stack chunks forced every per-plane read to decompress the
-        # whole Z stack, making scrubbing ~10x slower than necessary.
         inner_chunk = (1, 1, Ly_out, Lx_out)
 
-    target_bytes = target_chunk_mb * 1024 * 1024
-    frames_per_chunk = max(1, int(target_bytes / bytes_per_frame))
-    frames_per_chunk = min(frames_per_chunk, n_frames)
+    bytes_per_yx = Ly_out * Lx_out * itemsize
 
     # build codec chain
     inner_codecs = _build_inner_codecs(compressor, compression_level, shuffle=shuffle)
 
     if sharded:
-        # shard size: multiple frames per shard for efficient sequential reads
-        shard_t = min(n_frames, frames_per_chunk)
+        # one shard per (c, z) at all T — the GUI's fixed-(c, z) scrub
+        # opens exactly one shard file per channel-plane and reads chunks
+        # from it sequentially. File count = C * Z * ceil(T / shard_t),
+        # which is C*Z when target_chunk_mb is large enough to hold the
+        # whole T axis (the 2 GB default covers ~1400 frames at 1848x768
+        # uint16). Bump target_chunk_mb to widen the per-(c,z) shard or
+        # shrink it to split T across multiple shards.
+        target_bytes = target_chunk_mb * 1024 * 1024
+        max_shard_t = max(1, target_bytes // max(1, bytes_per_yx))
+        shard_t = min(n_frames, max_shard_t)
         if output_5d:
-            shard_shape = (shard_t, n_channels, n_planes, Ly_out, Lx_out)
+            shard_shape = (shard_t, 1, 1, Ly_out, Lx_out)
         else:
-            shard_shape = (shard_t, n_planes, Ly_out, Lx_out)
+            shard_shape = (shard_t, 1, Ly_out, Lx_out)
 
         codec = ShardingCodec(
             chunk_shape=inner_chunk,
@@ -1727,14 +1737,50 @@ def _write_volumetric_zarr(
             # downsample
             level_data = downsample_block(prev_data, scale_factors, pyramid_method)
 
-            # compute chunks for this level
+            # compute chunk + shard shapes for this level using the SAME
+            # recipe as level 0: one Y×X plane per chunk, all T per
+            # (c, z) shard. Y and X come from the downsampled level
+            # shape — pyramid scale factors only touch the spatial
+            # axes (1,1,2,2) for 4D and (1,1,1,2,2) for 5D, so T (and
+            # C, Z) match level 0. Without this fix, lower-resolution
+            # levels were stored as a single huge chunk (the level-0
+            # shard shape clamped to the level shape, used as plain
+            # chunks), forcing a full-volume decompress to view any
+            # frame at that level — fine for thumbnails, but it broke
+            # T-scrub the moment a viewer fell back to a pyramid level.
             lvl_shape = level_data.shape
-            lvl_chunks = tuple(
-                min(chunks[i], lvl_shape[i]) for i in range(len(lvl_shape))
+            lvl_Y = lvl_shape[-2]
+            lvl_X = lvl_shape[-1]
+            if output_5d:
+                lvl_inner = (1, 1, 1, lvl_Y, lvl_X)
+            else:
+                lvl_inner = (1, 1, lvl_Y, lvl_X)
+
+            lvl_inner_codecs = _build_inner_codecs(
+                compressor, compression_level, shuffle=shuffle
             )
 
-            # create array for this level (simpler codec for smaller levels)
-            lvl_codecs = _build_inner_codecs(compressor, compression_level, shuffle=shuffle)
+            if sharded:
+                lvl_bytes_per_yx = lvl_Y * lvl_X * itemsize
+                lvl_target_bytes = target_chunk_mb * 1024 * 1024
+                lvl_max_shard_t = max(
+                    1, lvl_target_bytes // max(1, lvl_bytes_per_yx)
+                )
+                lvl_shard_t = min(lvl_shape[0], lvl_max_shard_t)
+                if output_5d:
+                    lvl_shard = (lvl_shard_t, 1, 1, lvl_Y, lvl_X)
+                else:
+                    lvl_shard = (lvl_shard_t, 1, lvl_Y, lvl_X)
+                lvl_codec = ShardingCodec(
+                    chunk_shape=lvl_inner,
+                    codecs=lvl_inner_codecs,
+                    index_codecs=[BytesCodec(), Crc32cCodec()],
+                )
+                lvl_codecs = [lvl_codec]
+                lvl_chunks = lvl_shard
+            else:
+                lvl_codecs = lvl_inner_codecs
+                lvl_chunks = lvl_inner
 
             lvl_z = zarr.create(
                 store=root.store,
@@ -1831,7 +1877,10 @@ def _write_zarr(
             if shard_frames is not None:
                 shard_t = min(nframes, shard_frames)
             else:
-                shard_t = min(nframes, 100)  # default: 100-frame shards
+                # default: one shard per file — keeps file count to a small
+                # constant even for long recordings. Aligns with the GUI's
+                # fixed-(c, z) T-scrub pattern (one shard open, all T inside).
+                shard_t = nframes
 
             # ensure shard is divisible by inner chunk (zarr requirement)
             if inner_t > 1 and shard_t % inner_t != 0:
@@ -2007,24 +2056,55 @@ def _try_generic_writers(
             # Convert Path objects to strings for cross-platform compatibility
             np.save(outpath.parent / "ops.npy", _convert_paths_to_strings(ops))
     elif outpath.suffix.lower() == ".zarr":
-        # Zarr v3 format for numpy arrays
+        # Zarr v3 format for numpy arrays. Match the layout produced by
+        # `_write_volumetric_zarr` so generic-writer output behaves the
+        # same in the GUI (one chunk per Y×X plane, one shard per (c,z)
+        # at all T). Without this, raw numpy arrays got T*C*Z chunk
+        # files instead of C*Z shard files, and the GUI's T-scrub
+        # had no per-frame fast path.
         import zarr
-        from zarr.codecs import BytesCodec, GzipCodec
+        from zarr.codecs import (
+            BytesCodec,
+            Crc32cCodec,
+            GzipCodec,
+            ShardingCodec,
+        )
 
         arr = np.asarray(data)
 
-        # chunks: (1, ..., Y, X) - singleton leading dims, full spatial
-        chunks = (1,) * (arr.ndim - 2) + arr.shape[-2:]
+        if arr.ndim < 3:
+            # 2D: one chunk, sharding adds no value
+            create_kwargs = dict(
+                chunks=arr.shape,
+                codecs=[BytesCodec(), GzipCodec(level=5)],
+            )
+        else:
+            # ≥3D: chunks=(1,...,1,Y,X) per Y×X plane;
+            # shards=(T,1,...,1,Y,X) so a fixed-(c,z) T-scrub opens
+            # exactly one shard file. Compression off by default to
+            # match _imwrite_base; callers needing it can compress
+            # before calling.
+            Y, X = arr.shape[-2], arr.shape[-1]
+            inner = (1,) * (arr.ndim - 2) + (Y, X)
+            shard = (arr.shape[0],) + (1,) * (arr.ndim - 3) + (Y, X)
+            create_kwargs = dict(
+                chunks=shard,
+                codecs=[
+                    ShardingCodec(
+                        chunk_shape=inner,
+                        codecs=[BytesCodec()],
+                        index_codecs=[BytesCodec(), Crc32cCodec()],
+                    )
+                ],
+            )
 
-        # Create zarr array with compression
         z = zarr.create(
             store=str(outpath),
             shape=arr.shape,
-            chunks=chunks,
             dtype=arr.dtype,
-            codecs=[BytesCodec(), GzipCodec(level=5)],
             overwrite=True,
             zarr_format=3,
+            **create_kwargs,
         )
         z[:] = arr
 
