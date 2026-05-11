@@ -19,8 +19,11 @@ Output structure::
     └── isoview/                             custom namespace
         ├── projections/{corrected,raw}/xy/  (T,C,Y,X) uint16, own pyramid
         ├── aux/{xy_mask,xz_mask}/0/         (T,C,d0,d1) uint16, source-faithful
+        ├── backgrounds/0/                   (C,Y,X) uncompressed, pixel-exact
         ├── min_intensity/0/                 (T,C,2) float32
-        └── provenance/                      group, attrs only
+        └── provenance/
+            ├── attrs                        common + per_camera + isoview_config
+            └── xml_raw/<stem>/              1D uint8, verbatim XML bytes
 """
 
 from __future__ import annotations
