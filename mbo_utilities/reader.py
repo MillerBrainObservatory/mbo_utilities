@@ -30,7 +30,6 @@ from mbo_utilities.arrays import (
     _extract_tiff_plane_number,
     open_scanimage,
 )
-from mbo_utilities.arrays import IsoViewCorrectedArray
 from mbo_utilities.arrays.isoview import (
     IsoviewArray,
     detect_isoview_kind,
