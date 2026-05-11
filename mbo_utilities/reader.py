@@ -203,6 +203,14 @@ def imread(
                     logger.info(f"Detected Suite2p directory at {p}")
                     return Suite2pArray(p)
 
+                # Pointed at a suite2p reg_tif/ folder directly. Route to the
+                # parent plane via Suite2pArray with use_reg_tif=True so files
+                # are sorted by numeric frame_start, not lexicographically
+                # (suite2p uses variable-width filenames).
+                if p.name == "reg_tif" and (p.parent / "ops.npy").exists():
+                    logger.info(f"Detected Suite2p reg_tif folder at {p}")
+                    return Suite2pArray(p.parent / "ops.npy", use_reg_tif=True)
+
                 # Check for plane subdirectories (volumetric suite2p)
                 plane_subdirs = [d for d in p.iterdir() if d.is_dir() and (d / "ops.npy").exists()]
                 if plane_subdirs:

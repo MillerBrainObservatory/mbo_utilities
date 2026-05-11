@@ -64,6 +64,24 @@ def _extract_plane_number(name: str) -> int | None:
     return None
 
 
+_REG_TIF_RE = re.compile(r"file(\d+)_chan(\d+)\.tiff?$", re.IGNORECASE)
+
+
+def find_suite2p_reg_tif_files(plane_dir: Path, channel: int = 0) -> list[Path]:
+    """Return reg_tif files for ``channel`` in ``plane_dir/reg_tif/``, sorted by
+    the numeric frame_start parsed from the filename."""
+    reg_dir = plane_dir / "reg_tif"
+    if not reg_dir.is_dir():
+        return []
+    out: list[tuple[int, Path]] = []
+    for p in reg_dir.iterdir():
+        m = _REG_TIF_RE.match(p.name)
+        if m and int(m.group(2)) == channel:
+            out.append((int(m.group(1)), p))
+    out.sort(key=lambda kv: kv[0])
+    return [p for _, p in out]
+
+
 def find_suite2p_plane_dirs(directory: Path) -> list[Path]:
     """
     Find Suite2p plane directories in a parent directory.
@@ -168,6 +186,54 @@ class _SinglePlaneReader:
         self._file._mmap.close()
 
 
+class _Suite2pRegTifPlaneReader:
+    """Internal reader for a Suite2p plane backed by reg_tif/ instead of data.bin.
+
+    Presents the same surface as `_SinglePlaneReader` so `Suite2pArray` can hold
+    either type interchangeably.
+    """
+
+    def __init__(self, ops_path: Path, channel: int = 0):
+        from mbo_utilities.arrays.tiff import _SingleTiffPlaneReader
+
+        self.ops_path = ops_path
+        self.metadata = load_npy(ops_path).item()
+        plane_dir = ops_path.parent
+        self.reg_tif_dir = plane_dir / "reg_tif"
+        self._channel = channel
+
+        files = find_suite2p_reg_tif_files(plane_dir, channel=channel)
+        if not files:
+            raise FileNotFoundError(
+                f"No reg_tif files for chan{channel} in {self.reg_tif_dir}"
+            )
+        self.filenames = files
+        self.active_file = self.reg_tif_dir
+
+        self._inner = _SingleTiffPlaneReader(files)
+        self.Ly = self._inner.Ly
+        self.Lx = self._inner.Lx
+        self.dtype = np.int16
+        self.nframes = self._inner.nframes
+        self.shape = (self.nframes, self.Ly, self.Lx)
+
+        ops_ly = get_param(self.metadata, "Ly")
+        ops_lx = get_param(self.metadata, "Lx")
+        if ops_ly is not None and ops_lx is not None and (
+            ops_ly != self.Ly or ops_lx != self.Lx
+        ):
+            logger.warning(
+                f"reg_tif shape ({self.Ly}x{self.Lx}) differs from "
+                f"ops.npy ({ops_ly}x{ops_lx}) at {self.reg_tif_dir}"
+            )
+
+    def __getitem__(self, key):
+        return self._inner[key]
+
+    def close(self):
+        self._inner.close()
+
+
 class Suite2pArray(ReductionMixin, Shape5DMixin):
     """
     Lazy array reader for Suite2p binary output files.
@@ -182,6 +248,11 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         Path to ops.npy, a .bin file, or a directory containing plane subdirs.
     use_raw : bool, optional
         If True, prefer data_raw.bin over data.bin. Default False.
+        Ignored when reading reg_tif/ (no raw_tif equivalent).
+    use_reg_tif : bool, optional
+        If True, force loading from ``plane_dir/reg_tif/`` even when
+        ``data.bin`` is present. When False (default), reg_tif is used only
+        as a fallback when no binary file exists. Currently chan0 only.
     dims : str | Sequence[str] | None, optional
         Dimension labels. If None, inferred from shape (TZYX or TYX).
 
@@ -219,6 +290,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         self,
         filename: str | Path,
         use_raw: bool = False,
+        use_reg_tif: bool = False,
         dims: str | Sequence[str] | None = None,
     ):
         path = Path(filename)
@@ -226,7 +298,8 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
             raise FileNotFoundError(path)
 
         self._use_raw = use_raw
-        self._planes: list[_SinglePlaneReader] = []
+        self._use_reg_tif = use_reg_tif
+        self._planes: list[_SinglePlaneReader | _Suite2pRegTifPlaneReader] = []
         self._is_volumetric = False
 
         # determine if this is a volume or single plane
@@ -278,10 +351,31 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         ops_parent = self._planes[0].ops_path.parent
         return ops_parent.parent if self._is_volumetric else ops_parent
 
+    def _make_plane_reader(self, ops_path: Path):
+        """Pick reg_tif vs binary reader for one plane based on what's on
+        disk and the use_raw / use_reg_tif flags."""
+        plane_dir = ops_path.parent
+        has_bin = (plane_dir / "data.bin").exists() or (plane_dir / "data_raw.bin").exists()
+        has_reg_tif = bool(find_suite2p_reg_tif_files(plane_dir, channel=0))
+
+        if self._use_reg_tif:
+            if not has_reg_tif:
+                raise FileNotFoundError(
+                    f"use_reg_tif=True but no reg_tif files in {plane_dir}/reg_tif/"
+                )
+            return _Suite2pRegTifPlaneReader(ops_path, channel=0)
+        if has_bin:
+            return _SinglePlaneReader(ops_path, use_raw=self._use_raw)
+        if has_reg_tif:
+            return _Suite2pRegTifPlaneReader(ops_path, channel=0)
+        raise FileNotFoundError(
+            f"No data.bin, data_raw.bin, or reg_tif/ in {plane_dir}"
+        )
+
     def _init_single_plane(self, ops_path: Path, use_raw: bool):
         """Initialize as single-plane array."""
         self._is_volumetric = False
-        reader = _SinglePlaneReader(ops_path, use_raw)
+        reader = self._make_plane_reader(ops_path)
         self._planes = [reader]
 
         self._nframes = reader.nframes
@@ -299,7 +393,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
 
         for pdir in plane_dirs:
             ops_file = pdir / "ops.npy"
-            reader = _SinglePlaneReader(ops_file, use_raw)
+            reader = self._make_plane_reader(ops_file)
             self._planes.append(reader)
 
         # validate consistent shapes
@@ -485,7 +579,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
     def __array__(self, dtype=None, copy=None) -> np.ndarray:
         # return single frame for fast histogram/preview (prevents accidental full load)
         if self._is_volumetric:
-            arrs = [p._file[0] for p in self._planes]
+            arrs = [p[0] for p in self._planes]
             data = np.stack(arrs, axis=0)
         else:
             data = self._planes[0][0]
@@ -495,6 +589,11 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
 
     def switch_channel(self, use_raw: bool = False):
         """Switch all planes between raw and registered data."""
+        if any(not hasattr(p, "switch_channel") for p in self._planes):
+            raise NotImplementedError(
+                "switch_channel is only supported for binary-backed planes "
+                "(data.bin / data_raw.bin); reg_tif/ has no raw/registered split."
+            )
         for plane in self._planes:
             plane.switch_channel(use_raw=use_raw)
         self.filenames = [p.active_file for p in self._planes]
@@ -536,7 +635,9 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         if not self._is_volumetric:
             # single plane - try to show both raw and registered
             plane = self._planes[0]
-            if plane.raw_file.exists():
+            # reg_tif-backed planes have no raw/reg binary split; skip dual-display
+            has_binary_split = hasattr(plane, "raw_file") and hasattr(plane, "reg_file")
+            if has_binary_split and plane.raw_file.exists():
                 try:
                     raw_reader = _SinglePlaneReader(plane.ops_path, use_raw=True)
                     raw_arr = Suite2pArray.__new__(Suite2pArray)
@@ -552,7 +653,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
                 except Exception as e:
                     logger.warning(f"Could not open raw file: {e}")
 
-            if plane.reg_file.exists():
+            if has_binary_split and plane.reg_file.exists():
                 try:
                     reg_reader = _SinglePlaneReader(plane.ops_path, use_raw=False)
                     reg_arr = Suite2pArray.__new__(Suite2pArray)
