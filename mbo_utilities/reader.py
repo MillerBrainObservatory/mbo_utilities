@@ -17,11 +17,8 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays import (
     BinArray,
-    ClusterPTArray,
     LBMPiezoArray,
     H5Array,
-    IsoviewArray,
-    IsoViewOutputArray,
     LBMArray,
     NumpyArray,
     PiezoArray,
@@ -33,14 +30,9 @@ from mbo_utilities.arrays import (
     _extract_tiff_plane_number,
     open_scanimage,
 )
-from mbo_utilities.arrays import IsoViewCorrectedArray
 from mbo_utilities.arrays.isoview import (
-    _find_isoview_corrected_root,
-    _find_tm_folders,
-    _has_tm_pattern,
-    _TILED_CORRECTED_PATTERN,
-    _TILED_FUSED_PATTERN,
-    EXCLUDE_PATTERNS as ISOVIEW_EXCLUDE_PATTERNS,
+    IsoviewArray,
+    detect_isoview_kind,
 )
 from typing import TYPE_CHECKING
 
@@ -163,13 +155,21 @@ def imread(
     if hasattr(inputs, "_imwrite") and hasattr(inputs, "shape"):
         return inputs
 
-    if "isoview" in kwargs.items():
-        return IsoviewArray(inputs)
-
     if isinstance(inputs, (str, Path)):
         p = Path(inputs)
         if not p.exists():
             raise ValueError(f"Input path does not exist: {p}")
+
+        # Isoview detection runs FIRST, before any file-vs-dir dispatch.
+        # "Open File" on `<root>.corrected/SPM##/TM######/*.zarr` and "Open
+        # Folder" on `<root>.corrected/SPM##` and `mbo <root>.corrected/` on
+        # the CLI must all land here — same array, same shape. detect walks
+        # up parents so individual zarrs/tifs/klbs/stacks inside the tree
+        # resolve to the enclosing stack root.
+        iso_kind = detect_isoview_kind(p)
+        if iso_kind is not None:
+            logger.info(f"Detected isoview-{iso_kind} tree at {p}")
+            return IsoviewArray(p, kind=iso_kind)
 
         # if the user (or a file dialog) handed us a path inside a .zarr v3
         # store, redirect to the store root. file pickers default to selecting
@@ -188,105 +188,6 @@ def imread(
             paths = [p]
         elif p.is_dir():
             logger.debug(f"Input is a directory, searching for supported files in {p}")
-
-            # Check for an isoview `.corrected/` pipeline output root, either
-            # the `.corrected` directory itself or its dataset-root parent.
-            # Returns a single (T, C, Z, Y, X) array combining per-camera and
-            # fused-view trees as channels — see IsoViewCorrectedArray.
-            corrected_root = _find_isoview_corrected_root(p)
-            if corrected_root is not None:
-                logger.info(
-                    f"Detected isoview .corrected root: {corrected_root.name}"
-                )
-                return IsoViewCorrectedArray(corrected_root)
-
-            # Check for raw Isoview structure: .stack files with XML metadata
-            stack_files = list(p.glob("*.stack"))
-            if stack_files:
-                xml_files = list(p.glob("*.xml"))
-                if xml_files:
-                    logger.info(
-                        f"Detected raw Isoview structure with {len(stack_files)} .stack files."
-                    )
-                    return IsoviewArray(p)
-
-            # Check for tiled corrected/fused isoview TIF files (no TM folders)
-            tiled_tifs = [
-                f for f in p.glob("*.tif")
-                if not any(x in f.name for x in ISOVIEW_EXCLUDE_PATTERNS)
-            ]
-            if tiled_tifs:
-                if any(_TILED_FUSED_PATTERN.match(f.name) for f in tiled_tifs):
-                    logger.info("Detected tiled fused isoview data")
-                    return IsoviewArray(p)
-                if any(_TILED_CORRECTED_PATTERN.match(f.name) for f in tiled_tifs):
-                    logger.info("Detected tiled corrected isoview data")
-                    return IsoviewArray(p)
-
-            # Check for IsoView output structure: TM* subfolders with data files
-            # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
-            tm_folders = _find_tm_folders(p)
-            if tm_folders:
-                # check first TM folder for file types
-                first_tm = tm_folders[0]
-                klb_files = list(first_tm.glob("*.klb"))
-                zarr_files = list(first_tm.glob("*.zarr"))
-                # tif files excluding masks
-                tif_files = [f for f in first_tm.glob("*.tif")
-                             if not any(x in f.name for x in ["Mask", "mask", "minIntensity"])]
-
-                if tif_files:
-                    logger.info(
-                        f"Detected IsoView output with {len(tm_folders)} TM folders and TIF files."
-                    )
-                    return IsoViewOutputArray(p)
-                elif klb_files:
-                    logger.info(
-                        f"Detected IsoView output with {len(tm_folders)} TM folders and KLB files."
-                    )
-                    return IsoViewOutputArray(p)
-                elif zarr_files:
-                    # Prefer the pipeline-output reader: it handles CM-only,
-                    # CM+VW, fused-CM, and VW-only naming for zarr trees.
-                    # Fall back to the raw IsoviewArray only when filenames
-                    # don't match any pipeline-output pattern.
-                    try:
-                        logger.info(
-                            f"Detected IsoView output with {len(tm_folders)} TM folders and zarr files."
-                        )
-                        return IsoViewOutputArray(p)
-                    except (ValueError, FileNotFoundError):
-                        logger.info(
-                            f"Falling back to raw IsoviewArray for {p} "
-                            "(filenames did not match pipeline-output patterns)."
-                        )
-                        return IsoviewArray(p)
-
-            # Check if this IS a TM folder (single timepoint)
-            # supports both "TM000000" and "Dme_E1.TM000000_multiFused" naming
-            if _has_tm_pattern(p.name):
-                klbs = list(p.glob("*.klb"))
-                zarrs = list(p.glob("*.zarr"))
-                tifs = [f for f in p.glob("*.tif")
-                        if not any(x in f.name for x in ["Mask", "mask", "minIntensity"])]
-                if tifs:
-                    logger.info(
-                        f"Detected single TM folder with {len(tifs)} TIF files."
-                    )
-                    return IsoViewOutputArray(p)
-                elif klbs:
-                    logger.info(
-                        f"Detected single TM folder with {len(klbs)} KLB files."
-                    )
-                    return IsoViewOutputArray(p)
-                elif zarrs:
-                    logger.info(
-                        f"Detected single TM folder with {len(zarrs)} zarr files."
-                    )
-                    try:
-                        return IsoViewOutputArray(p)
-                    except (ValueError, FileNotFoundError):
-                        return IsoviewArray(p)
 
             zarrs = list(p.glob("*.zarr"))
             if zarrs:
@@ -448,19 +349,6 @@ def imread(
 
         # Case 2: flat zarr store with zarr.json
         if (first / "zarr.json").exists():
-            # Check if this is an isoview consolidated zarr (has camera_N groups)
-            camera_dirs = [d for d in first.iterdir() if d.is_dir() and d.name.startswith("camera_")]
-            if camera_dirs:
-                logger.info(f"Detected isoview consolidated zarr with {len(camera_dirs)} cameras.")
-                # For a single consolidated zarr, find the parent TM folder
-                # or use the zarr's parent as the isoview root
-                parent = first.parent
-                if parent.name.startswith("TM"):
-                    # Single TM folder
-                    return IsoviewArray(parent)
-                # The zarr file IS the isoview structure (single timepoint)
-                return IsoviewArray(parent)
-
             logger.info("Detected zarr.json, loading as ZarrArray.")
             return ZarrArray(paths, **_filter_kwargs(ZarrArray, kwargs))
 
@@ -490,20 +378,17 @@ def imread(
             data = pyklb.readfull(str(first))
             return NumpyArray(data)
 
-        # check if this looks like a clusterPT structure
+        # clusterPT tree: TM######/SPM##_TM######_CM##_CHN##.klb
         parent = first.parent
         if parent.name.startswith("TM"):
-            # inside a TM folder - use parent of TM as base
-            logger.info(f"Detected KLB file in TM folder, loading as ClusterPTArray.")
-            return ClusterPTArray(parent.parent)
+            logger.info("Detected KLB file in TM folder, loading as isoview-clusterpt.")
+            return IsoviewArray(parent.parent, kind="clusterpt")
 
-        # check if parent has TM* folders (clusterPT output root)
         tm_folders = [d for d in parent.iterdir() if d.is_dir() and d.name.startswith("TM")]
         if tm_folders:
-            logger.info(f"Detected KLB file in clusterPT root, loading as ClusterPTArray.")
-            return ClusterPTArray(parent)
+            logger.info("Detected KLB file in clusterPT root, loading as isoview-clusterpt.")
+            return IsoviewArray(parent, kind="clusterpt")
 
-        # standalone KLB file - read directly as numpy array
         logger.info(f"Loading standalone KLB file: {first}")
         data = pyklb.readfull(str(first))
         return NumpyArray(data)

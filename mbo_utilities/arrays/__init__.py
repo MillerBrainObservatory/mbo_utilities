@@ -88,10 +88,9 @@ if TYPE_CHECKING:
     from mbo_utilities.arrays.bin import BinArray as BinArray
     from mbo_utilities.arrays.h5 import H5Array as H5Array
     from mbo_utilities.arrays.isoview import (
-        ClusterPTArray as ClusterPTArray,
         IsoviewArray as IsoviewArray,
-        IsoViewCorrectedArray as IsoViewCorrectedArray,
-        IsoViewOutputArray as IsoViewOutputArray,
+        LazyVolume as LazyVolume,
+        detect_isoview_kind as detect_isoview_kind,
         isoview_to_ome_zarr as isoview_to_ome_zarr,
     )
     from mbo_utilities.arrays.numpy import NumpyArray as NumpyArray
@@ -133,9 +132,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ZarrArray": (".zarr", "ZarrArray"),
     "BinArray": (".bin", "BinArray"),
     "IsoviewArray": (".isoview", "IsoviewArray"),
-    "IsoViewOutputArray": (".isoview", "IsoViewOutputArray"),
-    "IsoViewCorrectedArray": (".isoview", "IsoViewCorrectedArray"),
-    "ClusterPTArray": (".isoview", "ClusterPTArray"),
+    "LazyVolume": (".isoview", "LazyVolume"),
+    "detect_isoview_kind": (".isoview", "detect_isoview_kind"),
     "isoview_to_ome_zarr": (".isoview", "isoview_to_ome_zarr"),
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
@@ -191,13 +189,12 @@ __all__ = [
     "CHUNKS_3D",
     "CHUNKS_4D",
     "BinArray",
-    "ClusterPTArray",
     "LBMPiezoArray",
     "H5Array",
     "ImageJHyperstackArray",
     "IsoviewArray",
-    "IsoViewCorrectedArray",
-    "IsoViewOutputArray",
+    "LazyVolume",
+    "detect_isoview_kind",
     "LBMArray",
     "NWBArray",
     "NumpyArray",
