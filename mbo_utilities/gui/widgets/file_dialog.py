@@ -112,6 +112,33 @@ def pop_button_style():
     imgui.pop_style_color(4)
 
 
+# Tooltips and copy in this dialog must respect the dialog's 340 px width.
+# wrapped_tooltip() does NOT auto-wrap, so anything longer than a few
+# words runs off the side of the screen on this layout. The helpers below
+# always wrap to ~30 em (roughly the dialog width minus margins).
+_TOOLTIP_WRAP_EM = 24.0
+
+
+def wrapped_tooltip(text: str, wrap_em: float = _TOOLTIP_WRAP_EM) -> None:
+    """Tooltip whose text wraps to ``wrap_em`` em units wide."""
+    imgui.begin_tooltip()
+    try:
+        imgui.push_text_wrap_pos(hello_imgui.em_size(wrap_em))
+        imgui.text_unformatted(text)
+        imgui.pop_text_wrap_pos()
+    finally:
+        imgui.end_tooltip()
+
+
+def text_wrapped_colored(color: imgui.ImVec4, text: str) -> None:
+    """Colored equivalent of imgui.text_wrapped()."""
+    imgui.push_style_color(imgui.Col_.text, color)
+    try:
+        imgui.text_wrapped(text)
+    finally:
+        imgui.pop_style_color()
+
+
 def icon_button(icon: str, label: str, size: imgui.ImVec2, tooltip: str = "") -> bool:
     """
     Draw a styled icon button with MBO theme.
@@ -147,9 +174,9 @@ def icon_button(icon: str, label: str, size: imgui.ImVec2, tooltip: str = "") ->
     button_text = f"{icon}  {label}"
     clicked = imgui.button(button_text, size)
 
-    # Show tooltip on hover
+    # Show tooltip on hover (wrapped so it fits the dialog width)
     if tooltip and imgui.is_item_hovered():
-        imgui.set_tooltip(tooltip)
+        wrapped_tooltip(tooltip)
 
     imgui.pop_style_var(2)
     imgui.pop_style_color(5)
@@ -229,7 +256,7 @@ class FileDialog:
 
             imgui.text_colored(COL_TEXT_DIM, "GPU adapter")
             if imgui.is_item_hovered():
-                imgui.set_tooltip(
+                wrapped_tooltip(
                     "Pick which GPU to render with. 'auto' lets wgpu "
                     "choose (usually the DiscreteGPU). Takes effect on "
                     "the next dataset you open."
@@ -249,7 +276,7 @@ class FileDialog:
 
             changed, new_debug = imgui.checkbox("Debug logging", self.debug_logging)
             if imgui.is_item_hovered():
-                imgui.set_tooltip(
+                wrapped_tooltip(
                     "Verbose console logs (per-read timings, zarr chunk "
                     "shapes, etc.). Same effect as launching with "
                     "MBO_DEBUG=1."
@@ -340,7 +367,7 @@ class FileDialog:
 
         # not installed
         if pipeline is None or pipeline.status == Status.MISSING:
-            imgui.text_colored(COL_NA, f"{name} - not installed")
+            text_wrapped_colored(COL_NA, f"{name} - not installed")
             return
 
         # build the line: "Suite2p - PyTorch v2.1.0 (GPU)"
@@ -368,13 +395,13 @@ class FileDialog:
 
         line = " ".join(parts)
 
-        # color based on status
+        # color based on status (wrapped so long dep chains stay in-bounds)
         if pipeline.status == Status.OK:
-            imgui.text_colored(COL_OK, line)
+            text_wrapped_colored(COL_OK, line)
         elif pipeline.status == Status.WARN:
-            imgui.text_colored(COL_WARN, line)
+            text_wrapped_colored(COL_WARN, line)
         else:
-            imgui.text_colored(COL_ERR, line)
+            text_wrapped_colored(COL_ERR, line)
 
         # tooltip with detailed info
         if imgui.is_item_hovered():
@@ -386,7 +413,7 @@ class FileDialog:
                 if feat and feat.message:
                     tooltip_parts.append(f"{req_name}: {feat.message}")
             if tooltip_parts:
-                imgui.set_tooltip("\n".join(tooltip_parts))
+                wrapped_tooltip("\n".join(tooltip_parts))
 
     def _draw_formats_card_content(self):
         """Draw supported formats - always shown immediately."""
@@ -404,7 +431,7 @@ class FileDialog:
             webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html")
         pop_button_style()
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Open documentation in browser")
+            wrapped_tooltip("Open documentation in browser")
 
         imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
 
@@ -479,7 +506,7 @@ class FileDialog:
             pop_button_style()
 
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Click for details")
+                wrapped_tooltip("Click for details")
 
         # popup with full dependency info
         if self._show_deps_popup:
@@ -514,29 +541,30 @@ class FileDialog:
                 hint = cupy_install_hint(driver_cuda)
                 imgui.indent(hello_imgui.em_size(0.6))
                 imgui.text_colored(COL_TEXT_DIM, "Common fix:")
-                imgui.same_line()
-                imgui.text_colored(COL_ACCENT, hint)
-                imgui.same_line()
+                # Hint is a `uv pip install cupy-cudaXXx` command that can
+                # easily exceed the dialog width; put it on its own line
+                # and let it wrap rather than running off the right edge.
+                text_wrapped_colored(COL_ACCENT, hint)
                 push_button_style(primary=False)
-                if imgui.small_button(f"{fa.ICON_FA_COPY}##cupy_hint"):
+                if imgui.small_button(f"{fa.ICON_FA_COPY}  Copy##cupy_hint"):
                     imgui.set_clipboard_text(hint)
                 pop_button_style()
                 if imgui.is_item_hovered():
-                    imgui.set_tooltip("Copy command to clipboard")
+                    wrapped_tooltip("Copy command to clipboard")
                 if cupy_feat is not None and cupy_feat.message:
-                    imgui.text_colored(COL_TEXT_DIM, cupy_feat.message)
+                    text_wrapped_colored(COL_TEXT_DIM, cupy_feat.message)
                 imgui.unindent(hello_imgui.em_size(0.6))
 
             # rastermap
             rastermap = self._get_feature("Rastermap")
             if rastermap is None or rastermap.status == Status.MISSING:
-                imgui.text_colored(COL_NA, "Rastermap - not installed")
+                text_wrapped_colored(COL_NA, "Rastermap - not installed")
             else:
                 ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
                 if rastermap.status == Status.OK:
-                    imgui.text_colored(COL_OK, f"Rastermap{ver}")
+                    text_wrapped_colored(COL_OK, f"Rastermap{ver}")
                 else:
-                    imgui.text_colored(COL_WARN, f"Rastermap{ver}")
+                    text_wrapped_colored(COL_WARN, f"Rastermap{ver}")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
             imgui.end_popup()
@@ -600,7 +628,7 @@ class FileDialog:
                 self.gui_modes
             )
             if imgui.is_item_hovered():
-                imgui.set_tooltip(f"Select Application: {self.gui_modes[self.selected_mode_index]}")
+                wrapped_tooltip(f"Select Application: {self.gui_modes[self.selected_mode_index]}")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
@@ -694,7 +722,7 @@ class FileDialog:
             if imgui.button(f"{fa.ICON_FA_GEARS}  Options", imgui.ImVec2(opt_w, btn_h)):
                 self._show_options_popup = True
             if imgui.is_item_hovered():
-                imgui.set_tooltip("GPU adapter, debug logging, and other settings")
+                wrapped_tooltip("GPU adapter, debug logging, and other settings")
             imgui.same_line()
             if imgui.button(f"{fa.ICON_FA_XMARK}  Quit", imgui.ImVec2(quit_w, btn_h)) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None
