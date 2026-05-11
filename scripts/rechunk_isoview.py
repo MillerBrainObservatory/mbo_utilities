@@ -51,9 +51,11 @@ from zarr.codecs import (
 from zarr.storage import LocalStore
 
 
-# matches SPM00_TM000005_CM02.zarr but not …segmentationMask.zarr
+# matches SPM00_TM000005_CM02.zarr (corrected) and
+# SPM00_TM000005_CM02_CM03_VW00.zarr (fused). Mask siblings under both
+# trees are filtered below unless --include-masks is passed.
 _VOLUME_GLOB = "**/SPM*_TM*_CM*.zarr"
-_MASK_SUFFIX = ".segmentationMask.zarr"
+_MASK_SUFFIXES = (".segmentationMask.zarr", ".mask.zarr")
 
 
 def _is_already_rechunked(arr) -> bool:
@@ -268,7 +270,10 @@ def main() -> int:
 
     candidates = sorted(root.glob(_VOLUME_GLOB))
     if not args.include_masks:
-        candidates = [p for p in candidates if _MASK_SUFFIX not in p.name]
+        candidates = [
+            p for p in candidates
+            if not any(s in p.name for s in _MASK_SUFFIXES)
+        ]
 
     print(f"Found {len(candidates)} candidate zarr files under {root}")
     if not candidates:
