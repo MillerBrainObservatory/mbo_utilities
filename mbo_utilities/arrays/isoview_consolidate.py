@@ -1,14 +1,13 @@
-"""Consolidate an isoview corrected output tree into a single OME-Zarr group.
+"""Consolidate an isoview output tree (corrected or fused) into one OME-Zarr group.
 
 Reads via :class:`mbo_utilities.arrays.isoview.IsoviewArray`, walks the
-companion files (segmentation masks, axis-mask projections, min-intensity
-NPZs, sibling projection trees), and writes one Zarr v3 group following
-the OME-NGFF 0.5 spec for the spec-covered pieces (multiscales, omero,
-labels) plus a custom ``/isoview/`` subgroup for the items the spec has
-no first-class home for (intensity projections, min_intensity, parsed
-XML provenance).
+companion files (3D masks, 2D coordinate / depth masks, projection
+TIFFs, backgrounds, raw XMLs, min-intensity NPZs), and writes one
+Zarr v3 group following the OME-NGFF 0.5 spec for the spec-covered
+pieces (multiscales, omero, labels) plus a custom ``/isoview/``
+subgroup for the items the spec has no first-class home for.
 
-Output structure::
+Output structure (both kinds share most of this)::
 
     <out>.zarr/
     ├── zarr.json                            ome.{version, multiscales, omero}
@@ -16,14 +15,26 @@ Output structure::
     ├── labels/
     │   ├── zarr.json                        ome.labels = ["segmentation"]
     │   └── segmentation/                    parent-mirroring pyramid, uint8
+    │                                        corrected: per-camera mask
+    │                                        fused:     combined mask (cam0 ∪ cam1)
     └── isoview/                             custom namespace
-        ├── projections/{corrected,raw}/xy/  (T,C,Y,X) uint16, own pyramid
-        ├── aux/{xy_mask,xz_mask}/0/         (T,C,d0,d1) uint16, source-faithful
+        ├── projections/<kind>/{xy,xz,yz}/   (T,C,d0,d1) uint16, own pyramid
+        │                                    computed from /0/ volume in
+        │                                    one read per (t,c)
+        ├── projections/raw/xy/              corrected only — disk-read from
+        │                                    <root>.raw.projections/ (xy only)
+        ├── aux/...                          source-faithful 2D auxiliaries:
+        │                                    corrected: xy_mask, xz_mask
+        │                                    fused:     fusion_mask,
+        │                                               mask2D_cam{0,1},
+        │                                               transformedMask2D_cam1
         ├── backgrounds/0/                   (C,Y,X) uncompressed, pixel-exact
-        ├── min_intensity/0/                 (T,C,2) float32
+        ├── min_intensity/0/                 corrected only — (T,C,2) float32
         └── provenance/
             ├── attrs                        common + per_camera + isoview_config
             └── xml_raw/<stem>/              1D uint8, verbatim XML bytes
+
+Public entry: :func:`consolidate_isoview` (kind dispatch).
 """
 
 from __future__ import annotations
@@ -133,6 +144,24 @@ _MIN_INT_RE = re.compile(
     r"^SPM(\d+)_TM(\d+)_CM(\d+)\.minIntensity\.npz$"
 )
 
+# Fused tree (under MultiFused_<method>/SPM##/TM######/) — pair-level
+# files use the CM##_CM##_VW## naming; single-camera-in-pair files
+# (mask2D, transformedMask2D) drop one CM and stay keyed by the
+# remaining (cam, vw).
+_FUSED_MASK_RE = re.compile(
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_VW(\d+)\.mask\."
+    r"(?:ome\.tif|tif|tiff|zarr|klb)$"
+)
+_FUSION_MASK_RE = re.compile(
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_VW(\d+)\.fusionMask\.(?:tif|tiff)$"
+)
+_MASK2D_RE = re.compile(
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_VW(\d+)\.mask2D\.(?:tif|tiff)$"
+)
+_TRANSFORMED_MASK2D_RE = re.compile(
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_VW(\d+)\.transformedMask2D\.(?:tif|tiff)$"
+)
+
 
 def _scan_corrected_companions(spm_dir: Path) -> dict[str, dict[int, dict[int, Path]]]:
     """Locate companion files under ``SPM##/TM######/``.
@@ -163,6 +192,100 @@ def _scan_corrected_companions(spm_dir: Path) -> dict[str, dict[int, dict[int, P
                     out[kind].setdefault(ti, {})[cam] = f
                     break
 
+    return out
+
+
+def _scan_fused_companions(method_dir: Path) -> dict[str, dict[int, dict[tuple, Path]]]:
+    """Locate companion files under one ``MultiFused_<method>/SPM##/TM######/``.
+
+    Returns the four fused-specific companion kinds, keyed differently
+    based on file scope:
+
+    Pair-level keys = ``(cam0, cam1, vw)`` — match the (cam0, cam1, vw)
+    tuples returned by :func:`IsoviewArray(kind="fused").views`:
+      - ``"mask"``         — 3D combined ``mask.zarr``
+      - ``"fusion_mask"``  — 2D blending boundary ``fusionMask.tif``
+
+    Single-cam-in-pair keys = ``(cam, vw)`` — one file per source
+    camera within each pair:
+      - ``"mask2D"``               — 2D depth-encoded slice mask
+      - ``"transformedMask2D"``    — 2D slice mask AFTER camera transform
+                                     (only the ``cam1`` of each pair)
+
+    The fused tree lives at ``<scan_root>/SPM##/TM######/``, one level
+    deeper than the corrected tree's ``SPM##/TM######/`` layout.
+    """
+    if not method_dir.is_dir():
+        return {}
+
+    # locate SPM## subdir + walk its TM folders
+    spm_dirs = sorted(
+        d for d in method_dir.iterdir()
+        if d.is_dir() and re.match(r"^SPM\d+$", d.name)
+    )
+    if not spm_dirs:
+        return {}
+    tm_dirs = _find_tm_folders(spm_dirs[0])
+    if not tm_dirs:
+        return {}
+
+    out: dict[str, dict[int, dict[tuple, Path]]] = {
+        "mask": {},
+        "fusion_mask": {},
+        "mask2D": {},
+        "transformedMask2D": {},
+    }
+
+    for ti, tm in enumerate(tm_dirs):
+        for f in tm.iterdir():
+            name = f.name
+            m = _FUSED_MASK_RE.match(name)
+            if m:
+                key = (int(m.group(3)), int(m.group(4)), int(m.group(5)))
+                out["mask"].setdefault(ti, {})[key] = f
+                continue
+            m = _FUSION_MASK_RE.match(name)
+            if m:
+                key = (int(m.group(3)), int(m.group(4)), int(m.group(5)))
+                out["fusion_mask"].setdefault(ti, {})[key] = f
+                continue
+            m = _MASK2D_RE.match(name)
+            if m:
+                key = (int(m.group(3)), int(m.group(4)))
+                out["mask2D"].setdefault(ti, {})[key] = f
+                continue
+            m = _TRANSFORMED_MASK2D_RE.match(name)
+            if m:
+                key = (int(m.group(3)), int(m.group(4)))
+                out["transformedMask2D"].setdefault(ti, {})[key] = f
+
+    return out
+
+
+def _remap_single_cam_to_pair(
+    per_cam_vw: dict[int, dict[tuple[int, int], Path]],
+    pair_view_keys: list[tuple[int, int, int]],
+    cam_position: int,  # 0 → cam0 of each pair; 1 → cam1
+) -> dict[int, dict[tuple, Path]]:
+    """Pivot a (cam, vw)-keyed scanner to match pair-tuple view_keys.
+
+    The mask2D / transformedMask2D scanners key by (cam, vw) — one
+    entry per source camera. For consolidation we want them indexed
+    by the pair (cam0, cam1, vw) so they line up with the channel
+    axis of the consolidated array. This walks each pair, looks up
+    the right single-cam entry, and rebuilds the scanner shape.
+    """
+    out: dict[int, dict[tuple, Path]] = {}
+    for ti, by_cam in per_cam_vw.items():
+        per_pair: dict[tuple, Path] = {}
+        for pair in pair_view_keys:
+            cam0, cam1, vw = pair
+            cam = cam0 if cam_position == 0 else cam1
+            p = by_cam.get((cam, vw))
+            if p is not None:
+                per_pair[pair] = p
+        if per_pair:
+            out[ti] = per_pair
     return out
 
 
@@ -597,9 +720,9 @@ def _write_aux_2d_per_tc(
 
 # === /isoview/projections (intensity max-projections) ===
 
-def _write_intensity_projections(
+def _write_disk_xy_projections(
     iso_group,
-    name: str,  # "corrected" | "raw"
+    name: str,  # typically "raw"
     projections: dict | None,
     iso_arr: IsoviewArray,
     tm_int_by_index: dict[int, int],
@@ -611,10 +734,18 @@ def _write_intensity_projections(
     compression_level: int,
     progress_callback: ProgressCallback | None,
 ) -> None:
-    """Write /isoview/projections/{name}/xy/ from a flat-projections scan.
+    """Read pre-computed XY projection TIFFs from a flat-projections dir.
 
-    Shape: ``(T, C, Y, X)``. Own multiscale pyramid (Y/X only). Reads
-    each TIFF lazily; first TIFF probes dtype + shape.
+    Used only for the corrected pipeline's *raw* projections (the only
+    case where projections aren't derivable from the consolidated
+    volume — they're max-projections of the raw acquisition stacks,
+    not the corrected output). For projections of the corrected /
+    fused volume, use :func:`_write_computed_projections` instead so
+    the projections derive from the canonical /0/ image data and we
+    get xy/xz/yz in one pass.
+
+    Output: ``/isoview/projections/<name>/xy/{0..N}/`` shape
+    ``(T, C, Y, X)``. Own Y/X-only pyramid.
     """
     if not projections or not projections.get("files"):
         return
@@ -697,6 +828,149 @@ def _write_intensity_projections(
             _multiscales_block(f"projections/{name}/xy", _AXES_4D, paths, scales)
         ],
     }
+
+
+def _write_computed_projections(
+    iso_group,
+    name: str,                                      # "corrected" | "fused"
+    iso_arr: IsoviewArray,
+    image_mags: list[tuple[int, int, int]],
+    dx: float,
+    dy: float,
+    dz: float,
+    dt_s: float,
+    compressor: str,
+    compression_level: int,
+    progress_callback: ProgressCallback | None,
+) -> None:
+    """Compute xy/xz/yz max-projections from the volume and write three subgroups.
+
+    Used by both corrected and fused consolidators (the user wanted the
+    same function for both, with all three projection axes per kind).
+    Each (t, c) volume is read **once** from the lazy IsoviewArray and
+    reduced along all three axes; the three writes share that read.
+
+    Pyramid factors come from the image's anisotropic mags, projected to
+    the relevant 2D pair per axis:
+      - xy reduces over Z → axes are (Y, X) → uses ``(my, mx)``
+      - xz reduces over Y → axes are (Z, X) → uses ``(mz, mx)``
+      - yz reduces over X → axes are (Z, Y) → uses ``(mz, my)``
+
+    So Z (which the anisotropic algorithm never downsamples for IsoView
+    data) stays at the source size at every level of xz/yz — the
+    pyramid only shrinks the surviving spatial axis. The xy pyramid
+    halves both Y and X each level.
+
+    Output: ``/isoview/projections/<name>/{xy,xz,yz}/{0..N}/``, each its
+    own ``(T, C, d0, d1)`` multiscale group.
+    """
+    nt, nc, nz, ny, nx = iso_arr.shape
+    dtype = iso_arr.dtype
+
+    parent = (
+        iso_group["projections"] if "projections" in iso_group
+        else iso_group.create_group("projections", overwrite=False)
+    )
+    sub = parent.create_group(name, overwrite=True)
+
+    # per-axis layout: source shape, which volume axis to max-reduce,
+    # which two image mag entries become the per-level 2D factor,
+    # and how to build the OME scale list for each level.
+    axis_specs: dict[str, dict] = {
+        "xy": {
+            "shape": (ny, nx),
+            "reduce": 0,                                  # max over Z
+            "mags": [(my, mx) for (_mz, my, mx) in image_mags],
+            "scale_for": lambda m: _scale_4d(dt_s, dy, dx, m),
+        },
+        "xz": {
+            "shape": (nz, nx),
+            "reduce": 1,                                  # max over Y
+            "mags": [(mz, mx) for (mz, _my, mx) in image_mags],
+            "scale_for": lambda m: _scale_4d(dt_s, dz, dx, m),
+        },
+        "yz": {
+            "shape": (nz, ny),
+            "reduce": 2,                                  # max over X
+            "mags": [(mz, my) for (mz, my, _mx) in image_mags],
+            "scale_for": lambda m: _scale_4d(dt_s, dz, dy, m),
+        },
+    }
+
+    # Create all level arrays up front so the level-0 loop can write
+    # to each axis in one pass without re-iterating the volume.
+    axis_state: dict[str, dict] = {}
+    for axis, spec in axis_specs.items():
+        axis_group = sub.create_group(axis, overwrite=True)
+        d0_src, d1_src = spec["shape"]
+        arrays: list = []
+        paths: list[str] = []
+        scales: list[list[float]] = []
+        for level_idx, mag in enumerate(spec["mags"]):
+            m0, m1 = mag
+            out_d0 = max(1, d0_src // m0)
+            out_d1 = max(1, d1_src // m1)
+            shape4d = (nt, nc, out_d0, out_d1)
+            chunk4d = (1, 1, out_d0, out_d1)
+            arr = _create_sharded_array(
+                axis_group, str(level_idx), shape4d, dtype,
+                chunk4d, chunk4d, compressor, compression_level,
+            )
+            arrays.append(arr)
+            paths.append(str(level_idx))
+            scales.append(spec["scale_for"](mag))
+        axis_group.attrs["ome"] = {
+            "version": "0.5",
+            "multiscales": [
+                _multiscales_block(
+                    f"projections/{name}/{axis}", _AXES_4D, paths, scales
+                )
+            ],
+        }
+        axis_state[axis] = {
+            "arrays": arrays,
+            "mags": spec["mags"],
+            "reduce": spec["reduce"],
+        }
+
+    # Level 0: one volume read per (t, c), three projection writes.
+    for ti in range(nt):
+        for ci in range(nc):
+            vol = np.asarray(iso_arr[ti, ci])         # (Z, Y, X)
+            for axis, state in axis_state.items():
+                proj = vol.max(axis=state["reduce"])  # 2D
+                state["arrays"][0][ti, ci, :, :] = proj.astype(dtype, copy=False)
+            if progress_callback:
+                progress_callback(
+                    f"proj_{name}_l0", ti * nc + ci + 1, nt * nc
+                )
+
+    # Higher levels per axis: gaussian downsample from the prior level.
+    for axis, state in axis_state.items():
+        arrays = state["arrays"]
+        mags = state["mags"]
+        for level_idx in range(1, len(arrays)):
+            arr = arrays[level_idx]
+            prev_arr = arrays[level_idx - 1]
+            prev_mag = mags[level_idx - 1]
+            mag = mags[level_idx]
+            factor = (mag[0] // prev_mag[0], mag[1] // prev_mag[1])
+            for ti in range(nt):
+                for ci in range(nc):
+                    prev_2d = prev_arr[ti, ci, :, :]
+                    if all(f == 1 for f in factor):
+                        out = prev_2d
+                    else:
+                        out = downsample_block(
+                            prev_2d, factor, method="gaussian"
+                        )
+                        out = out[: arr.shape[2], : arr.shape[3]]
+                    arr[ti, ci, :, :] = out
+                    if progress_callback:
+                        progress_callback(
+                            f"proj_{name}_{axis}_l{level_idx}",
+                            ti * nc + ci + 1, nt * nc,
+                        )
 
 
 # === /isoview/min_intensity ===
@@ -888,54 +1162,18 @@ def _write_raw_xml(iso_group, raw_root: Path | None) -> None:
 
 # === Public entry point ===
 
-def consolidate_isoview_corrected(
-    src: str | Path,
+def _setup_consolidation(
+    iso: IsoviewArray,
     out: str | Path,
     *,
-    overwrite: bool = False,
-    pyramid: bool = True,
-    pyramid_max_layers: int = 4,
-    compressor: str = "zstd",
-    compression_level: int = 3,
-    progress_callback: ProgressCallback | None = None,
-) -> Path:
-    """Consolidate a corrected isoview tree into one OME-Zarr group.
-
-    Parameters
-    ----------
-    src
-        Any path inside the corrected tree. Resolved via
-        :func:`_resolve_corrected_spm_dir` to the ``SPM##`` directory.
-    out
-        Output ``.zarr`` path. Created (parents OK) or overwritten when
-        ``overwrite=True``.
-    pyramid
-        Generate the OME-NGFF resolution pyramid. Levels are computed
-        anisotropy-aware via the webknossos algorithm — for typical
-        isoview corrected data (Z much coarser than Y/X) this reduces
-        to "downsample Y/X by 2 per level until <64 voxels".
-    pyramid_max_layers
-        Cap on additional levels beyond ``/0``. Stops earlier when Y or
-        X would fall below 64 voxels.
-    compressor, compression_level
-        Codec config for inner chunks. ``"zstd"`` with level 3 matches
-        the existing rechunked corrected tree.
-    progress_callback
-        Optional ``(stage, current, total) -> None`` hook fired once
-        per ``(t, c)`` slab written.
-
-    Returns
-    -------
-    Path
-        Path to the written ``.zarr`` group.
-    """
-    src_path = Path(src)
-    spm_dir = _resolve_corrected_spm_dir(src_path)
-    if spm_dir is None:
-        raise ValueError(f"not an isoview corrected tree: {src_path}")
-
-    iso = IsoviewArray(spm_dir, kind="corrected")
-    nt, nc, nz, ny, nx = iso.shape
+    overwrite: bool,
+    pyramid: bool,
+    pyramid_max_layers: int,
+):
+    """Shared boot for any kind: open the output group, compute mags,
+    pull physical scales from metadata. Returns ``(root, mags, dx, dy,
+    dz, dt_s, out_path)`` used by both per-kind consolidators."""
+    _nt, _nc, nz, ny, nx = iso.shape
     md = iso.metadata
     dx = float(md.get("dx", 1.0))
     dy = float(md.get("dy", 1.0))
@@ -950,21 +1188,47 @@ def consolidate_isoview_corrected(
     else:
         mags = [(1, 1, 1)]
 
-    # Y/X-only mag list for the 4D intensity-projection groups
-    mags_yx = []
-    seen_yx: set[tuple[int, int]] = set()
-    for mz, my, mx in mags:
-        if (my, mx) not in seen_yx:
-            seen_yx.add((my, mx))
-            mags_yx.append((my, mx))
-
     out_path = Path(out)
     if out_path.suffix.lower() != ".zarr":
         out_path = out_path.with_suffix(".zarr")
     root = _open_output_group(out_path, overwrite)
+    return root, mags, dx, dy, dz, dt_s, out_path
+
+
+def _consolidate_corrected(
+    src_path: Path,
+    out: str | Path,
+    *,
+    overwrite: bool,
+    pyramid: bool,
+    pyramid_max_layers: int,
+    compressor: str,
+    compression_level: int,
+    progress_callback: ProgressCallback | None,
+) -> Path:
+    """Internal: corrected-pipeline consolidator.
+
+    Uses :func:`_write_computed_projections` for the corrected
+    projections (xy/xz/yz all derived from the volume in one read per
+    (t,c)). The on-disk ``<root>.corrected.projections/`` flat dir is
+    ignored — the spec-correct equivalent comes out of the volume, and
+    the disk files would just duplicate it. The raw projections
+    (``<root>.raw.projections/``) ARE pulled from disk because they
+    derive from raw data the consolidated zarr doesn't carry.
+    """
+    spm_dir = _resolve_corrected_spm_dir(src_path)
+    if spm_dir is None:
+        raise ValueError(f"not an isoview corrected tree: {src_path}")
+
+    iso = IsoviewArray(spm_dir, kind="corrected")
+    nt, nc, nz, ny, nx = iso.shape
+    root, mags, dx, dy, dz, dt_s, out_path = _setup_consolidation(
+        iso, out, overwrite=overwrite,
+        pyramid=pyramid, pyramid_max_layers=pyramid_max_layers,
+    )
 
     logger.info(
-        "consolidate: src=%s out=%s shape=%s pyramid=%d levels=%d",
+        "consolidate corrected: src=%s out=%s shape=%s pyramid=%d levels=%d",
         spm_dir, out_path, iso.shape, int(pyramid), len(mags),
     )
 
@@ -974,10 +1238,9 @@ def consolidate_isoview_corrected(
         compressor, compression_level, progress_callback,
     )
 
-    # labels (spec-compliant integer-label arrays only — the 3D
-    # segmentation mask). The IsoView "xyMask"/"xzMask" coordinate
-    # maps don't fit the OME labels spec (axes don't map cleanly to
-    # "drop Z" or "drop X"), so they go under /isoview/aux/ instead.
+    # labels — only the OME-spec-compliant 3D segmentation goes here.
+    # The IsoView xyMask / xzMask coordinate maps live in /isoview/aux/
+    # because their axes don't map to the OME labels projection schema.
     companions = _scan_corrected_companions(spm_dir)
     labels = root.create_group("labels", overwrite=True)
     label_names: list[str] = []
@@ -990,8 +1253,6 @@ def consolidate_isoview_corrected(
 
     # /isoview custom namespace
     iso_group = root.create_group("isoview", overwrite=True)
-
-    # 2D coordinate masks (xyMask, xzMask) live here, not under /labels/
     _write_aux_2d_per_tc(
         iso_group, "xy_mask", companions.get("xy_mask", {}), iso,
         compressor, compression_level, progress_callback,
@@ -1001,36 +1262,42 @@ def consolidate_isoview_corrected(
         compressor, compression_level, progress_callback,
     )
 
-    # intensity max-projections (corrected + raw, when sibling dirs exist)
+    # corrected xy/xz/yz: one volume read per (t,c), three projections.
+    _write_computed_projections(
+        iso_group, "corrected", iso, mags,
+        dx, dy, dz, dt_s, compressor, compression_level, progress_callback,
+    )
+
+    # raw projections: come from a flat sibling dir (not from the
+    # consolidated volume — they're max-Z of the *raw* stacks).
     raw_root = _sibling_raw_root(iso)
-    corr_root = spm_dir.parent  # the .corrected/ dir
-    corr_proj_dir = corr_root.parent / f"{corr_root.name}.projections"
     raw_proj_dir = (
         raw_root.parent / f"{raw_root.name}.raw.projections"
         if raw_root is not None else None
     )
-    corr_proj = _scan_flat_projections(corr_proj_dir) if corr_proj_dir.is_dir() else None
     raw_proj = (
         _scan_flat_projections(raw_proj_dir)
         if raw_proj_dir is not None and raw_proj_dir.is_dir()
         else None
     )
-    # Flat projection scans key files by the raw TM integer parsed from
-    # the filename (e.g. TM000005 → 5). IsoviewArray's _timepoints is
-    # the index list 0..nt-1, not the raw TM number, so we build an
-    # explicit ti → raw-tm-int map from the SPM dir's TM folders.
-    tm_dirs = _find_tm_folders(spm_dir)
-    tm_int_by_index = {ti: _extract_timepoint(d.name) for ti, d in enumerate(tm_dirs)}
-    _write_intensity_projections(
-        iso_group, "corrected", corr_proj, iso, tm_int_by_index,
-        mags_yx, dx, dy, dt_s, compressor, compression_level, progress_callback,
-    )
-    _write_intensity_projections(
-        iso_group, "raw", raw_proj, iso, tm_int_by_index,
-        mags_yx, dx, dy, dt_s, compressor, compression_level, progress_callback,
-    )
+    if raw_proj is not None:
+        tm_dirs = _find_tm_folders(spm_dir)
+        tm_int_by_index = {
+            ti: _extract_timepoint(d.name) for ti, d in enumerate(tm_dirs)
+        }
+        # Y/X-only mag list for the 4D projection groups
+        mags_yx: list[tuple[int, int]] = []
+        seen_yx: set[tuple[int, int]] = set()
+        for _mz, my, mx in mags:
+            if (my, mx) not in seen_yx:
+                seen_yx.add((my, mx))
+                mags_yx.append((my, mx))
+        _write_disk_xy_projections(
+            iso_group, "raw", raw_proj, iso, tm_int_by_index,
+            mags_yx, dx, dy, dt_s, compressor, compression_level,
+            progress_callback,
+        )
 
-    # min intensity + provenance + backgrounds + raw XML
     _write_min_intensity(
         iso_group, companions.get("min_intensity", {}), iso,
         compressor, compression_level,
@@ -1039,15 +1306,14 @@ def consolidate_isoview_corrected(
     _write_backgrounds(iso_group, raw_root)
     _write_raw_xml(iso_group, raw_root)
 
-    # root-level OME multiscales + omero + custom isoview manifest
     root.attrs["ome"] = {
         "version": "0.5",
         "multiscales": [
-            _multiscales_block(
-                spm_dir.name, _AXES_5D, img_paths, img_scales
-            )
+            _multiscales_block(spm_dir.name, _AXES_5D, img_paths, img_scales)
         ],
-        "omero": _omero_block(iso.channel_names, iso._camera_metadata, default_z=nz // 2),
+        "omero": _omero_block(
+            iso.channel_names, iso._camera_metadata, default_z=nz // 2
+        ),
     }
     root.attrs["isoview"] = {
         "schema_version": "0.1",
@@ -1055,6 +1321,202 @@ def consolidate_isoview_corrected(
         "source": str(spm_dir),
         "shape": list(iso.shape),
     }
-
     logger.info("consolidate: wrote %s", out_path)
     return out_path
+
+
+def _consolidate_fused(
+    src_path: Path,
+    out: str | Path,
+    *,
+    overwrite: bool,
+    pyramid: bool,
+    pyramid_max_layers: int,
+    compressor: str,
+    compression_level: int,
+    progress_callback: ProgressCallback | None,
+) -> Path:
+    """Internal: fused-pipeline consolidator.
+
+    Layout differences vs corrected (see ``docs/isoview.md`` for the
+    full inventory):
+      - Channel axis indexes fused view PAIRS (``VW00_fused``,
+        ``VW90_fused``), not single cameras.
+      - Three intensity projections (xy/xz/yz) instead of just xy —
+        produced by :func:`_write_computed_projections` from the
+        consolidated volume.
+      - Combined 3D mask (``.mask.zarr`` = ``cam0_mask ∪ cam1_transformed_mask``)
+        goes into ``/labels/segmentation/``.
+      - Four extra 2D aux groups: ``fusion_mask``, ``mask2D_cam0``,
+        ``mask2D_cam1``, ``transformedMask2D_cam1``.
+      - No ``min_intensity`` (correction-stage artifact, not produced
+        by fusion).
+      - No ``<root>.raw.projections/`` (fusion's input is corrected,
+        not raw).
+    """
+    iso = IsoviewArray(src_path, kind="fused")
+    method_dir = iso.scan_root  # MultiFused_<method>/
+    nt, nc, nz, ny, nx = iso.shape
+    root, mags, dx, dy, dz, dt_s, out_path = _setup_consolidation(
+        iso, out, overwrite=overwrite,
+        pyramid=pyramid, pyramid_max_layers=pyramid_max_layers,
+    )
+
+    logger.info(
+        "consolidate fused: src=%s out=%s shape=%s pyramid=%d levels=%d",
+        method_dir, out_path, iso.shape, int(pyramid), len(mags),
+    )
+
+    img_paths, img_scales = _write_image_pyramid(
+        root, iso, mags, dx, dy, dz, dt_s,
+        compressor, compression_level, progress_callback,
+    )
+
+    # Combined 3D fusion mask → /labels/segmentation/.
+    # OME-spec-correct: ``mask`` is a binary integer-label array
+    # (uint8 after _read_companion + ``.astype``), same (T,C,Z,Y,X)
+    # shape as the parent image, pyramid mirrors the image.
+    companions = _scan_fused_companions(method_dir)
+    labels = root.create_group("labels", overwrite=True)
+    label_names: list[str] = []
+    if _write_segmentation_pyramid(
+        labels, companions.get("mask", {}), iso, mags,
+        dx, dy, dz, dt_s, compressor, compression_level, progress_callback,
+    ) is not None:
+        label_names.append("segmentation")
+    labels.attrs["ome"] = {"version": "0.5", "labels": label_names}
+
+    # /isoview custom namespace
+    iso_group = root.create_group("isoview", overwrite=True)
+
+    # 2D auxiliaries — keyed by pair (fusion_mask) or by single
+    # camera within the pair (mask2D, transformedMask2D). The
+    # single-cam ones get pivoted to per-pair indexing so the
+    # shared aux writer can use them.
+    pair_view_keys = list(iso.views)
+    _write_aux_2d_per_tc(
+        iso_group, "fusion_mask", companions.get("fusion_mask", {}), iso,
+        compressor, compression_level, progress_callback,
+    )
+    _write_aux_2d_per_tc(
+        iso_group, "mask2D_cam0",
+        _remap_single_cam_to_pair(
+            companions.get("mask2D", {}), pair_view_keys, cam_position=0,
+        ),
+        iso, compressor, compression_level, progress_callback,
+    )
+    _write_aux_2d_per_tc(
+        iso_group, "mask2D_cam1",
+        _remap_single_cam_to_pair(
+            companions.get("mask2D", {}), pair_view_keys, cam_position=1,
+        ),
+        iso, compressor, compression_level, progress_callback,
+    )
+    _write_aux_2d_per_tc(
+        iso_group, "transformedMask2D_cam1",
+        _remap_single_cam_to_pair(
+            companions.get("transformedMask2D", {}),
+            pair_view_keys, cam_position=1,
+        ),
+        iso, compressor, compression_level, progress_callback,
+    )
+
+    # xy/xz/yz projections from the consolidated volume
+    _write_computed_projections(
+        iso_group, "fused", iso, mags,
+        dx, dy, dz, dt_s, compressor, compression_level, progress_callback,
+    )
+
+    # provenance + backgrounds + raw XML (same as corrected)
+    _write_provenance(iso_group, iso)
+    raw_root = _sibling_raw_root(iso)
+    _write_backgrounds(iso_group, raw_root)
+    _write_raw_xml(iso_group, raw_root)
+
+    root.attrs["ome"] = {
+        "version": "0.5",
+        "multiscales": [
+            _multiscales_block(method_dir.name, _AXES_5D, img_paths, img_scales)
+        ],
+        "omero": _omero_block(
+            iso.channel_names, iso._camera_metadata, default_z=nz // 2
+        ),
+    }
+    root.attrs["isoview"] = {
+        "schema_version": "0.1",
+        "kind": "fused",
+        "source": str(method_dir),
+        "shape": list(iso.shape),
+    }
+    logger.info("consolidate: wrote %s", out_path)
+    return out_path
+
+
+def consolidate_isoview(
+    src: str | Path,
+    out: str | Path,
+    *,
+    kind: str | None = None,
+    overwrite: bool = False,
+    pyramid: bool = True,
+    pyramid_max_layers: int = 4,
+    compressor: str = "zstd",
+    compression_level: int = 3,
+    progress_callback: ProgressCallback | None = None,
+) -> Path:
+    """Consolidate one isoview output tree into one OME-Zarr group.
+
+    Parameters
+    ----------
+    src
+        Any path inside the source tree. For ``kind="corrected"`` this
+        is resolved to the ``SPM##`` directory under ``.corrected/``;
+        for ``kind="fused"`` it's resolved to the
+        ``Results/MultiFused_<method>/`` directory. Auto-detected when
+        ``kind=None`` via :func:`detect_isoview_kind`.
+    out
+        Output ``.zarr`` path. Created (parents OK) or overwritten when
+        ``overwrite=True``.
+    kind
+        ``"corrected"`` | ``"fused"`` | ``None``. ``None`` auto-detects.
+    pyramid, pyramid_max_layers
+        OME-NGFF resolution pyramid config. Levels are computed
+        anisotropy-aware via the webknossos algorithm (in practice:
+        downsample Y/X by 2 per level until <64 voxels).
+    compressor, compression_level
+        Codec for inner chunks. Matches the existing rechunked corrected
+        tree at ``zstd / level 3``.
+    progress_callback
+        Optional ``(stage, current, total) -> None`` hook.
+
+    Returns
+    -------
+    Path
+        Path to the written ``.zarr`` group.
+    """
+    src_path = Path(src)
+    if kind is None:
+        from mbo_utilities.arrays.isoview import detect_isoview_kind
+        kind = detect_isoview_kind(src_path)
+        if kind is None:
+            raise ValueError(
+                f"cannot auto-detect isoview kind at {src_path}; pass kind=..."
+            )
+
+    if kind == "corrected":
+        return _consolidate_corrected(
+            src_path, out, overwrite=overwrite,
+            pyramid=pyramid, pyramid_max_layers=pyramid_max_layers,
+            compressor=compressor, compression_level=compression_level,
+            progress_callback=progress_callback,
+        )
+    if kind == "fused":
+        return _consolidate_fused(
+            src_path, out, overwrite=overwrite,
+            pyramid=pyramid, pyramid_max_layers=pyramid_max_layers,
+            compressor=compressor, compression_level=compression_level,
+            progress_callback=progress_callback,
+        )
+    raise ValueError(
+        f"kind must be 'corrected' or 'fused'; got {kind!r}"
+    )
