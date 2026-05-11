@@ -236,6 +236,7 @@ def draw_keybinds_popup(parent: Any):
             ("", ""),
             ("View", None),
             ("m", "Toggle metadata viewer"),
+            ("Shift + L", "Focus metadata search (when viewer open)"),
             ("p / Enter", "Toggle side panel"),
             ("Space", "Play / pause"),
             ("v", "Reset vmin/vmax"),

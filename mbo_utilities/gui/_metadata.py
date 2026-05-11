@@ -135,9 +135,10 @@ def _render_item(name, val, prefix="", depth=0, filter_text="", name_color=None,
 
     if isinstance(val, Mapping):
         children = [
-            (k, v)
+            (str(k), v)
             for k, v in val.items()
-            if not (k.startswith("__") and k.endswith("__")) and not callable(v)
+            if not (str(k).startswith("__") and str(k).endswith("__"))
+            and not callable(v)
         ]
         if filter_text:
             children = [(k, v) for k, v in children if _matches_filter_recursive(k, v, filter_text)]
@@ -287,14 +288,15 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                 imgui.pop_text_wrap_pos()
                 imgui.end_tooltip()
 
-            # Keyboard shortcuts
+            # Keyboard shortcuts. Shift+L opens (or re-focuses) the search
+            # bar — matches the convention in the keybinds popup. We
+            # always set focus_requested so a second Shift+L while the
+            # field is already open puts the cursor back in it instead
+            # of doing nothing. Esc closes the search and clears it.
             io = imgui.get_io()
-            if io.key_ctrl and imgui.is_key_pressed(imgui.Key.l):
-                _metadata_search_active = not _metadata_search_active
-                if _metadata_search_active:
-                    _metadata_search_focus_requested = True
-                else:
-                    _metadata_search_filter = ""
+            if io.key_shift and imgui.is_key_pressed(imgui.Key.l):
+                _metadata_search_active = True
+                _metadata_search_focus_requested = True
             if _metadata_search_active and imgui.is_key_pressed(imgui.Key.escape):
                 _metadata_search_active = False
                 _metadata_search_filter = ""
@@ -311,7 +313,7 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                     _metadata_search_filter = ""
             imgui.pop_style_color()
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Search metadata (Ctrl+L)")
+                imgui.set_tooltip("Search metadata (Shift+L)")
 
             # Search input field
             if _metadata_search_active:
