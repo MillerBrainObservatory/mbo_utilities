@@ -29,15 +29,20 @@ def _active_z(parent: Any) -> int | None:
     """Return the 1-based z-index currently displayed by the image widget,
     or None when the dataset has no z slider.
 
-    Resolves Z by case-insensitive match against ``_slider_dim_names``
-    so 5D TCZYX layouts (whether dims are upper or lowercase) all report
-    correctly. fastplotlib's ``Indices`` is case-sensitive, so we must
-    index with the canonical original-case name.
+    Resolves Z by case-insensitive match against the NDWidget's
+    ``ReferenceIndex`` dim names so layouts with either case all report
+    correctly. The ``ReferenceIndex`` is case-sensitive, so we index with
+    the canonical original-case dim name.
     """
     iw = getattr(parent, "image_widget", None)
-    if iw is None or getattr(iw, "n_sliders", 0) < 1:
+    if iw is None:
         return None
-    names = tuple(getattr(iw, "_slider_dim_names", None) or ())
+    names = tuple(getattr(parent, "_slider_dim_names", None) or ())
+    if not names:
+        try:
+            names = tuple(iw.indices.ref_ranges.keys())
+        except AttributeError:
+            return None
     z_name = next((n for n in names if n.lower() == "z"), None)
     if z_name is None:
         return None
@@ -458,14 +463,13 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
 
 def compute_zstats(parent: Any):
     """Compute z-stats for all graphics/arrays."""
-    if not parent.image_widget or not parent.image_widget.data:
+    if not parent.image_widget or not parent.image_widget.ndgraphics:
         return
 
-    # Compute z-stats for each graphic (array)
-    for idx, arr in enumerate(parent.image_widget.data, start=1):
+    for idx, nd in enumerate(parent.image_widget.ndgraphics, start=1):
         threading.Thread(
             target=compute_zstats_single_array,
-            args=(parent, idx, arr),
+            args=(parent, idx, nd.processor.data),
             daemon=True,
         ).start()
 
@@ -508,7 +512,7 @@ def refresh_zstats(parent: Any):
     # array is the channel axis, not Z. Result: nz silently became nc, the
     # zstats slider ran 0..nc-1 and surfaced "z" stats for what were really
     # the first nc planes. Lowercase both sides before the lookup.
-    arr = parent.image_widget.data[0] if parent.image_widget.data else None
+    arr = parent.image_widget.ndgraphics[0].processor.data if parent.image_widget.ndgraphics else None
     dims = getattr(arr, "dims", None) if arr is not None else None
     dims_lower = tuple(d.lower() for d in dims) if dims else None
     if dims_lower is not None and "z" in dims_lower:

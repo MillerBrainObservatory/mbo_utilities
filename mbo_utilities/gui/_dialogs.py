@@ -340,18 +340,17 @@ def load_new_data(parent: Any, path: str):
         if hasattr(parent, "_rebuild_spatial_func"):
             parent._rebuild_spatial_func()
         if hasattr(parent, "image_widget") and parent.image_widget is not None:
-            for proc in parent.image_widget._image_processors:
-                proc.window_funcs = None
-                proc.window_sizes = None
-                proc.window_order = None
+            for nd in parent.image_widget.ndgraphics:
+                nd.processor.window_funcs = None
+                nd.processor.window_order = None
 
-        # iw-array API: use data indexer for replacing data
-        # data[0] = new_array triggers _reset_dimensions() automatically
-        parent.image_widget.data[0] = new_data
+        # NDWidget API: set processor.data directly on the first NDImage
+        parent.image_widget.ndgraphics[0].processor.data = new_data
 
-        # reset indices to start of data using public API
-        if parent.image_widget.n_sliders > 0:
-            parent.image_widget.indices = [0] * parent.image_widget.n_sliders
+        # reset indices to start
+        ref_dims = tuple(parent.image_widget.indices.ref_ranges.keys())
+        if ref_dims:
+            parent.image_widget.indices = {d: 0 for d in ref_dims}
 
         # Update internal state
         parent.fpath = path

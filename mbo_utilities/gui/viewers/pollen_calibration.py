@@ -27,7 +27,7 @@ from mbo_utilities.metadata.scanimage import (
 )
 
 if TYPE_CHECKING:
-    from fastplotlib.widgets import ImageWidget
+    from fastplotlib.widgets import NDWidget
 
 __all__ = ["PollenCalibrationViewer"]
 
@@ -93,7 +93,7 @@ class PollenCalibrationViewer(BaseViewer):
 
     def __init__(
         self,
-        image_widget: ImageWidget,
+        image_widget: NDWidget,
         fpath: str | list[str],
         parent=None,
         **kwargs,
@@ -152,8 +152,12 @@ class PollenCalibrationViewer(BaseViewer):
     def data(self):
         """Access the loaded data arrays."""
         if self.parent is not None:
-            return self.parent.image_widget.data if self.parent.image_widget else None
-        return self.image_widget.data if self.image_widget else None
+            iw = self.parent.image_widget
+        else:
+            iw = self.image_widget
+        if iw is None:
+            return None
+        return [nd.processor.data for nd in iw.ndgraphics]
 
     def get_metadata(self) -> dict:
         """Get metadata, using stored original if in manual mode."""
@@ -513,11 +517,12 @@ class PollenCalibrationViewer(BaseViewer):
 
         # Replace viewer data with max projections
         # Note: This replaces with numpy array - metadata viewer handles this gracefully
-        self.image_widget.data[0] = self._max_projections
+        self.image_widget.ndgraphics[0].processor.data = self._max_projections
 
         # Reset to first channel
-        if self.image_widget.n_sliders > 0:
-            self.image_widget.indices = [0]
+        ref_dims = tuple(self.image_widget.indices.ref_ranges.keys())
+        if ref_dims:
+            self.image_widget.indices = {ref_dims[0]: 0}
 
         # Show first beamlet
         self._show_beamlet(0)
@@ -636,11 +641,12 @@ class PollenCalibrationViewer(BaseViewer):
             self.logger.error(f"Channel {channel} out of range ({nc} channels)")
             return
 
-        # Navigate to this channel using ImageWidget indices
+        # Navigate to this channel using NDWidget indices
         # _max_projections is (C, Y, X) with 1 slider for C
         try:
-            if self.image_widget.n_sliders > 0:
-                self.image_widget.indices = [channel]
+            ref_dims = tuple(self.image_widget.indices.ref_ranges.keys())
+            if ref_dims:
+                self.image_widget.indices = {ref_dims[0]: channel}
 
         except Exception as e:
             self.logger.exception(f"Failed to update display: {e}")
@@ -721,11 +727,12 @@ class PollenCalibrationViewer(BaseViewer):
 
         try:
             # Reload original lazy array
-            self.image_widget.data[0] = arr
+            self.image_widget.ndgraphics[0].processor.data = arr
 
             # Reset indices to start
-            if self.image_widget.n_sliders > 0:
-                self.image_widget.indices = [0] * self.image_widget.n_sliders
+            ref_dims = tuple(self.image_widget.indices.ref_ranges.keys())
+            if ref_dims:
+                self.image_widget.indices = {d: 0 for d in ref_dims}
 
             self.image_widget.figure[0, 0].auto_scale()
             self.logger.info("Restored original data view")

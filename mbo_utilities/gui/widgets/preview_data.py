@@ -147,8 +147,8 @@ class PreviewDataWidget(EdgeWindow):
 
     Parameters
     ----------
-    iw : fastplotlib.ImageWidget
-        The ImageWidget to attach to.
+    iw : fastplotlib.NDWidget
+        The NDWidget to attach to.
     fpath : str | list | None
         Path(s) to the data file(s).
     threading_enabled : bool
@@ -161,7 +161,7 @@ class PreviewDataWidget(EdgeWindow):
 
     def __init__(
         self,
-        iw: fpl.ImageWidget,
+        iw: fpl.NDWidget,
         fpath: str | None | list = None,
         threading_enabled: bool = True,
         size: int | None = None,
@@ -215,13 +215,16 @@ class PreviewDataWidget(EdgeWindow):
 
         # Image widget setup
         self.image_widget = iw
-        self.num_graphics = len(self.image_widget.graphics)
-        self.shape = self.image_widget.data[0].shape
+        self.num_graphics = len(self.image_widget.ndgraphics)
+        self._slider_dim_names = tuple(self.image_widget.indices.ref_ranges.keys())
+        self._cached_window_funcs = None
+        self._cached_window_sizes = None
+        self.shape = self.image_widget.ndgraphics[0].processor.data.shape
 
         # Determine data type (ScanImage or volumetric TIFF).
         # Peel the squeeze wrapper so isinstance sees the real class.
         from mbo_utilities.arrays import TiffArray
-        first_arr = self.image_widget.data[0]
+        first_arr = self.image_widget.ndgraphics[0].processor.data
         underlying = getattr(first_arr, "_arr", first_arr)
         self.is_mbo_scan = (
             isinstance(underlying, ScanImageArray) or
@@ -349,34 +352,25 @@ class PreviewDataWidget(EdgeWindow):
         )
         io.set_ini_filename(str(fd_settings_dir))
 
-        _fonts_dir = Path(imgui_bundle.__file__).parent.joinpath(
-            "assets", "fonts", "Roboto"
-        )
-        sans_serif_font = str(_fonts_dir / "Roboto-Regular.ttf")
-        self._default_imgui_font = io.fonts.add_font_from_file_ttf(
-            sans_serif_font, 14, imgui.ImFontConfig()
-        )
-        # bold variant — used by the pipeline-settings popup to emphasize
-        # "look at these first" parameters listed in _IMPORTANT_FIELDS,
-        # paired with a thin box around the label. fall back to None if the
-        # file is missing (the popup pushes the font only when non-None).
-        bold_path = _fonts_dir / "Roboto-Bold.ttf"
-        if bold_path.is_file():
-            self._bold_font = io.fonts.add_font_from_file_ttf(
-                str(bold_path), 14, imgui.ImFontConfig()
-            )
-        else:
-            self._bold_font = None
-        imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
+        # ImguiFigure already loaded Roboto-Regular + FontAwesome into the
+        # atlas; reuse its handle as the default. Adding more fonts here
+        # after the figure has started rendering invalidates the atlas
+        # and produces tex_id=0 draw commands on first glyph use, which
+        # the wgpu imgui backend treats as a KeyError. Skip the bold font
+        # for now — _stats.py / pipelines.settings handle `_bold_font is
+        # None` by falling back to the default.
+        self._default_imgui_font = self._figure.default_imgui_font
+        self._bold_font = None
 
     def _init_state(self):
         """Initialize widget state."""
         for subplot in self.image_widget.figure:
             subplot.toolbar = False
-        self.image_widget._sliders_ui._loop = True
+        for dim in self.image_widget._sliders_ui._loop:
+            self.image_widget._sliders_ui._loop[dim] = True
 
         # Determine nz and nc (z-planes and channels) using dims property
-        arr = self.image_widget.data[0]
+        arr = self.image_widget.ndgraphics[0].processor.data
         dims = getattr(arr, "dims", None)
         dims_lower = tuple(d.lower() for d in dims) if dims else None
 
@@ -612,7 +606,7 @@ class PreviewDataWidget(EdgeWindow):
     def _init_viewer(self):
         """Initialize the viewer based on data type."""
         from mbo_utilities.gui.viewers import get_viewer_class
-        viewer_cls = get_viewer_class(self.image_widget.data[0])
+        viewer_cls = get_viewer_class(self.image_widget.ndgraphics[0].processor.data)
         self._viewer = viewer_cls(self.image_widget, self.fpath, parent=self)
         self.logger.debug(f"Viewer: {self._viewer.name}")
         self.set_context_info()
@@ -652,7 +646,7 @@ class PreviewDataWidget(EdgeWindow):
     @property
     def processors(self) -> list:
         """Access to underlying NDImageProcessor instances."""
-        return self.image_widget._image_processors
+        return [nd.processor for nd in self.image_widget.ndgraphics]
 
     def _get_data_arrays(self) -> list:
         """Get underlying data arrays from image processors."""
@@ -676,7 +670,7 @@ class PreviewDataWidget(EdgeWindow):
         indices = {}
         if self.image_widget is not None:
             try:
-                names = self.image_widget._slider_dim_names or ()
+                names = self._slider_dim_names or ()
                 for name in names:
                     try:
                         indices[name] = int(self.image_widget.indices[name])
@@ -876,9 +870,8 @@ class PreviewDataWidget(EdgeWindow):
     # === Internal methods ===
 
     def _refresh_image_widget(self):
-        """Trigger a frame refresh on the ImageWidget."""
-        current_indices = list(self.image_widget.indices)
-        self.image_widget.indices = current_indices
+        """Trigger a frame refresh on the NDWidget."""
+        self.image_widget.indices = dict(self.image_widget.indices)
 
     def _set_processor_attr(self, attr: str, value):
         """Set processor attribute without expensive histogram recomputation."""
@@ -891,16 +884,32 @@ class PreviewDataWidget(EdgeWindow):
             proc._compute_histogram = False
 
         try:
-            if attr == "window_funcs":
-                if isinstance(value, tuple):
-                    value = [value] * len(self.processors)
-                self.image_widget.window_funcs = value
-            elif attr == "window_sizes":
-                if isinstance(value, (tuple, list)) and not isinstance(value[0], (tuple, list, type(None))):
-                    value = [value] * len(self.processors)
-                self.image_widget.window_sizes = value
+            if attr in ("window_funcs", "window_sizes"):
+                if attr == "window_funcs":
+                    self._cached_window_funcs = value
+                else:
+                    self._cached_window_sizes = value
+                for proc in self.processors:
+                    ordered = tuple(
+                        d for d in proc.dims if d not in proc.spatial_dims
+                    )
+                    funcs = self._cached_window_funcs or (None,) * len(ordered)
+                    sizes = self._cached_window_sizes or (None,) * len(ordered)
+                    wf = {}
+                    for i, dim in enumerate(ordered):
+                        f = funcs[i] if i < len(funcs) else None
+                        s = sizes[i] if i < len(sizes) else None
+                        if f is not None and s is not None:
+                            wf[dim] = (f, s)
+                    proc.window_funcs = wf if wf else None
             elif attr == "spatial_func":
-                self.image_widget.spatial_func = value
+                if callable(value) or value is None:
+                    for proc in self.processors:
+                        proc.spatial_func = value
+                else:
+                    # list-of-callables: one per processor
+                    for proc, v in zip(self.processors, value):
+                        proc.spatial_func = v
             else:
                 for proc in self.processors:
                     setattr(proc, attr, value)
@@ -917,10 +926,6 @@ class PreviewDataWidget(EdgeWindow):
                 if subplot.docks["right"].size < 1:
                     subplot.docks["right"].size = 80
 
-        # fpl's window_funcs/window_sizes/spatial_func setters refresh via
-        # `self.indices = self.indices`, but that runs *before* the histogram
-        # restore above and can leave the displayed graphic stale. Force a
-        # post-restore refresh so changes take effect immediately.
         if attr in ("window_funcs", "window_sizes", "spatial_func"):
             self._refresh_image_widget()
 
@@ -941,7 +946,7 @@ class PreviewDataWidget(EdgeWindow):
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
-        names = self.image_widget._slider_dim_names or ()
+        names = self._slider_dim_names or ()
         # fastplotlib's `indices` is case-sensitive; isoview uses
         # uppercase TCZYX, LBM/ScanImage use lowercase. Resolve the
         # canonical key by case-insensitive match before indexing.
@@ -1085,6 +1090,14 @@ class PreviewDataWidget(EdgeWindow):
 
     def draw_window(self):
         """Override parent to handle keyboard shortcuts and global popups."""
+        # Re-apply opaque style each frame. imgui_bundle 1.92's defaults
+        # use a translucent alpha on popup_bg / window_bg, and at least
+        # one fastplotlib/ndwidget internal pushes a style var that
+        # masks our init-time override on subsequent frames. Re-asserting
+        # here is cheap and keeps popups consistently opaque.
+        from mbo_utilities.gui._imgui_helpers import style_imgui_opaque
+        style_imgui_opaque()
+
         handle_keyboard_shortcuts(self)
         check_file_dialogs(self)
 
@@ -1128,7 +1141,7 @@ class PreviewDataWidget(EdgeWindow):
         # mean image from the per-channel cache — no recompute needed.
         # `indices` is case-sensitive; resolve canonical names from the
         # slider list before indexing (isoview uses upper, LBM uses lower).
-        names = self.image_widget._slider_dim_names or ()
+        names = self._slider_dim_names or ()
         z_name = next((n for n in names if n.lower() == "z"), None)
         c_name = next((n for n in names if n.lower() == "c"), None)
         try:
@@ -1148,7 +1161,8 @@ class PreviewDataWidget(EdgeWindow):
             if self._mean_subtraction:
                 self._update_mean_subtraction()
             if self._auto_contrast_on_z and self.image_widget:
-                self.image_widget.reset_vmin_vmax_frame()
+                for nd in self.image_widget.ndgraphics:
+                    nd.graphic.reset_vmin_vmax()
 
     def draw_stats_section(self):
         """Draw z-stats visualization."""
@@ -1164,7 +1178,7 @@ class PreviewDataWidget(EdgeWindow):
     def get_raw_frame(self) -> tuple[ndarray, ...]:
         """Get raw frame data at current indices."""
         idx = self.image_widget.indices
-        names = self.image_widget._slider_dim_names or ()
+        names = self._slider_dim_names or ()
         t = idx["t"] if "t" in names else 0
         z = idx["z"] if "z" in names else 0
 
@@ -1177,7 +1191,10 @@ class PreviewDataWidget(EdgeWindow):
                 return arr
             raise ValueError(f"Unsupported data shape: {arr.shape}")
 
-        return tuple(_ndim_to_frame(arr, t, z) for arr in self.image_widget.data)
+        return tuple(
+            _ndim_to_frame(nd.processor.data, t, z)
+            for nd in self.image_widget.ndgraphics
+        )
 
     def compute_zstats(self):
         """Compute z-stats for all graphics."""

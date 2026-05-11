@@ -72,9 +72,6 @@ def draw_boxed_label(
         if font is not None:
             imgui.pop_font()
 
-_IMGUI_OPAQUE_APPLIED = False
-
-
 # stack of override modes for set_tooltip's mark alignment.
 # when populated, the top of the stack overrides the per-call `align` arg.
 # entered via the `tooltip_marks_right()` context manager — used by the
@@ -127,15 +124,12 @@ def begin_popup_size():
 def style_imgui_opaque():
     """Force fully opaque popups, modals, child windows, and frames.
 
-    idempotent — safe to call from any per-frame entry point. only mutates
-    the live imgui context the first time it's called.
+    Safe to call from any per-frame entry point. Re-applies every call to
+    survive any imgui style resets (e.g. from theme switches or context
+    swaps).
     """
-    global _IMGUI_OPAQUE_APPLIED
-    if _IMGUI_OPAQUE_APPLIED:
-        return
     if imgui.get_current_context() is None:
         return
-    _IMGUI_OPAQUE_APPLIED = True
 
     style = imgui.get_style()
 

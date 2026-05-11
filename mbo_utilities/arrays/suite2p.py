@@ -681,16 +681,35 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         window_funcs = kwargs.get("window_funcs")
 
         import fastplotlib as fpl
+        from mbo_utilities.arrays.features import get_slider_dims
 
-        return fpl.ImageWidget(
-            data=arrays,
-            names=names,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            figure_shape=(1, len(arrays)),
-            graphic_kwargs={"vmin": -300, "vmax": 4000},
-            window_funcs=window_funcs,
+        slider_dim_names = tuple(get_slider_dims(arrays[0]) or ())
+        spatial_dims = ("y", "x")
+        full_dims = slider_dim_names + spatial_dims
+        ref_ranges = {
+            d: (0, int(arrays[0].shape[i]), 1)
+            for i, d in enumerate(slider_dim_names)
+        }
+        ndw = fpl.NDWidget(
+            ref_ranges=ref_ranges,
+            shape=(1, len(arrays)),
+            controller_ids="sync",
+            names=[names],
+            **figure_kwargs,
         )
+        for _rr in ndw.indices.ref_ranges.values():
+            _rr.throttle = 0.0
+        for col, arr in enumerate(arrays):
+            nd = ndw[0, col].add_nd_image(
+                data=arr,
+                dims=full_dims,
+                spatial_dims=spatial_dims,
+                window_funcs=window_funcs,
+                compute_histogram=histogram_widget,
+            )
+            nd.graphic.vmin = -300
+            nd.graphic.vmax = 4000
+        return ndw
 
 
 def _add_suite2p_labels(

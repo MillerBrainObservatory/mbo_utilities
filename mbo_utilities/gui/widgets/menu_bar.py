@@ -69,8 +69,8 @@ def draw_menu_bar(parent: Any):
                 imgui.separator()
                 # Check if current data supports imwrite
                 can_save = parent.is_mbo_scan
-                if parent.image_widget and parent.image_widget.data:
-                    arr = parent.image_widget.data[0]
+                if parent.image_widget and parent.image_widget.ndgraphics:
+                    arr = parent.image_widget.ndgraphics[0].processor.data
                     can_save = hasattr(arr, "_imwrite")
                 if imgui.menu_item(
                     "Save as", "s", p_selected=False, enabled=can_save
@@ -78,7 +78,11 @@ def draw_menu_bar(parent: Any):
                     parent._saveas_popup_open = True
                 if not can_save and imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
                     imgui.begin_tooltip()
-                    arr_type = type(parent.image_widget.data[0]).__name__ if parent.image_widget and parent.image_widget.data else "Unknown"
+                    arr_type = (
+                        type(parent.image_widget.ndgraphics[0].processor.data).__name__
+                        if parent.image_widget and parent.image_widget.ndgraphics
+                        else "Unknown"
+                    )
                     imgui.text(f"{arr_type} does not support saving.")
                     imgui.end_tooltip()
                 imgui.separator()

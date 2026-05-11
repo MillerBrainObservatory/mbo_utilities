@@ -1159,8 +1159,8 @@ def _init_s2p_selection_state(self):
     num_planes = 1
     num_channels = 1
     try:
-        if hasattr(self, "image_widget") and self.image_widget.data:
-            data = self.image_widget.data[0]
+        if hasattr(self, "image_widget") and self.image_widget.ndgraphics:
+            data = self.image_widget.ndgraphics[0].processor.data
             max_frames = data.shape[0]
             if hasattr(data, "num_planes"):
                 num_planes = data.num_planes
@@ -1219,8 +1219,8 @@ def _init_s2p_selection_state(self):
         try:
             from mbo_utilities.metadata import get_param
             src_fs = None
-            if hasattr(self, "image_widget") and self.image_widget.data:
-                mdata = getattr(self.image_widget.data[0], "metadata", {}) or {}
+            if hasattr(self, "image_widget") and self.image_widget.ndgraphics:
+                mdata = getattr(self.image_widget.ndgraphics[0].processor.data, "metadata", {}) or {}
                 src_fs = get_param(mdata, "fs")
             # prefer user-edited fs from the metadata editor if present
             custom = getattr(self, "_custom_metadata", None) or {}
@@ -1683,7 +1683,7 @@ def _draw_current_dataset_section(self) -> None:
 
     arr = None
     try:
-        arr = self.image_widget.data[0]
+        arr = self.image_widget.ndgraphics[0].processor.data
     except (IndexError, AttributeError):
         pass
 
@@ -3898,9 +3898,10 @@ def run_process(self):
         selected_planes = getattr(self, "_selected_planes", None)
         if not selected_planes:
             # Fallback to current plane
-            names = self.image_widget._slider_dim_names or ()
+            names = tuple(self.image_widget.indices.ref_ranges.keys())
+            z_name = next((n for n in names if n.lower() == "z"), None)
             try:
-                current_z = self.image_widget.indices["z"] if "z" in names else 0
+                current_z = self.image_widget.indices[z_name] if z_name else 0
             except (IndexError, KeyError):
                 current_z = 0
             selected_planes = {current_z + 1}
@@ -3929,8 +3930,8 @@ def run_process(self):
 
             # determine roi
             num_rois = (
-                len(self.image_widget.graphics)
-                if hasattr(self.image_widget, "graphics")
+                len(self.image_widget.ndgraphics)
+                if hasattr(self.image_widget, "ndgraphics")
                 else 1
             )
             roi = 1 if num_rois > 1 else None
@@ -4132,7 +4133,7 @@ def run_process(self):
 
             # Build list of configuration dicts for each job to completely decouple GUI state
             jobs = []
-            for i, _arr in enumerate(self.image_widget.data):
+            for i, _nd in enumerate(self.image_widget.ndgraphics):
                 for channel in selected_channels:
                     if multi_channel:
                         base_out = Path(s2p_path) / _build_channel_dirname(self, channel)
@@ -4142,7 +4143,7 @@ def run_process(self):
                     for z_plane in sorted(selected_planes):
                         current_z = z_plane - 1
 
-                        if len(self.image_widget.graphics) > 1:
+                        if len(self.image_widget.ndgraphics) > 1:
                             plane_dir = base_out / f"plane{z_plane:02d}_roi{i + 1:02d}"
                             roi = i + 1
                         else:

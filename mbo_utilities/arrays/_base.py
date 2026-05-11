@@ -799,20 +799,35 @@ class TiffReaderMixin:
         return self._imwrite(outpath, **kwargs)
 
     def imshow(self, **kwargs):
-        """Display array using fastplotlib ImageWidget."""
+        """Display array using fastplotlib NDWidget."""
         import fastplotlib as fpl
+        from mbo_utilities.arrays.features import get_slider_dims
 
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         window_funcs = kwargs.get("window_funcs")
-        return fpl.ImageWidget(
+
+        slider_dim_names = tuple(get_slider_dims(self) or ())
+        spatial_dims = ("y", "x")
+        full_dims = slider_dim_names + spatial_dims
+        ref_ranges = {
+            d: (0, int(self.shape[i]), 1)
+            for i, d in enumerate(slider_dim_names)
+        }
+        ndw = fpl.NDWidget(ref_ranges=ref_ranges, shape=(1, 1), **figure_kwargs)
+        for _rr in ndw.indices.ref_ranges.values():
+            _rr.throttle = 0.0
+        nd = ndw[0, 0].add_nd_image(
             data=self,
-            cmap="gnuplot2",
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": self.vmin, "vmax": self.vmax},
+            dims=full_dims,
+            spatial_dims=spatial_dims,
             window_funcs=window_funcs,
+            compute_histogram=histogram_widget,
         )
+        nd.graphic.cmap = "gnuplot2"
+        nd.graphic.vmin = self.vmin
+        nd.graphic.vmax = self.vmax
+        return ndw
 
 
 class ReductionMixin:

@@ -330,29 +330,41 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
         )
 
     def imshow(self, **kwargs):
-        """Display array using fastplotlib ImageWidget."""
+        """Display array using fastplotlib NDWidget."""
         import fastplotlib as fpl
 
         histogram_widget = kwargs.pop("histogram_widget", True)
         figure_kwargs = kwargs.pop("figure_kwargs", {"size": (800, 800)})
-        # get min/max from first frame for contrast scaling
         first_frame = self.data[0]
-        graphic_kwargs = kwargs.pop(
-            "graphic_kwargs", {"vmin": float(first_frame.min()), "vmax": float(first_frame.max())}
-        )
+        default_vmin = float(first_frame.min())
+        default_vmax = float(first_frame.max())
+        graphic_kwargs = kwargs.pop("graphic_kwargs", None) or {}
+        vmin = graphic_kwargs.get("vmin", default_vmin)
+        vmax = graphic_kwargs.get("vmax", default_vmax)
 
-        # always 5D TCZYX: sliders for t, c, z
         slider_dim_names = ("t", "c", "z")
-        window_funcs = kwargs.pop("window_funcs", (np.mean, None, None))
-        window_sizes = kwargs.pop("window_sizes", (1, None, None))
+        spatial_dims = ("y", "x")
+        full_dims = slider_dim_names + spatial_dims
+        ref_ranges = {
+            d: (0, int(self.data.shape[i]), 1)
+            for i, d in enumerate(slider_dim_names)
+        }
+        window_funcs = kwargs.pop("window_funcs", {"t": (np.mean, 1)})
 
-        return fpl.ImageWidget(
-            data=self.data,
-            slider_dim_names=slider_dim_names,
-            window_funcs=window_funcs,
-            window_sizes=window_sizes,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs=graphic_kwargs,
-            **kwargs,
+        ndw = fpl.NDWidget(
+            ref_ranges=ref_ranges,
+            shape=(1, 1),
+            **figure_kwargs,
         )
+        for _rr in ndw.indices.ref_ranges.values():
+            _rr.throttle = 0.0
+        nd = ndw[0, 0].add_nd_image(
+            data=self.data,
+            dims=full_dims,
+            spatial_dims=spatial_dims,
+            window_funcs=window_funcs,
+            compute_histogram=histogram_widget,
+        )
+        nd.graphic.vmin = vmin
+        nd.graphic.vmax = vmax
+        return ndw

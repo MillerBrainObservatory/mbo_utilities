@@ -35,7 +35,7 @@ def _get_array_features(widget: Any) -> dict[str, bool]:
     Parameters
     ----------
     widget : Any
-        Widget with image_widget.data attribute (PreviewDataWidget, BaseViewer, etc.)
+        Widget with image_widget (NDWidget) attribute (PreviewDataWidget, BaseViewer, etc.)
 
     Features
     --------
@@ -49,7 +49,7 @@ def _get_array_features(widget: Any) -> dict[str, bool]:
         Array supports frame averaging (PiezoArray with frames_per_slice > 1).
     """
     try:
-        data = widget.image_widget.data[0]
+        data = widget.image_widget.ndgraphics[0].processor.data
     except (IndexError, AttributeError):
         return {}
 
@@ -243,7 +243,7 @@ def draw_saveas_popup(parent: Any):
 
         # mROI section - commented out for later use
         # try:
-        #     num_rois = parent.image_widget.data[0].num_rois
+        #     num_rois = parent.image_widget.ndgraphics[0].processor.data.num_rois
         # except (AttributeError, Exception):
         #     num_rois = 1
         #
@@ -525,7 +525,7 @@ _VIDEO_TEMPORAL_MODES = ["mean", "max", "std"]
 def _preview_fps(parent: Any) -> float | None:
     """Look up sampling frequency from the loaded array, trying several sources."""
     try:
-        data0 = parent.image_widget.data[0]
+        data0 = parent.image_widget.ndgraphics[0].processor.data
     except Exception:
         data0 = None
     candidates = []
@@ -549,7 +549,7 @@ def _preview_fps(parent: Any) -> float | None:
 
 def _preview_cmap(parent: Any) -> str | None:
     try:
-        c = str(parent.image_widget.graphics[0].cmap or "")
+        c = str(parent.image_widget.ndgraphics[0].graphic.cmap or "")
     except Exception:
         return None
     return c or None
@@ -557,7 +557,7 @@ def _preview_cmap(parent: Any) -> str | None:
 
 def _preview_vmin_vmax(parent: Any) -> tuple[float, float] | None:
     try:
-        g = parent.image_widget.graphics[0]
+        g = parent.image_widget.ndgraphics[0].graphic
         return float(g.vmin), float(g.vmax)
     except Exception:
         return None
@@ -866,7 +866,7 @@ def _draw_selection_section(parent: Any):
     num_planes = 1
     num_channels = 1
     try:
-        data = parent.image_widget.data[0]
+        data = parent.image_widget.ndgraphics[0].processor.data
         max_frames = data.shape[0]
         # get actual z-planes
         if hasattr(data, "num_planes"):
@@ -1221,7 +1221,7 @@ def _draw_save_button(parent: Any):
                     ):
                         # Get mROI count from data array (ScanImage-specific)
                         try:
-                            mroi_count = parent.image_widget.data[0].num_rois
+                            mroi_count = parent.image_widget.ndgraphics[0].processor.data.num_rois
                         except Exception:
                             mroi_count = 1
                         parent._saveas_selected_roi = set(range(mroi_count))
@@ -1237,7 +1237,7 @@ def _draw_save_button(parent: Any):
                 # build frames list from parsed timepoint selection
                 tp_parsed = parent._saveas_tp_parsed
                 try:
-                    max_timepoints = parent.image_widget.data[0].shape[0]
+                    max_timepoints = parent.image_widget.ndgraphics[0].processor.data.shape[0]
                 except (IndexError, AttributeError):
                     max_timepoints = 1000
 

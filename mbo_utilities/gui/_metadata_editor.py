@@ -17,7 +17,7 @@ from mbo_utilities.metadata import parse_filename_metadata, get_filename_suggest
 def _get_suggested_metadata(parent: Any) -> list:
     """Get suggested metadata fields from array."""
     try:
-        current_data = parent.image_widget.data[0]
+        current_data = parent.image_widget.ndgraphics[0].processor.data
     except (IndexError, AttributeError):
         return []
 
@@ -52,7 +52,7 @@ def _build_suggested_fields(parent: Any) -> list[dict]:
     """Build the complete list of suggested metadata fields."""
     # get array data
     try:
-        current_data = parent.image_widget.data[0]
+        current_data = parent.image_widget.ndgraphics[0].processor.data
     except (IndexError, AttributeError):
         current_data = None
 
@@ -123,7 +123,7 @@ def draw_metadata_editor_content(parent: Any):
 
     # get array data
     try:
-        current_data = parent.image_widget.data[0]
+        current_data = parent.image_widget.ndgraphics[0].processor.data
     except (IndexError, AttributeError):
         current_data = None
 

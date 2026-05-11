@@ -1541,17 +1541,14 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
 
     def imshow(self, **kwargs):
         import fastplotlib as fpl
+        from mbo_utilities.arrays.features import get_slider_dims
 
         arrays = []
         names = []
         for roi in self.iter_rois():
             arr = copy.copy(self)
             arr.roi = roi
-            # Need to disable feature on copies to show raw? Or valid?
-            # Original code disabled correction.
             arr.fix_phase = False
-            # Note: setting fix_phase=False on copy also sets feature.enabled=False
-            # due to property delegation.
             arrays.append(arr)
             names.append(f"ROI {roi}" if roi else "Stitched mROIs")
 
@@ -1563,15 +1560,33 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         sample_frame = arrays[0][0]
         vmin, vmax = float(sample_frame.min()), float(sample_frame.max())
 
-        return fpl.ImageWidget(
-            data=arrays,
-            names=names,
-            histogram_widget=histogram_widget,
-            figure_kwargs=figure_kwargs,
-            figure_shape=figure_shape,
-            graphic_kwargs={"vmin": vmin, "vmax": vmax},
-            window_funcs=window_funcs,
+        slider_dim_names = tuple(get_slider_dims(arrays[0]) or ())
+        spatial_dims = ("y", "x")
+        full_dims = slider_dim_names + spatial_dims
+        ref_ranges = {
+            d: (0, int(arrays[0].shape[i]), 1)
+            for i, d in enumerate(slider_dim_names)
+        }
+        ndw = fpl.NDWidget(
+            ref_ranges=ref_ranges,
+            shape=figure_shape,
+            controller_ids="sync",
+            names=[names],
+            **figure_kwargs,
         )
+        for _rr in ndw.indices.ref_ranges.values():
+            _rr.throttle = 0.0
+        for col, arr in enumerate(arrays):
+            nd = ndw[0, col].add_nd_image(
+                data=arr,
+                dims=full_dims,
+                spatial_dims=spatial_dims,
+                window_funcs=window_funcs,
+                compute_histogram=histogram_widget,
+            )
+            nd.graphic.vmin = vmin
+            nd.graphic.vmax = vmax
+        return ndw
 
 
 class LBMArray(ScanImageArray):

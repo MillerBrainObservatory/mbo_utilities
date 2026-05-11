@@ -4,10 +4,10 @@ base class for ui widgets that control image display.
 widgets are self-contained ui components that:
 - check if they should display based on data/parent attributes
 - draw imgui controls
-- modify image_widget.data or window funcs directly
+- modify image_widget.ndgraphics[*].processor.data or window funcs directly
 
 no processors needed - all manipulation happens via data attributes
-or imagewidget's built-in window_funcs/spatial_func apis.
+or NDWidget's built-in window_funcs/spatial_func apis.
 """
 
 from abc import ABC, abstractmethod

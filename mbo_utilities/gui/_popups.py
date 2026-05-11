@@ -45,8 +45,8 @@ def draw_tools_popups(parent: Any):
             "Metadata Viewer",
             parent.show_metadata_viewer,
         )
-        if parent.image_widget and parent.image_widget.data:
-            data_arr = parent.image_widget.data[0]
+        if parent.image_widget and parent.image_widget.ndgraphics:
+            data_arr = parent.image_widget.ndgraphics[0].processor.data
             # Check if data has metadata (numpy arrays don't)
             if hasattr(data_arr, "metadata"):
                 metadata = data_arr.metadata

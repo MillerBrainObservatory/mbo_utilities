@@ -32,18 +32,18 @@ dependencies = [
 	"ipywidgets>=8.0.0,<9",
 	"icecream>=2.1.4",
 	"glfw ; sys_platform != 'linux'",
-	"pygfx>=0.15.2",
+	"pygfx>=0.16.0",
 	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
 	"mkl_fft>=2.0.0",
-	"mbo-fastplotlib>=0.7.3",
-	"rendercanvas>=2.4.2,<2.5",
+	"fastplotlib",
+	"rendercanvas>=2.6.1",
 	"imgui-bundle==1.92.5",
 	"pyqt6>=6.7",
 	"pyqt6-sip",
 	"pyqtgraph",
 	"qtpy",
-	"wgpu>=0.28.1,<0.29",
+	"wgpu>=0.30.1",
 	"napari",
 	"napari-ome-zarr",
 	"napari-animation",
@@ -96,6 +96,9 @@ docs = [
 ]
 # Everything
 all = ["mbo_utilities[rastermap,docs]"]
+
+[tool.uv.sources]
+fastplotlib = { path = "C:/Users/RBO/repos/fastplotlib", editable = true }
 
 # [[tool.uv.index]]
 # name = "pytorch-cu126"

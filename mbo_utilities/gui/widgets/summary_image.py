@@ -336,7 +336,7 @@ class SummaryImageViewer(Widget):
         if iw is None:
             return
         try:
-            graphics = list(iw.graphics)
+            graphics = [nd.graphic for nd in iw.ndgraphics]
         except Exception:
             return
         if not graphics:

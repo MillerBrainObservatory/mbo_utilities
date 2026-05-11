@@ -82,7 +82,8 @@ def handle_keyboard_shortcuts(parent: Any):
         if parent.image_widget:
             parent.logger.info("Shortcut: 'v' (Reset vmin/vmax)")
             with contextlib.suppress(Exception):
-                parent.image_widget.reset_vmin_vmax_frame()
+                for nd in parent.image_widget.ndgraphics:
+                    nd.graphic.reset_vmin_vmax()
 
     # c: toggle fix-phase (scan-phase correction) when data supports it
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.c, False):
@@ -124,7 +125,7 @@ def handle_keyboard_shortcuts(parent: Any):
 
 
 def _get_sliders_ui(parent: Any):
-    """Return fpl's ImageWidgetSliders instance, or None."""
+    """Return fpl's NDWidgetUI instance, or None."""
     iw = getattr(parent, "image_widget", None)
     if iw is None:
         return None
@@ -134,23 +135,27 @@ def _get_sliders_ui(parent: Any):
     figure = getattr(iw, "figure", None)
     guis = getattr(figure, "guis", None) or {}
     for gui in (guis.values() if hasattr(guis, "values") else guis):
-        if gui is not None and gui.__class__.__name__ == "ImageWidgetSliders":
+        if gui is not None and gui.__class__.__name__ == "NDWidgetUI":
             return gui
     return None
 
 
-def toggle_playback(parent: Any, dim_index: int = 0) -> None:
-    """Toggle play/pause on the given slider dim (default T=0) via fpl's sliders widget."""
+def toggle_playback(parent: Any, dim: str | None = None) -> None:
+    """Toggle play/pause on the given slider dim (default first dim, usually 't')."""
     sliders = _get_sliders_ui(parent)
     if sliders is None or not hasattr(sliders, "_playing"):
         return
     playing = sliders._playing
-    if dim_index >= len(playing):
+    if not playing:
         return
-    playing[dim_index] = not playing[dim_index]
-    if hasattr(sliders, "_last_frame_time") and dim_index < len(sliders._last_frame_time):
-        sliders._last_frame_time[dim_index] = 0
-    state = "PLAY" if playing[dim_index] else "PAUSE"
+    if dim is None:
+        dim = next(iter(playing))
+    if dim not in playing:
+        return
+    playing[dim] = not playing[dim]
+    if hasattr(sliders, "_last_frame_time") and dim in sliders._last_frame_time:
+        sliders._last_frame_time[dim] = 0
+    state = "PLAY" if playing[dim] else "PAUSE"
     parent.logger.info(f"Shortcut: 'Space' ({state})")
 
 
@@ -198,66 +203,57 @@ def handle_arrow_keys(parent: Any):
     """Handle arrow key navigation for T and Z dimensions."""
     io = imgui.get_io()
 
-    # skip arrow keys when typing in text fields
     if io.want_text_input:
         return
 
-    if not parent.image_widget or not parent.image_widget.data:
+    iw = parent.image_widget
+    if iw is None or not iw.ndgraphics:
         return
 
-    n_sliders = parent.image_widget.n_sliders
-    if n_sliders == 0:
+    ref_ranges = iw.indices.ref_ranges
+    if not ref_ranges:
         return
 
-    # get shape from actual data
-    shape = parent.image_widget.data[0].shape
-    if not isinstance(shape, tuple) or len(shape) < 3:
-        return
+    names_lower = tuple(d.lower() for d in ref_ranges.keys())
+    dim_keys = tuple(ref_ranges.keys())
 
-    current_indices = list(parent.image_widget.indices)
-
-    # jump step: 10 when shift held, 1 otherwise
     step = 10 if io.key_shift else 1
 
-    # left/right: T dimension (index 0)
-    t_max = shape[0] - 1
-    current_t = current_indices[0]
+    # left/right: T dim (case-insensitive lookup)
+    t_idx = next((i for i, n in enumerate(names_lower) if n == "t"), None)
+    if t_idx is not None:
+        t_name = dim_keys[t_idx]
+        t_range = ref_ranges[t_name]
+        t_max = int(t_range.stop) - 1
+        current_t = iw.indices[t_name]
 
-    if imgui.is_key_pressed(imgui.Key.left_arrow):
-        new_t = max(0, current_t - step)
-        if new_t != current_t:
-            current_indices[0] = new_t
-            parent.image_widget.indices = current_indices
-            return
+        if imgui.is_key_pressed(imgui.Key.left_arrow):
+            new_t = max(0, current_t - step)
+            if new_t != current_t:
+                iw.indices = {t_name: new_t}
+                return
 
-    if imgui.is_key_pressed(imgui.Key.right_arrow):
-        new_t = min(t_max, current_t + step)
-        if new_t != current_t:
-            current_indices[0] = new_t
-            parent.image_widget.indices = current_indices
-            return
+        if imgui.is_key_pressed(imgui.Key.right_arrow):
+            new_t = min(t_max, current_t + step)
+            if new_t != current_t:
+                iw.indices = {t_name: new_t}
+                return
 
-    # up/down: Z dimension. Resolve Z by name so 5D TCZYX data (where
-    # indices[1] is C, not Z) scrolls the correct axis. Hardcoding
-    # indices[1] used to make Up/Down scroll C on 5D data.
-    names = tuple(
-        n.lower()
-        for n in (getattr(parent.image_widget, "_slider_dim_names", None) or ())
-    )
-    if "z" in names:
-        z_pos = names.index("z")
-        z_max = shape[z_pos] - 1
-        current_z = current_indices[z_pos]
+    # up/down: Z dim
+    z_idx = next((i for i, n in enumerate(names_lower) if n == "z"), None)
+    if z_idx is not None:
+        z_name = dim_keys[z_idx]
+        z_range = ref_ranges[z_name]
+        z_max = int(z_range.stop) - 1
+        current_z = iw.indices[z_name]
 
         if imgui.is_key_pressed(imgui.Key.down_arrow):
             new_z = max(0, current_z - step)
             if new_z != current_z:
-                current_indices[z_pos] = new_z
-                parent.image_widget.indices = current_indices
+                iw.indices = {z_name: new_z}
                 return
 
         if imgui.is_key_pressed(imgui.Key.up_arrow):
             new_z = min(z_max, current_z + step)
             if new_z != current_z:
-                current_indices[z_pos] = new_z
-                parent.image_widget.indices = current_indices
+                iw.indices = {z_name: new_z}

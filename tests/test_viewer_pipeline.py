@@ -51,10 +51,14 @@ class FakeArr:
 
 
 class FakeParent:
-    """Parent stub matching the WidgetBase contract: parent.image_widget.data[0]."""
+    """Parent stub matching the WidgetBase contract:
+    parent.image_widget.ndgraphics[0].processor.data.
+    """
 
     def __init__(self, arr):
-        self.image_widget = type("IW", (), {"data": [arr]})()
+        processor = type("Proc", (), {"data": arr})()
+        nd = type("ND", (), {"processor": processor})()
+        self.image_widget = type("IW", (), {"ndgraphics": [nd]})()
 
 
 # ============================================================

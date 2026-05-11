@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from fastplotlib.widgets import ImageWidget
+    from fastplotlib.widgets import NDWidget
 
 __all__ = [
     "BaseViewer",
@@ -27,7 +27,7 @@ class BaseViewer(ABC):
 
     def __init__(
         self,
-        image_widget: ImageWidget,
+        image_widget: NDWidget,
         fpath: str | list[str],
         parent=None,
         **kwargs,
@@ -41,7 +41,7 @@ class BaseViewer(ABC):
         """Access the loaded data arrays."""
         if self.image_widget is None:
             return None
-        return self.image_widget.data
+        return [nd.processor.data for nd in self.image_widget.ndgraphics]
 
     @property
     def logger(self):

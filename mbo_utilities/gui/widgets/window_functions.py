@@ -22,7 +22,8 @@ class WindowFunctionsWidget(Widget):
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
         """Supported when data has a time dimension with more than 1 frame."""
-        arr = parent.image_widget.data[0] if getattr(parent, "image_widget", None) else None
+        iw = getattr(parent, "image_widget", None)
+        arr = iw.ndgraphics[0].processor.data if iw and iw.ndgraphics else None
         if arr is None:
             return False
         dims = getattr(arr, "dims", None)
@@ -90,7 +91,8 @@ class SpatialFunctionsWidget(Widget):
         ill-defined and gaussian blur is trivially available on the
         already-displayed frame without this control.
         """
-        arr = parent.image_widget.data[0] if getattr(parent, "image_widget", None) else None
+        iw = getattr(parent, "image_widget", None)
+        arr = iw.ndgraphics[0].processor.data if iw and iw.ndgraphics else None
         if arr is None:
             return False
         shape = getattr(arr, "shape", None)

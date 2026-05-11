@@ -589,7 +589,7 @@ class _ScrubTimingProxy:
 
 
 def _create_image_widget(data_array, widget: bool = True):
-    """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
+    """Create fastplotlib NDWidget with optional PreviewDataWidget."""
     import copy
     import numpy as np
     import fastplotlib as fpl
@@ -608,28 +608,11 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         figure_kwargs = {"size": (1000, 1000)}
 
-    # Determine slider dimension names from array's dims property if available
     from mbo_utilities.arrays.features import get_slider_dims
 
-    slider_dim_names = get_slider_dims(data_array)
-
-    # window_funcs/window_sizes must match slider_dim_names length
-    if slider_dim_names:
-        n_sliders = len(slider_dim_names)
-        # apply mean to first dim (usually t), None for rest
-        window_funcs = (np.mean,) + (None,) * (n_sliders - 1)
-        window_sizes = (1,) + (None,) * (n_sliders - 1)
-    else:
-        window_funcs = None
-        window_sizes = None
+    slider_dim_names = tuple(get_slider_dims(data_array))
 
     def _squeeze_for_viewer(arr):
-        """drop every singleton non-spatial dim so fastplotlib's ndim-2
-        slider count matches get_slider_dims output.
-
-        fastplotlib expects ndim == len(slider_dim_names) + 2. any
-        T/C/Z with size 1 must be squeezed, not just C.
-        """
         if not hasattr(arr, "shape") or len(arr.shape) != 5:
             out = arr
         elif any(arr.shape[i] == 1 for i in range(3)):
@@ -638,17 +621,14 @@ def _create_image_widget(data_array, widget: bool = True):
             out = arr
         return _ScrubTimingProxy(out)
 
-    # Handle multi-ROI data (duck typing: check for roi_mode attribute)
     if hasattr(data_array, "roi_mode") and hasattr(data_array, "iter_rois"):
         arrays = []
         names = []
-        # get name from first filename if available, truncate if too long
         base_name = None
         if hasattr(data_array, "filenames") and data_array.filenames:
             from pathlib import Path
             first_file = Path(data_array.filenames[0])
             base_name = first_file.stem
-            # for suite2p arrays (data.bin), use parent folder name instead
             if base_name in ("data", "data_raw"):
                 base_name = first_file.parent.name
             if len(base_name) > 24:
@@ -659,51 +639,72 @@ def _create_image_widget(data_array, widget: bool = True):
             arr.roi = r
             arrays.append(_squeeze_for_viewer(arr))
             names.append(f"ROI {r}" if r else (base_name or "Full Image"))
-
-        iw = fpl.ImageWidget(
-            data=arrays,
-            names=names,
-            slider_dim_names=slider_dim_names,
-            window_funcs=window_funcs,
-            window_sizes=window_sizes,
-            cmap="gnuplot2",
-            histogram_widget=True,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
-        )
     else:
-        iw = fpl.ImageWidget(
-            data=_squeeze_for_viewer(data_array),
-            slider_dim_names=slider_dim_names,
-            window_funcs=window_funcs,
-            window_sizes=window_sizes,
-            cmap="gnuplot2",
-            histogram_widget=True,
-            figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
+        arrays = [_squeeze_for_viewer(data_array)]
+        names = None
+
+    spatial_dims = ("y", "x")
+    first = arrays[0]
+    full_dims = tuple(slider_dim_names) + spatial_dims
+    if first.ndim != len(full_dims):
+        raise ValueError(
+            f"slider_dim_names {slider_dim_names} + {spatial_dims} produces "
+            f"{len(full_dims)} dims but array shape is {first.shape}"
         )
+    ref_ranges = {
+        d: (0, int(first.shape[i]), 1)
+        for i, d in enumerate(slider_dim_names)
+    }
+    window_funcs = {slider_dim_names[0]: (np.mean, 1)} if slider_dim_names else None
 
-    iw.show()
+    fig_shape = (1, len(arrays))
+    ndw_kwargs = dict(figure_kwargs)
+    ndw_kwargs["shape"] = fig_shape
+    ndw_kwargs["controller_ids"] = "sync"
+    if names is not None:
+        ndw_kwargs["names"] = [names]
 
-    # set qt window title and icon after canvas is created
+    ndw = fpl.NDWidget(ref_ranges=ref_ranges, **ndw_kwargs)
+
+    # NDWidget's RangeContinuous defaults to a 200 ms throttle on slider
+    # updates, which makes scrubbing through T feel laggy (frames update
+    # ~5 Hz while the slider moves smoothly). Drop throttle so each
+    # slider move triggers an immediate frame read — matches the fork's
+    # ImageWidget behavior.
+    for _rr in ndw.indices.ref_ranges.values():
+        _rr.throttle = 0.0
+
+    for col, arr in enumerate(arrays):
+        nd = ndw[0, col].add_nd_image(
+            data=arr,
+            dims=full_dims,
+            spatial_dims=spatial_dims,
+            window_funcs=window_funcs,
+            compute_histogram=True,
+        )
+        nd.graphic.cmap = "gnuplot2"
+        nd.graphic.vmin = -100
+        nd.graphic.vmax = 4000
+
+    ndw.show()
+
     from mbo_utilities import __version__
-    canvas = iw.figure.canvas
+    canvas = ndw.figure.canvas
     if hasattr(canvas, "set_title"):
         canvas.set_title(f"Miller Brain Studio v{__version__}")
     _set_qt_icon()
 
-    # Add PreviewDataWidget if requested
     if widget:
         from mbo_utilities.gui.widgets.preview_data import PreviewDataWidget
 
         gui = PreviewDataWidget(
-            iw=iw,
+            iw=ndw,
             fpath=data_array.source_path,
             size=300,
         )
-        iw.figure.add_gui(gui)
+        ndw.figure.add_gui(gui)
 
-    return iw
+    return ndw
 
 
 def _is_jupyter() -> bool:

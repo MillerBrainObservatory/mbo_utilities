@@ -511,7 +511,7 @@ class Suite2pPipelineWidget(PipelineWidget):
     def _reposition_mbo_window(self, x: int, y: int, width: int, height: int):
         """Reposition the MBO window to the specified geometry.
 
-        Uses the Qt canvas from fastplotlib's ImageWidget to find and
+        Uses the Qt canvas from fastplotlib's NDWidget to find and
         reposition the parent window.
 
         Parameters

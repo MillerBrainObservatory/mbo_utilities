@@ -14,7 +14,7 @@ from imgui_bundle import imgui, imgui_ctx
 from . import BaseViewer
 
 if TYPE_CHECKING:
-    from fastplotlib.widgets import ImageWidget
+    from fastplotlib.widgets import NDWidget
 
 __all__ = ["TimeSeriesViewer"]
 
@@ -26,7 +26,7 @@ class TimeSeriesViewer(BaseViewer):
 
     def __init__(
         self,
-        image_widget: ImageWidget,
+        image_widget: NDWidget,
         fpath: str | list[str],
         parent=None,
         **kwargs,
