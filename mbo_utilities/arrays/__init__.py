@@ -92,6 +92,9 @@ if TYPE_CHECKING:
         detect_isoview_kind as detect_isoview_kind,
         isoview_to_ome_zarr as isoview_to_ome_zarr,
     )
+    from mbo_utilities.arrays.isoview_consolidate import (
+        consolidate_isoview_corrected as consolidate_isoview_corrected,
+    )
     from mbo_utilities.arrays.numpy import NumpyArray as NumpyArray
     from mbo_utilities.arrays.nwb import NWBArray as NWBArray
     from mbo_utilities.arrays.suite2p import (
@@ -133,6 +136,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "IsoviewArray": (".isoview", "IsoviewArray"),
     "detect_isoview_kind": (".isoview", "detect_isoview_kind"),
     "isoview_to_ome_zarr": (".isoview", "isoview_to_ome_zarr"),
+    "consolidate_isoview_corrected": (".isoview_consolidate", "consolidate_isoview_corrected"),
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
     "AxiallyAlignedView": ("._registration", "AxiallyAlignedView"),
@@ -191,6 +195,7 @@ __all__ = [
     "H5Array",
     "ImageJHyperstackArray",
     "IsoviewArray",
+    "consolidate_isoview_corrected",
     "detect_isoview_kind",
     "LBMArray",
     "NWBArray",
