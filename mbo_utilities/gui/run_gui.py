@@ -505,6 +505,89 @@ class _SqueezeSingletonDims:
         return getattr(self._arr, name)
 
 
+class _ScrubTimingProxy:
+    """Logs per-frame __getitem__ time at DEBUG level.
+
+    Applied by `_squeeze_for_viewer` to every array handed to fastplotlib
+    so scrub timing surfaces uniformly across reader types
+    (IsoviewArray, LBMArray, Suite2pArray, ZarrArray, …) without
+    per-class edits. Zero-cost when DEBUG is filtered out: the
+    `isEnabledFor` check short-circuits before perf_counter.
+
+    `_arr` deliberately points to the *innermost* reader (peeling any
+    `_SqueezeSingletonDims`) so existing `getattr(x, "_arr", x)` patterns
+    in `_dialogs.py` / `preview_data.py` continue to surface a real
+    ScanImageArray / TiffArray for isinstance checks. Indexing routes
+    through `_wrapped` instead, which preserves the squeeze layer's
+    shape transform.
+
+    Must define `__array__` and `astype` explicitly — fastplotlib's
+    TextureArray._fix_data calls `.astype(np.float32)`, and without an
+    explicit hook here `__getattr__` would silently forward to the
+    underlying array and bypass our timing.
+    """
+
+    def __init__(self, arr):
+        import numpy as np
+        from mbo_utilities.log import get as get_logger
+        self._wrapped = arr
+        self._arr = getattr(arr, "_arr", arr)
+        self._np = np
+        self._logger = get_logger("gui.scrub")
+
+    @property
+    def shape(self):
+        return self._wrapped.shape
+
+    @property
+    def ndim(self):
+        return self._wrapped.ndim
+
+    @property
+    def dtype(self):
+        return self._wrapped.dtype
+
+    @property
+    def dims(self):
+        return getattr(self._wrapped, "dims", None)
+
+    def __len__(self):
+        return len(self._wrapped)
+
+    def __getitem__(self, key):
+        import logging
+        if not self._logger.isEnabledFor(logging.DEBUG):
+            return self._wrapped[key]
+        import time
+        t0 = time.perf_counter()
+        out = self._wrapped[key]
+        dt_ms = (time.perf_counter() - t0) * 1000.0
+        type_name = type(self._arr).__name__
+        np = self._np
+        if isinstance(key, tuple) and key and isinstance(key[0], (int, np.integer)):
+            key_str = f"t={int(key[0])}"
+        elif isinstance(key, (int, np.integer)):
+            key_str = f"t={int(key)}"
+        else:
+            key_str = repr(key)
+        self._logger.debug(f"{type_name}[{key_str}]: {dt_ms:.1f}ms")
+        return out
+
+    def __array__(self, dtype=None, copy=None):
+        arr = self._np.asarray(self._wrapped)
+        if dtype is not None:
+            arr = arr.astype(dtype)
+        return arr
+
+    def astype(self, dtype, *args, **kwargs):
+        return self._np.asarray(self).astype(dtype, *args, **kwargs)
+
+    def __getattr__(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return getattr(self._wrapped, name)
+
+
 def _create_image_widget(data_array, widget: bool = True):
     """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
     import copy
@@ -548,10 +631,12 @@ def _create_image_widget(data_array, widget: bool = True):
         T/C/Z with size 1 must be squeezed, not just C.
         """
         if not hasattr(arr, "shape") or len(arr.shape) != 5:
-            return arr
-        if any(arr.shape[i] == 1 for i in range(3)):
-            return _SqueezeSingletonDims(arr)
-        return arr
+            out = arr
+        elif any(arr.shape[i] == 1 for i in range(3)):
+            out = _SqueezeSingletonDims(arr)
+        else:
+            out = arr
+        return _ScrubTimingProxy(out)
 
     # Handle multi-ROI data (duck typing: check for roi_mode attribute)
     if hasattr(data_array, "roi_mode") and hasattr(data_array, "iter_rois"):
@@ -688,9 +773,20 @@ def _run_gui_impl(
 def _launch_standard_viewer(data_in, roi, widget, metadata_only):
     from mbo_utilities.reader import imread
     from mbo_utilities.arrays import normalize_roi
+    from mbo_utilities.log import get as get_logger
+    import time as _time
 
+    logger = get_logger("gui.boot")
     roi = normalize_roi(roi)
+    t0 = _time.perf_counter()
     data_array = imread(data_in, roi=roi)
+    t_imread = _time.perf_counter() - t0
+    logger.debug(
+        f"[boot] imread: {t_imread*1000:.0f} ms  "
+        f"type={type(data_array).__name__}  "
+        f"shape={getattr(data_array, 'shape', None)}  "
+        f"dims={getattr(data_array, 'dims', None)}"
+    )
 
     if metadata_only:
         metadata = data_array.metadata
@@ -700,7 +796,13 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
         return None
 
     import fastplotlib as fpl
+    t1 = _time.perf_counter()
     iw = _create_image_widget(data_array, widget=widget)
+    t_widget = _time.perf_counter() - t1
+    logger.debug(
+        f"[boot] _create_image_widget (incl. PreviewDataWidget): "
+        f"{t_widget*1000:.0f} ms"
+    )
 
     if _is_jupyter():
         return iw

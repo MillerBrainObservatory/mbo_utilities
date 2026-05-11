@@ -294,7 +294,7 @@ def load_new_data(parent: Any, path: str):
     Uses iw.set_data() to swap data arrays, which handles shape changes.
     """
     from mbo_utilities.arrays import TiffArray
-    from mbo_utilities.gui.run_gui import _SqueezeSingletonDims
+    from mbo_utilities.gui.run_gui import _SqueezeSingletonDims, _ScrubTimingProxy
 
     path_obj = Path(path)
     if not path_obj.exists():
@@ -324,6 +324,7 @@ def load_new_data(parent: Any, path: str):
             new_data = _SqueezeSingletonDims(raw_data)
         else:
             new_data = raw_data
+        new_data = _ScrubTimingProxy(new_data)
 
         # Reset stale per-data display state via the standalone helper
         # so the reset contract can be tested in isolation.
