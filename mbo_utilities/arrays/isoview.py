@@ -38,7 +38,6 @@ logger = _get_logger("arrays.isoview")
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 _SPM_PATTERN = re.compile(r"^SPM\d+$")
 _METHOD_PATTERN = re.compile(r"^MultiFused_")
-_VOL_EXTS = (".zarr", ".tif", ".tiff", ".klb")
 _AUX_PATTERNS = (
     "Mask", "mask", "minIntensity", "coords", "Projection", "configuration",
     "transformation", "intensityCorrection", "referenceMinIntensity",
