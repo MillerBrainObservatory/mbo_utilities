@@ -1,20 +1,17 @@
-"""ProjectionsViewer - browse XY/XZ/YZ projection TIFFs from isoview pipeline outputs.
+"""ProjectionsViewer - browse XY/XZ/YZ projection TIFFs for a loaded isoview stack.
 
-Activates whenever a loaded array originates from a Keller-lab isoview pipeline
-(detected via metadata `stack_type == "isoview-*"` or a source path with
-`*.raw.projections/`, `*.corrected.projections/`, or
-`*.corrected/Results/MultiFused_geometric/` siblings).
+The widget activates whenever the active array's ``projections()`` method
+returns a non-empty dict (see :class:`mbo_utilities.arrays.isoview.IsoviewArray`).
+Each stack subclass knows its own projection directory, so the widget no
+longer scans the dataset root — it just consumes what the array reports.
 
-Discovers all projection TIFFs lazily and presents a side-panel selector plus
-a floating imgui popup that mirrors `summary_image.SummaryImageViewer`'s
-toolbar / contrast / pan-zoom / save UX. Projections themselves are loaded on
-demand (one tifffile read per selection); the GPU texture cache is bounded so
-the 800+ projections in a typical dataset don't pin memory.
+Side panel: an "Open viewer" button plus a white-text overview of what the
+stack has (axes, views, timepoint count). The popup keeps the full
+contrast / cmap / pan-zoom / save UX.
 """
 
 from __future__ import annotations
 
-import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -26,7 +23,6 @@ from imgui_bundle import imgui, portable_file_dialogs as pfd
 from mbo_utilities.gui._imgui_helpers import set_tooltip
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui.widgets.summary_image import (
-    SIDE_PANEL_SECTION_COLOR,
     STATUS_ERROR_COLOR,
     STATUS_OK_COLOR,
     _CONTRAST_AUTO,
@@ -45,132 +41,12 @@ from mbo_utilities.gui.widgets.summary_image import (
 )
 
 
-_AXIS_LABELS = ("xy", "xz", "yz")
 _AXIS_DISPLAY = {"xy": "XY (max-Z)", "xz": "XZ (max-Y)", "yz": "YZ (max-X)"}
-
-_RE_FLAT = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)\.(xy|xz|yz)Projection\.tif$",
-    re.IGNORECASE,
-)
-_RE_FUSED = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)\.(xy|xz|yz)Projection\.tif$",
-    re.IGNORECASE,
-)
-_RE_VW_ONLY = re.compile(
-    r"^SPM(\d+)_TM(\d+)_(?:VW|CHN)(\d+)\.(xy|xz|yz)Projection\.tif$",
-    re.IGNORECASE,
-)
-_RE_TM = re.compile(r"^TM(\d{6})$", re.IGNORECASE)
+_WHITE = (1.0, 1.0, 1.0, 1.0)
 
 # bound the GPU texture cache so scrubbing through 800+ projections doesn't
 # blow VRAM. one projection is ~1-3 MiB; 16 textures is ~50 MiB worst case.
 _MAX_GPU_CACHE = 16
-
-
-def _isoview_root(arr) -> Path | None:
-    """Locate the dataset root that holds projection trees for ``arr``.
-
-    The root is the directory that contains either a `*.corrected/` child
-    or sibling `*.{raw,corrected}.projections/` folders. Returns the first
-    plausible candidate by walking up the array's source path.
-    """
-    src = getattr(arr, "source_path", None)
-    if src is None:
-        return None
-    p = Path(src)
-    if p.is_file():
-        p = p.parent
-    for cand in (p, *p.parents):
-        if not cand.exists():
-            continue
-        if any(
-            c.is_dir()
-            and (c.name.endswith(".corrected") or c.name.endswith(".projections"))
-            for c in cand.iterdir()
-        ):
-            return cand
-        # the array's own path is already inside the .corrected tree
-        if cand.name.endswith(".corrected"):
-            return cand.parent
-    return None
-
-
-def _discover_projections(root: Path) -> dict[str, dict]:
-    """Scan ``root`` for raw / corrected / fused projection trees.
-
-    Returns a dict keyed by source group ("raw", "corrected", "fused"),
-    each mapping to {"axes": [...], "views": [...], "files": {(axis, view, t): Path}}.
-    Empty groups are omitted. Views are normalized strings (e.g. "CM00",
-    "VW00") so the UI can list them without re-parsing.
-    """
-    groups: dict[str, dict] = {}
-
-    def _add(group: str, axis: str, view: str, t: int, path: Path) -> None:
-        g = groups.setdefault(
-            group,
-            {"axes": set(), "views": set(), "files": {}},
-        )
-        g["axes"].add(axis)
-        g["views"].add(view)
-        g["files"][(axis, view, t)] = path
-
-    # flat siblings: <root>/<dataset>.{raw,corrected}.projections/SPM##_TM##_CM##.xyProjection.tif
-    for child in root.iterdir():
-        if not child.is_dir():
-            continue
-        if child.name.endswith(".raw.projections"):
-            label = "raw"
-        elif child.name.endswith(".corrected.projections"):
-            label = "corrected"
-        else:
-            continue
-        for f in child.iterdir():
-            m = _RE_FLAT.match(f.name)
-            if not m:
-                continue
-            _, tm, cm, axis = m.groups()
-            _add(label, axis.lower(), f"CM{int(cm):02d}", int(tm), f)
-
-    # fused tree: <root>/<dataset>.corrected/Results/MultiFused_geometric/SPM##/TM######/...
-    for child in root.iterdir():
-        if not (child.is_dir() and child.name.endswith(".corrected")):
-            continue
-        fused_root = child / "Results" / "MultiFused_geometric"
-        if not fused_root.is_dir():
-            continue
-        for spm_dir in fused_root.iterdir():
-            if not spm_dir.is_dir() or not spm_dir.name.startswith("SPM"):
-                continue
-            for tm_dir in spm_dir.iterdir():
-                if not tm_dir.is_dir() or not _RE_TM.match(tm_dir.name):
-                    continue
-                t = int(tm_dir.name[2:])
-                for f in tm_dir.iterdir():
-                    if not f.name.endswith(("Projection.tif", "Projection.TIF")):
-                        continue
-                    m = _RE_FUSED.match(f.name)
-                    if m:
-                        _, _, cm0, cm1, vw, axis = m.groups()
-                        view = f"VW{int(vw):02d}"
-                        _add("fused", axis.lower(), view, t, f)
-                        continue
-                    m = _RE_VW_ONLY.match(f.name)
-                    if m:
-                        _, _, vw, axis = m.groups()
-                        view = f"VW{int(vw):02d}"
-                        _add("fused", axis.lower(), view, t, f)
-
-    # finalize: sort axes/views, drop empty groups
-    finalized: dict[str, dict] = {}
-    for label, g in groups.items():
-        if not g["files"]:
-            continue
-        finalized[label] = {
-            "axes": [a for a in _AXIS_LABELS if a in g["axes"]],
-            "views": sorted(g["views"]),
-            "files": g["files"],
-        }
-    return finalized
 
 
 def _timepoints_for(group: dict, axis: str, view: str) -> list[int]:
@@ -180,7 +56,7 @@ def _timepoints_for(group: dict, axis: str, view: str) -> list[int]:
 
 
 class ProjectionsViewer(Widget):
-    """Browse XY/XZ/YZ projections from isoview pipeline outputs."""
+    """Browse XY/XZ/YZ projections produced for the loaded isoview stack."""
 
     name = "Projections"
     priority = 65  # right after SummaryImageViewer (60)
@@ -199,14 +75,13 @@ class ProjectionsViewer(Widget):
         self._show_pixel_values: bool = False
 
         # selection
-        self._source: str | None = None
         self._axis: str | None = None
         self._view: str | None = None
         self._timepoint: int | None = None
 
-        # discovery cache (lazy)
-        self._projections: dict[str, dict] | None = None
-        self._root: Path | None = None
+        # discovery cache (lazy, sourced from arr.projections())
+        self._projections: dict | None = None
+        self._stack_type: str | None = None
 
         # per-image state
         self._array_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
@@ -223,12 +98,13 @@ class ProjectionsViewer(Widget):
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
         for arr in parent._get_data_arrays():
-            md = getattr(arr, "metadata", None) or {}
-            stack_type = str(md.get("stack_type", ""))
-            if stack_type.startswith("isoview"):
-                root = _isoview_root(arr)
-                if root is not None:
-                    return True
+            proj = getattr(arr, "projections", None)
+            if callable(proj):
+                try:
+                    if proj():
+                        return True
+                except Exception:
+                    continue
         return False
 
     def _backend(self):
@@ -239,9 +115,13 @@ class ProjectionsViewer(Widget):
 
     def _active_array(self):
         for arr in self.parent._get_data_arrays():
-            md = getattr(arr, "metadata", None) or {}
-            if str(md.get("stack_type", "")).startswith("isoview"):
-                return arr
+            proj = getattr(arr, "projections", None)
+            if callable(proj):
+                try:
+                    if proj():
+                        return arr
+                except Exception:
+                    continue
         return None
 
     def _ensure_projections(self) -> bool:
@@ -251,35 +131,36 @@ class ProjectionsViewer(Widget):
         if arr is None:
             self._projections = {}
             return False
-        root = _isoview_root(arr)
-        if root is None:
+        try:
+            result = arr.projections()
+        except Exception:
+            result = None
+        if not result:
             self._projections = {}
             return False
-        self._root = root
-        self._projections = _discover_projections(root)
-        if not self._projections:
-            return False
+        self._projections = result
+        self._stack_type = str((arr.metadata or {}).get("stack_type", ""))
         # initialize selection to the first plausible entry
-        self._source = next(iter(self._projections))
-        g = self._projections[self._source]
-        self._axis = g["axes"][0] if g["axes"] else None
-        self._view = g["views"][0] if g["views"] else None
+        axes = result.get("axes") or []
+        views = result.get("views") or []
+        self._axis = axes[0] if axes else None
+        self._view = views[0] if views else None
         if self._axis and self._view:
-            tps = _timepoints_for(g, self._axis, self._view)
+            tps = _timepoints_for(result, self._axis, self._view)
             self._timepoint = tps[0] if tps else None
         return True
 
     def _current_path(self) -> Path | None:
-        if not (self._projections and self._source and self._axis and self._view):
+        if not (self._projections and self._axis and self._view):
             return None
         if self._timepoint is None:
             return None
-        return self._projections[self._source]["files"].get(
+        return self._projections["files"].get(
             (self._axis, self._view, self._timepoint)
         )
 
     def _selection_key(self) -> tuple:
-        return (self._source, self._axis, self._view, self._timepoint)
+        return (self._stack_type, self._axis, self._view, self._timepoint)
 
     def _load_array(self, path: Path) -> np.ndarray | None:
         key = (str(path),)
@@ -296,7 +177,6 @@ class ProjectionsViewer(Widget):
             if arr.ndim != 2:
                 return None
         self._array_cache[key] = arr
-        # bound the in-memory cache to the GPU cache size
         while len(self._array_cache) > _MAX_GPU_CACHE:
             self._array_cache.popitem(last=False)
         return arr
@@ -358,7 +238,6 @@ class ProjectionsViewer(Widget):
                 self._gpu_cache.pop(key, None)
             gpu = _GpuImage(backend, arr, cmap, lo, hi)
             self._gpu_cache[key] = gpu
-            # evict oldest if over the cap
             while len(self._gpu_cache) > _MAX_GPU_CACHE:
                 _, evicted = self._gpu_cache.popitem(last=False)
                 evicted.destroy()
@@ -384,70 +263,54 @@ class ProjectionsViewer(Widget):
     def _on_selection_changed(self) -> None:
         self._reset_view()
 
-    def _draw_selectors(
-        self,
-        prefix: str = "side",
-        include_axis: bool = True,
-        include_timepoint: bool = True,
-    ) -> None:
-        """Render Source / Axis / View / Timepoint selectors.
-
-        Source and View always render. Axis and Timepoint are gated by
-        flags so the side panel can show a slim version (just Source and
-        View) while the popup shows the full set. ``prefix`` disambiguates
-        imgui ids so the two instances don't fight.
-        """
-        sources = list(self._projections.keys())
-        if not sources:
-            imgui.text_colored(STATUS_ERROR_COLOR, "no projections found")
+    def _draw_overview(self) -> None:
+        """Compact white-text summary of what projections this stack has."""
+        g = self._projections
+        axes = g.get("axes") or []
+        views = g.get("views") or []
+        files = g.get("files") or {}
+        if not files:
+            imgui.text_colored(STATUS_ERROR_COLOR, "no projections")
             return
 
-        if self._source not in sources:
-            self._source = sources[0]
-            self._on_selection_changed()
+        tps_per_view = {
+            v: len({t for (a, vv, t) in files if vv == v})
+            for v in views
+        }
+        max_t = max(tps_per_view.values()) if tps_per_view else 0
+        axes_str = ", ".join(a.upper() for a in axes)
 
-        imgui.set_next_item_width(110)
-        idx = sources.index(self._source)
-        changed, new_idx = imgui.combo(
-            f"Source##{prefix}_src", idx, sources
-        )
-        if changed:
-            self._source = sources[new_idx]
-            g = self._projections[self._source]
-            self._axis = g["axes"][0] if g["axes"] else None
-            self._view = g["views"][0] if g["views"] else None
-            tps = _timepoints_for(g, self._axis, self._view) if self._axis and self._view else []
-            self._timepoint = tps[0] if tps else None
-            self._on_selection_changed()
+        imgui.text_colored(_WHITE, f"{len(files)} files")
+        imgui.text_colored(_WHITE, f"axes: {axes_str}")
+        imgui.text_colored(_WHITE, f"views: {', '.join(views)}")
+        imgui.text_colored(_WHITE, f"timepoints: {max_t}")
 
-        g = self._projections[self._source]
-        axes = g["axes"]
-        if not axes:
+    def _draw_popup_selectors(self) -> None:
+        """Axis / View / Timepoint selectors inside the popup viewer."""
+        g = self._projections
+        axes = g.get("axes") or []
+        views = g.get("views") or []
+        if not axes or not views:
             return
+
         if self._axis not in axes:
             self._axis = axes[0]
             self._on_selection_changed()
+        imgui.set_next_item_width(120)
+        labels = [_AXIS_DISPLAY.get(a, a) for a in axes]
+        idx = axes.index(self._axis)
+        changed, new_idx = imgui.combo("Axis##projections", idx, labels)
+        if changed:
+            self._axis = axes[new_idx]
+            self._on_selection_changed()
 
-        if include_axis:
-            imgui.same_line()
-            imgui.set_next_item_width(110)
-            labels = [_AXIS_DISPLAY.get(a, a) for a in axes]
-            idx = axes.index(self._axis)
-            changed, new_idx = imgui.combo(f"Axis##{prefix}_axis", idx, labels)
-            if changed:
-                self._axis = axes[new_idx]
-                self._on_selection_changed()
-
-        views = g["views"]
-        if not views:
-            return
         if self._view not in views:
             self._view = views[0]
             self._on_selection_changed()
         imgui.same_line()
-        imgui.set_next_item_width(95)
+        imgui.set_next_item_width(100)
         idx = views.index(self._view)
-        changed, new_idx = imgui.combo(f"View##{prefix}_view", idx, views)
+        changed, new_idx = imgui.combo("View##projections", idx, views)
         if changed:
             self._view = views[new_idx]
             self._on_selection_changed()
@@ -456,28 +319,25 @@ class ProjectionsViewer(Widget):
         if not tps:
             imgui.text_colored(
                 STATUS_ERROR_COLOR,
-                f"no {self._axis} for {self._view} in {self._source}",
+                f"no {self._axis} for {self._view}",
             )
             return
         if self._timepoint not in tps:
             self._timepoint = tps[0]
             self._on_selection_changed()
 
-        if include_timepoint:
-            imgui.set_next_item_width(220)
-            # use slider_int over an integer index into tps so the slider step
-            # is always 1 even when the timepoint values themselves skip
-            cur_pos = tps.index(self._timepoint)
-            changed, new_pos = imgui.slider_int(
-                f"T##{prefix}_t",
-                cur_pos,
-                0,
-                len(tps) - 1,
-                f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})",
-            )
-            if changed:
-                self._timepoint = tps[int(new_pos)]
-                self._on_selection_changed()
+        imgui.set_next_item_width(220)
+        cur_pos = tps.index(self._timepoint)
+        changed, new_pos = imgui.slider_int(
+            "T##projections",
+            cur_pos,
+            0,
+            len(tps) - 1,
+            f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})",
+        )
+        if changed:
+            self._timepoint = tps[int(new_pos)]
+            self._on_selection_changed()
 
     def draw(self) -> None:
         if not self._ensure_projections():
@@ -486,17 +346,11 @@ class ProjectionsViewer(Widget):
         self._sync_cmap_with_fpl()
         draw_section_header("Projections")
 
-        # side panel: slim — Source and View only. Axis and Timepoint live
-        # in the popup so the Preview Tab stays uncluttered (no point in
-        # scrubbing T or flipping axes here when there's no preview image
-        # to react to it).
-        self._draw_selectors(
-            prefix="side", include_axis=False, include_timepoint=False
-        )
-
         if imgui.button("Open viewer##projections_open"):
             self._popup_open = True
             self._reset_view()
+
+        self._draw_overview()
 
         self._poll_save_dialog()
 
@@ -504,10 +358,7 @@ class ProjectionsViewer(Widget):
             self._draw_popup()
 
     def _draw_toolbar(self) -> None:
-        # popup: full selector set including axis + timepoint slider.
-        self._draw_selectors(
-            prefix="popup", include_axis=True, include_timepoint=True
-        )
+        self._draw_popup_selectors()
 
         imgui.set_next_item_width(110)
         cmap_changed, new_cmap = imgui.combo(
@@ -638,7 +489,7 @@ class ProjectionsViewer(Widget):
             return
         cmap = self._cmaps[self._cmap_idx]
         default = f"{path.stem}_{cmap}.png"
-        start_dir = str(self._root) if self._root else ""
+        start_dir = str(path.parent) if path else ""
         try:
             self._save_dialog = pfd.save_file(
                 "Save projection as PNG",
@@ -670,9 +521,10 @@ class ProjectionsViewer(Widget):
             key = self._pending_save_key
             if key is None:
                 return
-            arr = self._array_cache.get(
-                (str(self._projections[key[0]]["files"][(key[1], key[2], key[3])]),)
-            )
+            path = self._projections["files"].get((key[1], key[2], key[3]))
+            if path is None:
+                return
+            arr = self._array_cache.get((str(path),))
             if arr is None:
                 return
             cmap = self._cmaps[self._cmap_idx]
