@@ -12,6 +12,10 @@ from mbo_utilities.preferences import (
     get_default_open_dir,
     set_last_dir,
     add_recent_file,
+    get_gpu_index,
+    set_gpu_index,
+    get_debug_logging,
+    set_debug_logging,
 )
 from mbo_utilities.install import check_installation, cupy_install_hint, Status
 
@@ -172,8 +176,102 @@ class FileDialog:
         self.gui_modes = ["Fastplotlib viewer (default)", "Napari viewer"]
         self.selected_mode_index = 0
 
+        # GPU adapter selection. -1 == wgpu auto-pick; otherwise an index
+        # into self._gpu_adapter_labels. Lazily populated on first render
+        # so importing FileDialog doesn't force fastplotlib import.
+        self._gpu_adapters = None  # list[wgpu adapter]
+        self._gpu_adapter_labels: list[str] = []
+        # Seed from persisted preferences so re-opens remember the user's choice.
+        self.selected_gpu_index: int = get_gpu_index()
+        self.debug_logging: bool = get_debug_logging()
+        self._show_options_popup: bool = False
+
         # start dependency check immediately in background
         self._start_dependency_check()
+
+    def _ensure_gpu_list(self) -> None:
+        """Enumerate adapters once, on first need."""
+        if self._gpu_adapters is not None:
+            return
+        try:
+            import fastplotlib as fpl
+            self._gpu_adapters = list(fpl.enumerate_adapters())
+        except Exception:
+            self._gpu_adapters = []
+        labels = ["auto (default)"]
+        for i, a in enumerate(self._gpu_adapters):
+            info = getattr(a, "info", {}) or {}
+            name = info.get("device", info.get("description", f"adapter {i}"))
+            type_ = info.get("adapter_type", info.get("device_type", "?"))
+            labels.append(f"{i}: {name} [{type_}]")
+        self._gpu_adapter_labels = labels
+
+    def _draw_options_popup(self) -> None:
+        """Modal popup: GPU adapter selector + debug logging flag.
+
+        Both settings are persisted to ~/.mbo/settings/preferences.json on
+        change so the choice survives restarts.
+        """
+        if self._show_options_popup:
+            imgui.open_popup("##options_popup")
+            self._show_options_popup = False
+
+        popup_flags = imgui.WindowFlags_.always_auto_resize
+        if not imgui.begin_popup("##options_popup", popup_flags):
+            return
+
+        try:
+            imgui.text_colored(COL_ACCENT, f"{fa.ICON_FA_GEARS}  Options")
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            self._ensure_gpu_list()
+
+            imgui.text_colored(COL_TEXT_DIM, "GPU adapter")
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Pick which GPU to render with. 'auto' lets wgpu "
+                    "choose (usually the DiscreteGPU). Takes effect on "
+                    "the next dataset you open."
+                )
+            imgui.set_next_item_width(hello_imgui.em_size(20))
+            ui_idx = self.selected_gpu_index + 1  # 0 == "auto"
+            changed, new_ui_idx = imgui.combo(
+                "##gpu_adapter", ui_idx, self._gpu_adapter_labels
+            )
+            if changed:
+                self.selected_gpu_index = new_ui_idx - 1
+                set_gpu_index(self.selected_gpu_index)
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            changed, new_debug = imgui.checkbox("Debug logging", self.debug_logging)
+            if imgui.is_item_hovered():
+                imgui.set_tooltip(
+                    "Verbose console logs (per-read timings, zarr chunk "
+                    "shapes, etc.). Same effect as launching with "
+                    "MBO_DEBUG=1."
+                )
+            if changed:
+                self.debug_logging = new_debug
+                set_debug_logging(self.debug_logging)
+                # Apply immediately so the dialog itself sees the new level.
+                try:
+                    import logging
+                    from mbo_utilities import log as _mbo_log
+                    _mbo_log.set_global_level(
+                        logging.DEBUG if self.debug_logging else logging.INFO
+                    )
+                except Exception:
+                    pass
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            if imgui.button("Close", imgui.ImVec2(hello_imgui.em_size(6), 0)):
+                imgui.close_current_popup()
+        finally:
+            imgui.end_popup()
 
     @property
     def widget_enabled(self):
@@ -559,6 +657,10 @@ class FileDialog:
             imgui.pop_style_var(2)
             imgui.pop_style_color()
 
+            # Options popup is drawn here but only renders when opened
+            # via the button on the bottom row.
+            self._draw_options_popup()
+
             # file/folder completion
             if self._open_multi and self._open_multi.ready():
                 self.selected_path = self._open_multi.result()
@@ -578,13 +680,23 @@ class FileDialog:
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 
-            # quit button (centered)
+            # Options + Quit on a centered row so both remain visible
+            # regardless of how tall the formats card grew.
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-            qsz = imgui.ImVec2(hello_imgui.em_size(6), hello_imgui.em_size(1.5))
-            self._center_widget(qsz.x)
-            # Quit uses secondary style (gray bg, no border)
+            opt_w = hello_imgui.em_size(7)
+            quit_w = hello_imgui.em_size(6)
+            spacing = imgui.get_style().item_spacing.x
+            row_w = opt_w + quit_w + spacing
+            self._center_widget(row_w)
+            btn_h = hello_imgui.em_size(1.5)
+            # Options uses secondary style for visual parity with Quit
             push_button_style(primary=False)
-            if imgui.button(f"{fa.ICON_FA_XMARK}  Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
+            if imgui.button(f"{fa.ICON_FA_GEARS}  Options", imgui.ImVec2(opt_w, btn_h)):
+                self._show_options_popup = True
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("GPU adapter, debug logging, and other settings")
+            imgui.same_line()
+            if imgui.button(f"{fa.ICON_FA_XMARK}  Quit", imgui.ImVec2(quit_w, btn_h)) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None
                 hello_imgui.get_runner_params().app_shall_exit = True
             pop_button_style()

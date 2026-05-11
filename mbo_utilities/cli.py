@@ -374,7 +374,19 @@ def main(
     is_flag=True,
     help="Show only metadata (no image viewer).",
 )
-def view(data_in=None, roi=None, widget=True, metadata=False):
+@click.option(
+    "--gpu",
+    "gpu_index",
+    type=int,
+    default=None,
+    help="0-based GPU adapter index (see --list-gpus). Default: wgpu auto-pick.",
+)
+@click.option(
+    "--list-gpus",
+    is_flag=True,
+    help="List available GPU adapters and exit.",
+)
+def view(data_in=None, roi=None, widget=True, metadata=False, gpu_index=None, list_gpus=False):
     r"""
     Open imaging data in the GUI viewer.
 
@@ -384,7 +396,34 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
       mbo view /data/raw.tiff        Open specific file
       mbo view /data/raw --metadata  Show only metadata
       mbo view /data --roi 0 --roi 2 View specific ROIs
+      mbo view --list-gpus           Show available GPU adapters
+      mbo view /data/raw --gpu 0     Force GPU index 0
     """
+    if list_gpus:
+        import fastplotlib as fpl
+        adapters = fpl.enumerate_adapters()
+        click.echo(f"{'idx':<4} {'type':<14} {'vendor':<10} {'name'}")
+        for i, a in enumerate(adapters):
+            info = getattr(a, "info", {}) or {}
+            type_ = info.get("adapter_type", info.get("device_type", "?"))
+            vendor = info.get("vendor", "?")
+            name = info.get("device", info.get("description", "?"))
+            click.echo(f"{i:<4} {str(type_):<14} {str(vendor):<10} {name}")
+        return
+
+    if gpu_index is not None:
+        import fastplotlib as fpl
+        adapters = fpl.enumerate_adapters()
+        if not 0 <= gpu_index < len(adapters):
+            raise click.BadParameter(
+                f"--gpu {gpu_index} out of range; found {len(adapters)} adapter(s). "
+                f"Run `mbo view --list-gpus` to see them.",
+                param_hint="--gpu",
+            )
+        fpl.select_adapter(adapters[gpu_index])
+        info = getattr(adapters[gpu_index], "info", {}) or {}
+        click.echo(f"Using GPU {gpu_index}: {info.get('device', info.get('description', '?'))}")
+
     # show first-run warning
     first_run = _is_first_run()
     if first_run:

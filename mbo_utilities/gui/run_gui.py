@@ -728,6 +728,23 @@ def _run_gui_impl(
     mode: str = "Fastplotlib viewer (default)",
 ):
     """Internal implementation of run_gui with all heavy imports."""
+    # Apply persisted Options (GPU adapter, debug logging) before any
+    # fastplotlib Figure is created or the launch dialog renders.
+    try:
+        from mbo_utilities.preferences import get_gpu_index, get_debug_logging
+        _gpu_idx = get_gpu_index()
+        if _gpu_idx >= 0:
+            import fastplotlib as fpl
+            _adapters = fpl.enumerate_adapters()
+            if 0 <= _gpu_idx < len(_adapters):
+                fpl.select_adapter(_adapters[_gpu_idx])
+        if get_debug_logging():
+            import logging
+            from mbo_utilities import log as _mbo_log
+            _mbo_log.set_global_level(logging.DEBUG)
+    except Exception:
+        pass
+
     # show splash screen while loading (only for desktop shortcut launches)
     splash = None
     if show_splash and not _is_jupyter():
