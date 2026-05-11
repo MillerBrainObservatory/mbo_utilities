@@ -19,7 +19,6 @@ a single `_KINDS` registry; there are no subclasses.
 | Symbol                                  | Purpose                                                                                                                   |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | [`IsoviewArray(path, kind=None)`](#class-isoviewarray) | The reader. Auto-detects `kind` from the path unless one is supplied. |
-| [`LazyVolume(path, dimensions=None)`](#class-lazyvolume) | Lazy 3D reader for a single zarr / tif / klb / stack file. Used internally by `IsoviewArray`. |
 | [`detect_isoview_kind(path)`](#detect_isoview_kind) | Walks a path (file or dir) and returns `"corrected"`, `"fused"`, `"raw"`, `"clusterpt"`, or `None`. |
 | [`isoview_to_ome_zarr(src, out, kind=None, …)`](#isoview_to_ome_zarr) | Convenience wrapper: open an IsoView tree and write it to a single OME-Zarr v0.5 group. |
 
@@ -105,25 +104,6 @@ Construction steps (in order):
 
 To add a fifth kind you'd append one entry here plus its scanner / resolver — no
 class changes required.
-
-## Class: `LazyVolume`
-
-Wraps a single 3D volume file (one of zarr, tif, klb, stack) behind a uniform
-`shape` / `ndim` / `dtype` / `__getitem__` / `__array__` API. Used by
-`IsoviewArray._probe_shape`, `_read_volume`, and `_read_slab`. Honors zarr's
-chunked indexing so narrow Y×X reads can avoid decompressing the whole volume
-when the source zarr is plane-major chunked.
-
-| Method / property | Behavior                                                                          |
-| ----------------- | --------------------------------------------------------------------------------- |
-| `shape` / `ndim`  | Always 3D `(Z, Y, X)`. Leading singleton T/C dims from OME-Zarr are squeezed.    |
-| `dtype`           | numpy dtype.                                                                      |
-| `attrs`           | For zarr: contents of the group's `.attrs` (for OME multiscales).                |
-| `chunks`          | Zarr chunk shape if applicable, otherwise `None`.                                |
-| `__getitem__`     | Format-aware: tiff reads only the requested pages; zarr forwards the indexer with leading singletons padded; klb falls back to a full materialize. |
-| `__array__`       | Full materialization (`self[:]`).                                                |
-| `close()`         | Releases the backing file handle.                                                |
-| Context manager   | Yes — `with LazyVolume(path) as v:` ensures `close()` runs.                      |
 
 ## Per-kind helpers
 
