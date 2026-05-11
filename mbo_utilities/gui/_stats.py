@@ -8,6 +8,7 @@ the ImPlot-based visualization for signal quality analysis.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
 
 import numpy as np
@@ -158,7 +159,7 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     return [0], "z"
 
 
-def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 200) -> np.ndarray:
+def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 30) -> np.ndarray:
     """Read a single z-plane subsampled in T, capped at `max_samples` frames.
 
     This is the per-plane equivalent of `_load_subsampled` and is used by
@@ -168,6 +169,13 @@ def _read_plane_subsampled(arr: Any, z: int, max_samples: int = 200) -> np.ndarr
     many timepoints the recording has — without it, an N-thousand-frame
     LBM dataset on a slow share would pull tens of GB over the wire and
     leave the progress bar pinned at 0% for the duration.
+
+    `max_samples=30` is the default because zstats only needs a stable
+    estimate of mean/std per plane; 30 evenly-spaced samples is enough
+    for a 1% standard error on the mean and keeps numpy's GIL-holding
+    compute under ~30 ms per plane (vs ~200 ms when reading every
+    frame of a small recording). Larger values made the worker hog
+    the GIL for seconds at a time and visibly stuttered the GUI.
 
     Returns a (T_sub, Y, X) stack of float32 ready for stats math.
     """
@@ -229,6 +237,11 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     # phase correction is irrelevant for mean/std/SNR and expensive per
     # chunk under the shared _tiff_lock — turn it off for all reads here.
     arr.fix_phase = False
+    t_total_start = time.perf_counter()
+    parent.logger.debug(
+        f"[zstats] start array={idx} type={type(arr).__name__} "
+        f"shape={getattr(arr, 'shape', None)} dims={getattr(arr, 'dims', None)}"
+    )
     # Check for pre-computed stats in zarr metadata (instant loading)
     # supports both 'stats' (new) and 'zstats' (legacy) properties
     pre_stats = None
@@ -249,18 +262,35 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         # before the first plane finishes (the first read can take a
         # while on a slow share even with the per-plane cap).
         parent._zstats_progress[idx - 1] = 0.01
+        prev_end = time.perf_counter()
         for i, s in enumerate(slice_range):
-            stack = _read_plane_subsampled(arr, z=s, max_samples=200)
+            t_iter_start = time.perf_counter()
+            gap_ms = (t_iter_start - prev_end) * 1000.0
+            stack = _read_plane_subsampled(arr, z=s, max_samples=30)
+            t_after_read = time.perf_counter()
             mean_img = np.mean(stack, axis=0)
             means.append(mean_img)
+            t_after_compute = time.perf_counter()
+            parent.logger.debug(
+                f"[zstats:pre] arr={idx} plane={s} "
+                f"gap={gap_ms:.0f}ms "
+                f"read={(t_after_read - t_iter_start) * 1000:.0f}ms "
+                f"compute={(t_after_compute - t_after_read) * 1000:.0f}ms "
+                f"frames={stack.shape[0]} bytes={stack.nbytes / 1e6:.1f}MB"
+            )
             parent._zstats_progress[idx - 1] = (i + 1) / n_slices
             parent._zstats_current_z[idx - 1] = s
+            prev_end = t_after_compute
         means_stack = np.stack(means)
         parent._zstats_means[idx - 1] = means_stack
         parent._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
         parent._zstats_done[idx - 1] = True
         parent._zstats_running[idx - 1] = False
-        parent.logger.info(f"Loaded pre-computed {slice_label}-stats from zarr metadata for array {idx}")
+        parent.logger.debug(
+            f"[zstats] done array={idx} (pre-cached stats) "
+            f"total={(time.perf_counter() - t_total_start) * 1000:.0f}ms "
+            f"planes={n_slices}"
+        )
         return
 
     stats, means = {"mean": [], "std": [], "snr": []}, []
@@ -282,8 +312,19 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     # the bulk read is tens of GB. per-plane reads keep total bytes
     # bounded (max_samples * n_planes * Y * X) and let the progress
     # callback tick once per plane.
+    total_read_ms = 0.0
+    total_compute_ms = 0.0
+    total_bytes = 0
+    prev_end = time.perf_counter()
     for i, s in enumerate(slice_range):
-        stack = _read_plane_subsampled(arr, z=s, max_samples=200)
+        t_iter_start = time.perf_counter()
+        # `gap` is wall-clock time between the previous plane finishing
+        # and this plane starting. Should be ~0 ms; non-trivial values
+        # indicate the worker thread was descheduled (lock contention,
+        # GIL hand-off, GC, etc.) — useful for diagnosing GUI starvation.
+        gap_ms = (t_iter_start - prev_end) * 1000.0
+        stack = _read_plane_subsampled(arr, z=s, max_samples=30)
+        t_after_read = time.perf_counter()
 
         mean_img = np.mean(stack, axis=0)
         std_img = np.std(stack, axis=0)
@@ -305,25 +346,45 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         parent._zstats_progress[idx - 1] = (i + 1) / n_slices
         parent._zstats_current_z[idx - 1] = s
 
+        t_after_compute = time.perf_counter()
+        read_ms = (t_after_read - t_iter_start) * 1000.0
+        compute_ms = (t_after_compute - t_after_read) * 1000.0
+        total_read_ms += read_ms
+        total_compute_ms += compute_ms
+        total_bytes += int(stack.nbytes)
+        parent.logger.debug(
+            f"[zstats] arr={idx} plane={s} "
+            f"gap={gap_ms:.0f}ms read={read_ms:.0f}ms "
+            f"compute={compute_ms:.0f}ms "
+            f"frames={stack.shape[0]} bytes={stack.nbytes / 1e6:.1f}MB"
+        )
+        prev_end = t_after_compute
+
     parent._zstats[idx - 1] = stats
     means_stack = np.stack(means)
     parent._zstats_means[idx - 1] = means_stack
     parent._zstats_mean_scalar[idx - 1] = means_stack.mean(axis=(1, 2))
     parent._zstats_done[idx - 1] = True
     parent._zstats_running[idx - 1] = False
+    parent.logger.debug(
+        f"[zstats] done array={idx} "
+        f"total={(time.perf_counter() - t_total_start) * 1000:.0f}ms "
+        f"reads={total_read_ms:.0f}ms compute={total_compute_ms:.0f}ms "
+        f"bytes={total_bytes / 1e6:.1f}MB planes={n_slices}"
+    )
 
     # Save stats to array metadata for persistence (zarr files)
     # prefer 'stats' property but fall back to 'zstats' for backwards compat
     if hasattr(arr, "stats"):
         try:
             arr.stats = stats
-            parent.logger.info(f"Saved stats to array {idx} metadata")
+            parent.logger.debug(f"Saved stats to array {idx} metadata")
         except Exception as e:
             parent.logger.debug(f"Could not save stats to array metadata: {e}")
     elif hasattr(arr, "zstats"):
         try:
             arr.zstats = stats
-            parent.logger.info(f"Saved z-stats to array {idx} metadata")
+            parent.logger.debug(f"Saved z-stats to array {idx} metadata")
         except Exception as e:
             parent.logger.debug(f"Could not save z-stats to array metadata: {e}")
 
@@ -370,7 +431,7 @@ def refresh_zstats(parent: Any):
 
     # Update nz from the array's dims tuple. Dims labels are not normalized:
     # some readers emit lowercase ("t", "z", "c"), others uppercase
-    # ("T", "C", "Z", "Y", "X" — IsoViewCorrectedArray, ScanImageArray, etc.)
+    # ("T", "C", "Z", "Y", "X" — IsoviewArray, ScanImageArray, etc.)
     # The case-sensitive `"z" in dims` test used to fail on uppercase
     # readers, so we'd fall through to `shape[1]` — which on a 5D TCZYX
     # array is the channel axis, not Z. Result: nz silently became nc, the
@@ -393,7 +454,7 @@ def refresh_zstats(parent: Any):
     else:
         parent.nz = 1
 
-    parent.logger.info(f"Refreshing z-stats for {n} arrays, nz={parent.nz}")
+    parent.logger.debug(f"Refreshing z-stats for {n} arrays, nz={parent.nz}")
 
     # Mark all as running before starting
     for i in range(n):
