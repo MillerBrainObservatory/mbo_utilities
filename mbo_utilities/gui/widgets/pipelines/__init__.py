@@ -54,6 +54,12 @@ def _register_pipelines_sync() -> None:
         except Exception:
             pass
 
+        try:
+            from mbo_utilities.gui.widgets.pipelines.isoview import IsoviewPipelineWidget
+            _PIPELINE_CLASSES.append(IsoviewPipelineWidget)
+        except Exception:
+            pass
+
         # future: add more pipelines here
         # from .masknmf import MaskNMFPipelineWidget
         # _PIPELINE_CLASSES.append(MaskNMFPipelineWidget)
@@ -133,67 +139,141 @@ def any_pipeline_available() -> bool:
     return any(p.is_available for p in _PIPELINE_CLASSES)
 
 
-def draw_run_tab(parent: Any) -> None:
-    """
-    Draw the run tab content.
+def _active_array(parent: Any) -> Any:
+    """Return the currently-loaded array (or ``None``).
 
-    shows pipeline selector and the selected pipeline's widget.
-    if no pipelines available, shows install message.
+    Used to filter pipelines via :meth:`PipelineWidget.applies_to`.
+    """
+    iw = getattr(parent, "image_widget", None)
+    if iw is None or not iw.data:
+        return None
+    return iw.data[0]
+
+
+def _is_pipeline_available(cls: type) -> bool:
+    """Resolve ``is_available`` whether it's a class attr or a property.
+
+    Suite2p declares ``is_available`` as a ``@property`` (instance-bound),
+    so reading it off the class returns the descriptor (truthy) and not
+    the value. We instantiate temporarily if needed — Suite2p widgets
+    are heavy to construct so we cache the result on the class.
+    """
+    cached = getattr(cls, "_is_available_cached", None)
+    if cached is not None:
+        return cached
+    val = cls.__dict__.get("is_available")
+    if isinstance(val, property):
+        try:
+            result = bool(val.fget(cls.__new__(cls)))
+        except Exception:
+            # property reads parent state — give up and assume available
+            result = True
+    else:
+        result = bool(getattr(cls, "is_available", True))
+    cls._is_available_cached = result  # type: ignore[attr-defined]
+    return result
+
+
+def draw_run_tab(parent: Any) -> None:
+    """Draw the run tab content.
+
+    Renders a pipeline selector at the top (when more than one
+    applicable pipeline is available), then the selected widget's
+    config UI. Pipelines are filtered by ``is_available`` (deps
+    installed) AND ``applies_to(active_array)`` (data type matches).
     """
     _register_pipelines()
 
-    # initialize state
-    if not hasattr(parent, "_selected_pipeline_idx"):
-        parent._selected_pipeline_idx = 0
+    # Persist selection by pipeline NAME, not list index — the list of
+    # applicable pipelines changes between datasets, and an int index
+    # silently shifts to a different pipeline when the list shrinks.
+    if not hasattr(parent, "_selected_pipeline_name"):
+        parent._selected_pipeline_name = None
     if not hasattr(parent, "_pipeline_instances"):
         parent._pipeline_instances = {}
 
-    # check if any pipelines available
+    arr = _active_array(parent)
+
     if not _PIPELINE_CLASSES:
         imgui.text_colored(
             imgui.ImVec4(1.0, 0.7, 0.2, 1.0),
-            "No pipelines available."
+            "No pipelines registered.",
         )
         imgui.text("Install a pipeline package:")
         imgui.text_colored(
             imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
-            "uv pip install mbo_utilities"
+            "uv pip install mbo_utilities",
         )
         return
 
-    # get first available pipeline (currently only suite2p)
-    pipeline_cls = _PIPELINE_CLASSES[0]
-    parent._selected_pipeline_idx = 0
+    # partition: applicable to current data (and installed) vs. not.
+    applicable: list[type[PipelineWidget]] = []
+    not_applicable: list[type[PipelineWidget]] = []
+    not_installed: list[type[PipelineWidget]] = []
+    for cls in _PIPELINE_CLASSES:
+        installed = _is_pipeline_available(cls)
+        try:
+            applies = cls.applies_to(arr)
+        except Exception:
+            applies = False
+        if installed and applies:
+            applicable.append(cls)
+        elif not installed:
+            not_installed.append(cls)
+        else:
+            not_applicable.append(cls)
 
-    # if not available, show install message
-    if not pipeline_cls.is_available:
-        imgui.spacing()
+    if not applicable:
         imgui.text_colored(
             imgui.ImVec4(1.0, 0.7, 0.2, 1.0),
-            f"{pipeline_cls.name} is not installed."
+            "No pipeline applies to the loaded data.",
         )
         imgui.spacing()
-        imgui.text("Install with:")
-        imgui.text_colored(
-            imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
-            pipeline_cls.install_command
-        )
+        if not_applicable:
+            imgui.text("Installed but not applicable to this data:")
+            for cls in not_applicable:
+                imgui.bullet_text(f"{cls.name}")
+        if not_installed:
+            imgui.spacing()
+            imgui.text("Not installed:")
+            for cls in not_installed:
+                imgui.bullet_text(cls.name)
+                imgui.indent(16)
+                imgui.text_colored(
+                    imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
+                    cls.install_command,
+                )
+                imgui.unindent(16)
         return
 
-    # get or create pipeline instance
+    # selector — combo when more than one option. Resolve persisted
+    # name → list index each frame so a user's choice survives switching
+    # between datasets where the applicable set changes.
+    labels = [c.name for c in applicable]
+    try:
+        idx = labels.index(parent._selected_pipeline_name)
+    except (ValueError, TypeError):
+        idx = 0
+    if len(applicable) > 1:
+        imgui.set_next_item_width(220)
+        changed, new_idx = imgui.combo("Pipeline##run_tab", idx, labels)
+        if changed:
+            idx = new_idx
+        imgui.separator()
+    pipeline_cls = applicable[idx]
+    parent._selected_pipeline_name = pipeline_cls.name
+
     pipeline_key = pipeline_cls.name
     if pipeline_key not in parent._pipeline_instances:
         parent._pipeline_instances[pipeline_key] = pipeline_cls(parent)
-
     pipeline = parent._pipeline_instances[pipeline_key]
 
-    # draw the pipeline widget
     try:
         pipeline.draw()
     except Exception as e:
         imgui.text_colored(
             imgui.ImVec4(1.0, 0.3, 0.3, 1.0),
-            f"Error: {e}"
+            f"Error: {e}",
         )
 
 
