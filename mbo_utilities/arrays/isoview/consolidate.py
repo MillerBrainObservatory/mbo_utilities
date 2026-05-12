@@ -4,35 +4,42 @@ Reads via :class:`mbo_utilities.arrays.isoview.IsoviewArray`, walks the
 companion files (3D masks, 2D coordinate / depth masks, projection
 TIFFs, backgrounds, raw XMLs, min-intensity NPZs), and writes one
 Zarr v3 group following the OME-NGFF 0.5 spec for the spec-covered
-pieces (multiscales, omero, labels) plus a custom ``/isoview/``
-subgroup for the items the spec has no first-class home for.
+pieces (multiscales, omero, labels). Items the spec has no first-class
+home for live as top-level sibling groups (2D masks, backgrounds,
+``/metadata/``) — each with its own ``multiscales`` block so Fiji can
+drag-drop them directly.
 
 Output structure (both kinds share most of this)::
 
     <out>.zarr/
     ├── zarr.json                            ome.{version, multiscales, omero}
     ├── 0/ .. n/                             image pyramid (T,C,Z,Y,X) uint16
+    ├── max_z/                               XY max-projection (T,C,1,Y,X), own pyramid
+    ├── max_y/                               XZ max-projection (T,C,Z,1,X), own pyramid
+    ├── max_x/                               YZ max-projection (T,C,Z,Y,1), own pyramid
+    ├── raw_max_z/                           corrected only — disk-read XY proj
+    │                                        (T,C,1,Y,X), own pyramid
     ├── labels/
     │   ├── zarr.json                        ome.labels = ["segmentation"]
     │   └── segmentation/                    parent-mirroring pyramid, uint8
     │                                        corrected: per-camera mask
     │                                        fused:     combined mask (cam0 ∪ cam1)
-    └── isoview/                             custom namespace
-        ├── projections/<kind>/{xy,xz,yz}/   (T,C,d0,d1) uint16, own pyramid
-        │                                    computed from /0/ volume in
-        │                                    one read per (t,c)
-        ├── projections/raw/xy/              corrected only — disk-read from
-        │                                    <root>.raw.projections/ (xy only)
-        ├── aux/...                          source-faithful 2D auxiliaries:
-        │                                    corrected: xy_mask, xz_mask
-        │                                    fused:     fusion_mask,
-        │                                               mask2D_cam{0,1},
-        │                                               transformedMask2D_cam1
-        ├── backgrounds/0/                   (C,Y,X) uncompressed, pixel-exact
-        ├── min_intensity/0/                 corrected only — (T,C,2) float32
-        └── provenance/
-            ├── attrs                        common + per_camera + isoview_config
-            └── xml_raw/<stem>/              1D uint8, verbatim XML bytes
+    ├── xy_mask/, xz_mask/                   corrected only — (T,C,1,d0,d1)
+    ├── fusion_mask/                         fused only — (T,C,1,Y,X)
+    ├── mask2D_cam0/, mask2D_cam1/           fused only — (T,C,1,d0,d1)
+    ├── transformedMask2D_cam1/              fused only — (T,C,1,d0,d1)
+    ├── backgrounds/                         (1,C,1,Y,X) uncompressed
+    ├── min_intensity/                       corrected only — (T,C,2), no multiscales
+    └── metadata/
+        ├── attrs                            common + per_camera + isoview_config
+        └── xml_raw/<stem>/                  1D uint8, verbatim XML bytes
+
+Every image array is written as full 5D TCZYX (singleton dims padded
+for projections, backgrounds, and 2D mask groups) so Fiji's OME-NGFF
+reader — which is hardcoded for 5D and crashes on lower-rank arrays —
+can drag-drop-open any of them directly. The one exception is
+``min_intensity``, which is bookkeeping data and carries no
+multiscales block.
 
 Public entry: :func:`consolidate_isoview` (kind dispatch).
 """
@@ -376,24 +383,12 @@ _AXES_5D = [
     {"name": "y", "type": "space", "unit": "micrometer"},
     {"name": "x", "type": "space", "unit": "micrometer"},
 ]
-_AXES_4D = [
-    {"name": "t", "type": "time", "unit": "second"},
-    {"name": "c", "type": "channel"},
-    {"name": "y", "type": "space", "unit": "micrometer"},
-    {"name": "x", "type": "space", "unit": "micrometer"},
-]
 
 
 def _scale_5d(dt_s, dz, dy, dx, mag_zyx):
     """Build a (T, C, Z, Y, X) scale list for one pyramid level."""
     mz, my, mx = mag_zyx
     return [float(dt_s), 1.0, float(dz * mz), float(dy * my), float(dx * mx)]
-
-
-def _scale_4d(dt_s, dy, dx, mag_yx):
-    """Build a (T, C, Y, X) scale list for one pyramid level."""
-    my, mx = mag_yx
-    return [float(dt_s), 1.0, float(dy * my), float(dx * mx)]
 
 
 def _multiscales_block(
@@ -635,7 +630,7 @@ def _write_segmentation_pyramid(
 
 
 def _write_aux_2d_per_tc(
-    iso_group,
+    root,
     name: str,
     scanner: dict[int, dict[int, Path]],
     iso_arr: IsoviewArray,
@@ -643,16 +638,16 @@ def _write_aux_2d_per_tc(
     compression_level: int,
     progress_callback: ProgressCallback | None,
 ) -> None:
-    """Write /isoview/aux/<name>/0/ — a 2D-per-(t,c) auxiliary array.
+    """Write ``/<name>/0/`` — a 2D-per-(t,c) auxiliary mask at top level.
 
-    Used for the ``xyMask`` / ``xzMask`` coordinate maps the IsoView
-    pipeline emits. These don't fit the OME label projection schema
-    (their axes don't map cleanly to "drop Z" or "drop X"; e.g. the
-    "xzMask" is shape ``(Y, Z)``, not ``(Z, X)`` as the name implies),
-    so we store them faithfully under a custom path without OME
-    labels metadata.
+    Used for the ``xyMask`` / ``xzMask`` coordinate maps (corrected) and
+    the ``fusion_mask`` / ``mask2D_*`` slice masks (fused). Each becomes
+    its own multiscale group at the zarr root so Fiji's OME-NGFF reader
+    can drag-drop the folder directly.
 
-    Output shape: ``(T, C, dim0, dim1)`` matching the source 2D shape.
+    Output shape: ``(T, C, 1, dim0, dim1)`` — singleton Z padded in so the
+    Fiji OME-NGFF reader (which only handles 5D) accepts the array. The
+    source 2D plane is preserved bit-exact at ``arr[t, c, 0, :, :]``.
     No pyramid — these arrays are small (~70 KB per (t, c) for a
     typical isoview dataset).
     """
@@ -679,14 +674,10 @@ def _write_aux_2d_per_tc(
 
     nt = iso_arr.num_timepoints
     nc = iso_arr.num_color_channels
-    shape = (nt, nc, dim0, dim1)
-    chunk = (1, 1, dim0, dim1)
+    shape = (nt, nc, 1, dim0, dim1)
+    chunk = (1, 1, 1, dim0, dim1)
 
-    aux_group = (
-        iso_group["aux"] if "aux" in iso_group
-        else iso_group.create_group("aux", overwrite=False)
-    )
-    sub = aux_group.create_group(name, overwrite=True)
+    sub = root.create_group(name, overwrite=True)
     arr = _create_sharded_array(
         sub, "0", shape, src_dtype, chunk, chunk,
         compressor, compression_level,
@@ -707,23 +698,29 @@ def _write_aux_2d_per_tc(
                     name, ti, ci, (dim0, dim1), data.shape,
                 )
                 continue
-            arr[ti, ci, :, :] = data
+            arr[ti, ci, 0, :, :] = data
             if progress_callback:
                 progress_callback(f"aux_{name}", ti * nc + ci + 1, nt * nc)
 
+    sub.attrs["ome"] = {
+        "version": "0.5",
+        "multiscales": [
+            _multiscales_block(
+                name, _AXES_5D, ["0"], [[1.0, 1.0, 1.0, 1.0, 1.0]],
+            )
+        ],
+    }
     sub.attrs["description"] = (
-        f"Isoview-internal 2D coordinate mask per (t, c). "
-        f"Source TIFF shape preserved: (dim0={dim0}, dim1={dim1}). "
-        f"Axes are isoview-specific and don't fit the OME-NGFF labels "
-        f"spec, hence the custom /isoview/aux/ path."
+        f"Isoview-internal 2D mask per (t, c). Source plane shape: "
+        f"(dim0={dim0}, dim1={dim1}); padded with singleton Z for the "
+        f"Fiji 5D reader. Unit scales (axes are isoview-specific)."
     )
 
 
-# === /isoview/projections (intensity max-projections) ===
+# === max projections ===
 
 def _write_disk_xy_projections(
-    iso_group,
-    name: str,  # typically "raw"
+    root,
     projections: dict | None,
     iso_arr: IsoviewArray,
     tm_int_by_index: dict[int, int],
@@ -735,18 +732,17 @@ def _write_disk_xy_projections(
     compression_level: int,
     progress_callback: ProgressCallback | None,
 ) -> None:
-    """Read pre-computed XY projection TIFFs from a flat-projections dir.
+    """Read pre-computed XY projection TIFFs and write top-level ``/raw_max_z/``.
 
     Used only for the corrected pipeline's *raw* projections (the only
     case where projections aren't derivable from the consolidated
     volume — they're max-projections of the raw acquisition stacks,
     not the corrected output). For projections of the corrected /
-    fused volume, use :func:`_write_computed_projections` instead so
-    the projections derive from the canonical /0/ image data and we
-    get xy/xz/yz in one pass.
+    fused volume, use :func:`_write_computed_projections` instead.
 
-    Output: ``/isoview/projections/<name>/xy/{0..N}/`` shape
-    ``(T, C, Y, X)``. Own Y/X-only pyramid.
+    Output: ``/raw_max_z/{0..N}/`` shape ``(T, C, 1, Y, X)`` — 5D with
+    a singleton Z so Fiji's 5D-only OME-NGFF reader can drag-drop the
+    folder directly.
     """
     if not projections or not projections.get("files"):
         return
@@ -763,10 +759,7 @@ def _write_disk_xy_projections(
     ny, nx = sample.shape
     dtype = sample.dtype
 
-    parent_group = iso_group.create_group("projections", overwrite=False) \
-        if "projections" not in iso_group else iso_group["projections"]
-    src_group = parent_group.create_group(name, overwrite=True)
-    xy_group = src_group.create_group("xy", overwrite=True)
+    xy_group = root.create_group("raw_max_z", overwrite=True)
 
     paths: list[str] = []
     scales: list[list[float]] = []
@@ -775,15 +768,16 @@ def _write_disk_xy_projections(
         my, mx = mag
         out_ny = max(1, ny // my)
         out_nx = max(1, nx // mx)
-        shape = (nt, nc, out_ny, out_nx)
-        chunk = (1, 1, out_ny, out_nx)
+        shape = (nt, nc, 1, out_ny, out_nx)
+        chunk = (1, 1, 1, out_ny, out_nx)
         shard = chunk
         arr = _create_sharded_array(
             xy_group, str(level_idx), shape, dtype, chunk, shard,
             compressor, compression_level,
         )
         paths.append(str(level_idx))
-        scales.append(_scale_4d(dt_s, dy, dx, mag))
+        # 5D scale with Z mag fixed at 1 (singleton).
+        scales.append(_scale_5d(dt_s, 1.0, dy, dx, (1, my, mx)))
 
         if level_idx == 0:
             for ti in range(nt):
@@ -800,10 +794,10 @@ def _write_disk_xy_projections(
                     img = np.asarray(tifffile.imread(str(p)))
                     if img.ndim != 2:
                         img = np.squeeze(img)
-                    arr[ti, ci, :, :] = img.astype(dtype, copy=False)
+                    arr[ti, ci, 0, :, :] = img.astype(dtype, copy=False)
                     if progress_callback:
                         progress_callback(
-                            f"proj_{name}_l0",
+                            "raw_max_z_l0",
                             ti * nc + ci + 1, nt * nc,
                         )
         else:
@@ -813,27 +807,38 @@ def _write_disk_xy_projections(
             factor2 = (mag[0] // prev_mag[0], mag[1] // prev_mag[1])
             for ti in range(nt):
                 for ci in range(nc):
-                    img = prev_arr[ti, ci, :, :]
+                    img = prev_arr[ti, ci, 0, :, :]
                     out = downsample_block(img, factor2, method="gaussian")
                     out = out[:out_ny, :out_nx]
-                    arr[ti, ci, :, :] = out
+                    arr[ti, ci, 0, :, :] = out
                     if progress_callback:
                         progress_callback(
-                            f"proj_{name}_l{level_idx}",
+                            f"raw_max_z_l{level_idx}",
                             ti * nc + ci + 1, nt * nc,
                         )
 
     xy_group.attrs["ome"] = {
         "version": "0.5",
         "multiscales": [
-            _multiscales_block(f"projections/{name}/xy", _AXES_4D, paths, scales)
+            _multiscales_block("raw_max_z", _AXES_5D, paths, scales)
         ],
     }
 
 
+def _proj_slot(singleton_dim: int, ti: int, ci: int) -> tuple:
+    """Build a 5D indexer that writes a 2D plane into ``arr[t, c, ...]``
+    where ``singleton_dim`` (2=Z, 3=Y, 4=X) is collapsed to index 0."""
+    if singleton_dim == 2:
+        return (ti, ci, 0, slice(None), slice(None))
+    if singleton_dim == 3:
+        return (ti, ci, slice(None), 0, slice(None))
+    if singleton_dim == 4:
+        return (ti, ci, slice(None), slice(None), 0)
+    raise ValueError(f"singleton_dim must be 2, 3, or 4; got {singleton_dim}")
+
+
 def _write_computed_projections(
-    iso_group,
-    name: str,                                      # "corrected" | "fused"
+    root,
     iso_arr: IsoviewArray,
     image_mags: list[tuple[int, int, int]],
     dx: float,
@@ -844,57 +849,64 @@ def _write_computed_projections(
     compression_level: int,
     progress_callback: ProgressCallback | None,
 ) -> None:
-    """Compute xy/xz/yz max-projections from the volume and write three subgroups.
+    """Compute XY/XZ/YZ max-projections and write top-level multiscale groups.
 
-    Used by both corrected and fused consolidators (the user wanted the
-    same function for both, with all three projection axes per kind).
     Each (t, c) volume is read **once** from the lazy IsoviewArray and
-    reduced along all three axes; the three writes share that read.
+    reduced along all three spatial axes; the three writes share that
+    single read. Each projection becomes a sibling of the main image
+    pyramid so Fiji's OME-NGFF reader can drag-drop it directly:
 
-    Pyramid factors come from the image's anisotropic mags, projected to
-    the relevant 2D pair per axis:
-      - xy reduces over Z → axes are (Y, X) → uses ``(my, mx)``
-      - xz reduces over Y → axes are (Z, X) → uses ``(mz, mx)``
-      - yz reduces over X → axes are (Z, Y) → uses ``(mz, my)``
+      - ``/max_z/`` — max-projection over Z, (T,C,1,Y,X), Z=1 singleton
+      - ``/max_y/`` — max-projection over Y, (T,C,Z,1,X), Y=1 singleton
+      - ``/max_x/`` — max-projection over X, (T,C,Z,Y,1), X=1 singleton
 
-    So Z (which the anisotropic algorithm never downsamples for IsoView
-    data) stays at the source size at every level of xz/yz — the
-    pyramid only shrinks the surviving spatial axis. The xy pyramid
-    halves both Y and X each level.
+    All three are written as full 5D TCZYX arrays with the reduced spatial
+    axis collapsed to a single sample. This is the shape the Fiji
+    ``Pyramidal5DImageData`` reader expects; sub-5D arrays trip an OOB
+    inside its 4D-per-channel source constructor.
 
-    Output: ``/isoview/projections/<name>/{xy,xz,yz}/{0..N}/``, each its
-    own ``(T, C, d0, d1)`` multiscale group.
+    Pyramid factors come from the image's anisotropic mags. Z (which the
+    anisotropic algorithm never downsamples for IsoView data) stays at
+    the source size at every level of max_y/max_x; max_z halves Y/X.
     """
     nt, nc, nz, ny, nx = iso_arr.shape
     dtype = iso_arr.dtype
 
-    parent = (
-        iso_group["projections"] if "projections" in iso_group
-        else iso_group.create_group("projections", overwrite=False)
-    )
-    sub = parent.create_group(name, overwrite=True)
-
-    # per-axis layout: source shape, which volume axis to max-reduce,
-    # which two image mag entries become the per-level 2D factor,
-    # and how to build the OME scale list for each level.
+    # per-axis layout:
+    #   reduce      — which volume axis to max-project (0=Z, 1=Y, 2=X)
+    #   singleton   — which 5D output dim becomes size 1 (2=Z, 3=Y, 4=X)
+    #   shape_at(m) — full 5D shape at a given anisotropic mag tuple
+    #   scale_for(m)— per-level 5D OME scale (TCZYX)
     axis_specs: dict[str, dict] = {
-        "xy": {
-            "shape": (ny, nx),
-            "reduce": 0,                                  # max over Z
-            "mags": [(my, mx) for (_mz, my, mx) in image_mags],
-            "scale_for": lambda m: _scale_4d(dt_s, dy, dx, m),
+        "max_z": {
+            "reduce": 0,
+            "singleton": 2,
+            "shape_at": lambda m: (
+                nt, nc, 1, max(1, ny // m[1]), max(1, nx // m[2]),
+            ),
+            "scale_for": lambda m: _scale_5d(
+                dt_s, dz, dy, dx, (1, m[1], m[2]),
+            ),
         },
-        "xz": {
-            "shape": (nz, nx),
-            "reduce": 1,                                  # max over Y
-            "mags": [(mz, mx) for (mz, _my, mx) in image_mags],
-            "scale_for": lambda m: _scale_4d(dt_s, dz, dx, m),
+        "max_y": {
+            "reduce": 1,
+            "singleton": 3,
+            "shape_at": lambda m: (
+                nt, nc, max(1, nz // m[0]), 1, max(1, nx // m[2]),
+            ),
+            "scale_for": lambda m: _scale_5d(
+                dt_s, dz, dy, dx, (m[0], 1, m[2]),
+            ),
         },
-        "yz": {
-            "shape": (nz, ny),
-            "reduce": 2,                                  # max over X
-            "mags": [(mz, my) for (mz, my, _mx) in image_mags],
-            "scale_for": lambda m: _scale_4d(dt_s, dz, dy, m),
+        "max_x": {
+            "reduce": 2,
+            "singleton": 4,
+            "shape_at": lambda m: (
+                nt, nc, max(1, nz // m[0]), max(1, ny // m[1]), 1,
+            ),
+            "scale_for": lambda m: _scale_5d(
+                dt_s, dz, dy, dx, (m[0], m[1], 1),
+            ),
         },
     }
 
@@ -902,20 +914,17 @@ def _write_computed_projections(
     # to each axis in one pass without re-iterating the volume.
     axis_state: dict[str, dict] = {}
     for axis, spec in axis_specs.items():
-        axis_group = sub.create_group(axis, overwrite=True)
-        d0_src, d1_src = spec["shape"]
+        axis_group = root.create_group(axis, overwrite=True)
         arrays: list = []
         paths: list[str] = []
         scales: list[list[float]] = []
-        for level_idx, mag in enumerate(spec["mags"]):
-            m0, m1 = mag
-            out_d0 = max(1, d0_src // m0)
-            out_d1 = max(1, d1_src // m1)
-            shape4d = (nt, nc, out_d0, out_d1)
-            chunk4d = (1, 1, out_d0, out_d1)
+        for level_idx, mag in enumerate(image_mags):
+            shape5 = spec["shape_at"](mag)
+            # One inner chunk == one full 2D plane per (t, c).
+            chunk5 = (1, 1, shape5[2], shape5[3], shape5[4])
             arr = _create_sharded_array(
-                axis_group, str(level_idx), shape4d, dtype,
-                chunk4d, chunk4d, compressor, compression_level,
+                axis_group, str(level_idx), shape5, dtype,
+                chunk5, chunk5, compressor, compression_level,
             )
             arrays.append(arr)
             paths.append(str(level_idx))
@@ -923,67 +932,69 @@ def _write_computed_projections(
         axis_group.attrs["ome"] = {
             "version": "0.5",
             "multiscales": [
-                _multiscales_block(
-                    f"projections/{name}/{axis}", _AXES_4D, paths, scales
-                )
+                _multiscales_block(axis, _AXES_5D, paths, scales)
             ],
         }
         axis_state[axis] = {
             "arrays": arrays,
-            "mags": spec["mags"],
             "reduce": spec["reduce"],
+            "singleton": spec["singleton"],
         }
 
     # Level 0: one volume read per (t, c), three projection writes.
     for ti in range(nt):
         for ci in range(nc):
             vol = np.asarray(iso_arr[ti, ci])         # (Z, Y, X)
-            for axis, state in axis_state.items():
+            for state in axis_state.values():
                 proj = vol.max(axis=state["reduce"])  # 2D
-                state["arrays"][0][ti, ci, :, :] = proj.astype(dtype, copy=False)
+                slot = _proj_slot(state["singleton"], ti, ci)
+                state["arrays"][0][slot] = proj.astype(dtype, copy=False)
             if progress_callback:
-                progress_callback(
-                    f"proj_{name}_l0", ti * nc + ci + 1, nt * nc
-                )
+                progress_callback("max_proj_l0", ti * nc + ci + 1, nt * nc)
 
-    # Higher levels per axis: gaussian downsample from the prior level.
+    # Higher levels per axis: squeeze the singleton out of the prior
+    # level's plane, gaussian-downsample 2D, write back into the
+    # singleton slot.
     for axis, state in axis_state.items():
         arrays = state["arrays"]
-        mags = state["mags"]
+        singleton = state["singleton"]
+        sq_axis = singleton - 2  # axis position inside per-(t,c) ZYX slice
         for level_idx in range(1, len(arrays)):
             arr = arrays[level_idx]
             prev_arr = arrays[level_idx - 1]
-            prev_mag = mags[level_idx - 1]
-            mag = mags[level_idx]
-            factor = (mag[0] // prev_mag[0], mag[1] // prev_mag[1])
+            surviving = [d for d in (2, 3, 4) if d != singleton]
+            factor = tuple(
+                max(1, prev_arr.shape[d] // arr.shape[d]) for d in surviving
+            )
+            target = tuple(arr.shape[d] for d in surviving)
             for ti in range(nt):
                 for ci in range(nc):
-                    prev_2d = prev_arr[ti, ci, :, :]
+                    prev_2d = np.squeeze(prev_arr[ti, ci], axis=sq_axis)
                     if all(f == 1 for f in factor):
                         out = prev_2d
                     else:
                         out = downsample_block(
                             prev_2d, factor, method="gaussian"
                         )
-                        out = out[: arr.shape[2], : arr.shape[3]]
-                    arr[ti, ci, :, :] = out
+                        out = out[: target[0], : target[1]]
+                    arr[_proj_slot(singleton, ti, ci)] = out
                     if progress_callback:
                         progress_callback(
-                            f"proj_{name}_{axis}_l{level_idx}",
+                            f"{axis}_l{level_idx}",
                             ti * nc + ci + 1, nt * nc,
                         )
 
 
-# === /isoview/min_intensity ===
+# === /min_intensity ===
 
 def _write_min_intensity(
-    iso_group,
+    root,
     scanner: dict[int, dict[int, Path]],
     iso_arr: IsoviewArray,
     compressor: str,
     compression_level: int,
 ) -> None:
-    """Write /isoview/min_intensity/0/ as (T, C, 2) float32.
+    """Write top-level ``/min_intensity/0/`` as (T, C, 2) float32.
 
     The ``minIntensity.npz`` archives carry either a scalar or a
     ``[mask_pct, stack_pct]`` 2-vector per (t, c). We normalize to the
@@ -1013,7 +1024,7 @@ def _write_min_intensity(
                 data[ti, ci, 0] = float(flat[0])
                 data[ti, ci, 1] = float(flat[1]) if flat.size > 1 else float(flat[0])
 
-    g = iso_group.create_group("min_intensity", overwrite=True)
+    g = root.create_group("min_intensity", overwrite=True)
     arr = _create_sharded_array(
         g, "0", data.shape, data.dtype, data.shape, data.shape,
         compressor, compression_level,
@@ -1022,15 +1033,15 @@ def _write_min_intensity(
     g.attrs["description"] = (
         "Background percentile baseline per (t, c). Two slots: "
         "[mask_pct, stack_pct] when segmentation enabled; both equal "
-        "to stack_pct otherwise."
+        "to stack_pct otherwise. Not an image — no multiscales block."
     )
 
 
-# === /isoview/provenance ===
+# === /metadata ===
 
-def _write_provenance(iso_group, iso_arr: IsoviewArray) -> None:
-    """Inline parsed XML + isoview_config into group attrs."""
-    g = iso_group.create_group("provenance", overwrite=True)
+def _write_metadata(root, iso_arr: IsoviewArray) -> None:
+    """Inline parsed XML + isoview_config into ``/metadata`` attrs."""
+    g = root.create_group("metadata", overwrite=True)
     g.attrs["common"] = _json_safe(iso_arr._metadata)
     if iso_arr._camera_metadata:
         g.attrs["per_camera"] = _json_safe(iso_arr._camera_metadata)
@@ -1047,15 +1058,16 @@ def _write_provenance(iso_group, iso_arr: IsoviewArray) -> None:
                 logger.debug("could not read %s: %s", cfg, exc)
 
 
-def _write_backgrounds(iso_group, raw_root: Path | None) -> None:
-    """Store ``Background_*.tif`` images as a single ``(C, Y, X)`` zarr.
+def _write_backgrounds(root, raw_root: Path | None) -> None:
+    """Store ``Background_*.tif`` images as top-level ``/backgrounds/``.
 
-    The raw acquisition root holds one background image per camera
-    (e.g. ``Background_0.tif`` ... ``Background_3.tif``). They're stored
+    Shape ``(1, C, 1, Y, X)`` — 5D TCZYX with singleton T and Z so
+    Fiji's 5D-only OME-NGFF reader can drag-drop the folder. The raw
+    acquisition root holds one background image per camera (e.g.
+    ``Background_0.tif`` ... ``Background_3.tif``). They're stored
     *uncompressed* and pixel-exact so the array round-trips bit-for-bit
     against the source TIFFs — the user's explicit requirement for
-    these is "not compressed or altered in any way". One chunk per
-    camera plane.
+    these is "not compressed or altered in any way".
 
     No-op when ``raw_root`` is unreachable or has no ``Background_*.tif``.
     """
@@ -1077,14 +1089,15 @@ def _write_backgrounds(iso_group, raw_root: Path | None) -> None:
         return
     ny, nx = sample.shape
     dtype = sample.dtype
+    nc = len(bg_files)
 
-    bg_group = iso_group.create_group("backgrounds", overwrite=True)
+    bg_group = root.create_group("backgrounds", overwrite=True)
     arr = _create_sharded_array(
         bg_group, "0",
-        shape=(len(bg_files), ny, nx),
+        shape=(1, nc, 1, ny, nx),
         dtype=dtype,
-        chunk_shape=(1, ny, nx),
-        shard_shape=(1, ny, nx),
+        chunk_shape=(1, 1, 1, ny, nx),
+        shard_shape=(1, 1, 1, ny, nx),
         compressor="none",
         compression_level=0,
     )
@@ -1100,26 +1113,36 @@ def _write_backgrounds(iso_group, raw_root: Path | None) -> None:
                 bg.name, img.shape, (ny, nx),
             )
             continue
-        arr[i] = img
+        arr[0, i, 0, :, :] = img
         source_names.append(bg.name)
 
+    bg_group.attrs["ome"] = {
+        "version": "0.5",
+        "multiscales": [
+            _multiscales_block(
+                "backgrounds", _AXES_5D, ["0"],
+                [[1.0, 1.0, 1.0, 1.0, 1.0]],
+            )
+        ],
+    }
     bg_group.attrs["description"] = (
         "Per-camera background images from the raw acquisition root. "
-        "Stored uncompressed and pixel-exact (no scaling, no codec)."
+        "Stored uncompressed and pixel-exact (no scaling, no codec). "
+        "Padded to 5D (T=1, Z=1) for Fiji's OME-NGFF reader."
     )
     bg_group.attrs["source_files"] = source_names
 
 
-def _write_raw_xml(iso_group, raw_root: Path | None) -> None:
+def _write_raw_xml(root, raw_root: Path | None) -> None:
     """Store each ``*.xml`` from the raw root as a 1D ``uint8`` byte array.
 
-    Path: ``/isoview/provenance/xml_raw/<stem>/``. The array is the
-    literal bytes of the source file — no encoding, no parsing, no
-    compression. Use ``arr[:].tobytes().decode("utf-8")`` to round-trip
-    back to text. Original filename stays in ``arr.attrs["filename"]``.
+    Path: ``/metadata/xml_raw/<stem>/``. The array is the literal bytes
+    of the source file — no encoding, no parsing, no compression. Use
+    ``arr[:].tobytes().decode("utf-8")`` to round-trip back to text.
+    Original filename stays in ``arr.attrs["filename"]``.
 
     Provides a redundant copy of the acquisition XMLs alongside the
-    parsed/merged metadata in ``/isoview/provenance.attrs["common"]``.
+    parsed/merged metadata in ``/metadata.attrs["common"]``.
     """
     if raw_root is None or not raw_root.is_dir():
         return
@@ -1127,12 +1150,12 @@ def _write_raw_xml(iso_group, raw_root: Path | None) -> None:
     if not xml_files:
         return
 
-    prov = (
-        iso_group["provenance"]
-        if "provenance" in iso_group
-        else iso_group.create_group("provenance", overwrite=False)
+    meta = (
+        root["metadata"]
+        if "metadata" in root
+        else root.create_group("metadata", overwrite=False)
     )
-    xml_group = prov.create_group("xml_raw", overwrite=True)
+    xml_group = meta.create_group("xml_raw", overwrite=True)
 
     for xml_path in xml_files:
         raw = xml_path.read_bytes()
@@ -1210,12 +1233,13 @@ def _consolidate_corrected(
     """Internal: corrected-pipeline consolidator.
 
     Uses :func:`_write_computed_projections` for the corrected
-    projections (xy/xz/yz all derived from the volume in one read per
-    (t,c)). The on-disk ``<root>.corrected.projections/`` flat dir is
-    ignored — the spec-correct equivalent comes out of the volume, and
-    the disk files would just duplicate it. The raw projections
-    (``<root>.raw.projections/``) ARE pulled from disk because they
-    derive from raw data the consolidated zarr doesn't carry.
+    projections (max_z / max_y / max_x derived from the volume in one
+    read per (t,c)). The on-disk ``<root>.corrected.projections/`` flat
+    dir is ignored — the spec-correct equivalent comes out of the
+    volume, and the disk files would just duplicate it. The raw
+    projections (``<root>.raw.projections/``) ARE pulled from disk
+    because they derive from raw data the consolidated zarr doesn't
+    carry; they land at top-level ``raw_max_z/``.
     """
     spm_dir = _resolve_corrected_spm_dir(src_path)
     if spm_dir is None:
@@ -1239,9 +1263,10 @@ def _consolidate_corrected(
         compressor, compression_level, progress_callback,
     )
 
-    # labels — only the OME-spec-compliant 3D segmentation goes here.
-    # The IsoView xyMask / xzMask coordinate maps live in /isoview/aux/
-    # because their axes don't map to the OME labels projection schema.
+    # labels — only the OME-spec-compliant 3D segmentation lives here.
+    # The IsoView xyMask / xzMask coordinate maps are written as
+    # top-level sibling groups since their axes don't map to the OME
+    # labels projection schema.
     companions = _scan_corrected_companions(spm_dir)
     labels = root.create_group("labels", overwrite=True)
     label_names: list[str] = []
@@ -1252,20 +1277,18 @@ def _consolidate_corrected(
         label_names.append("segmentation")
     labels.attrs["ome"] = {"version": "0.5", "labels": label_names}
 
-    # /isoview custom namespace
-    iso_group = root.create_group("isoview", overwrite=True)
     _write_aux_2d_per_tc(
-        iso_group, "xy_mask", companions.get("xy_mask", {}), iso,
+        root, "xy_mask", companions.get("xy_mask", {}), iso,
         compressor, compression_level, progress_callback,
     )
     _write_aux_2d_per_tc(
-        iso_group, "xz_mask", companions.get("xz_mask", {}), iso,
+        root, "xz_mask", companions.get("xz_mask", {}), iso,
         compressor, compression_level, progress_callback,
     )
 
-    # corrected xy/xz/yz: one volume read per (t,c), three projections.
+    # corrected max_z / max_y / max_x: one volume read per (t,c).
     _write_computed_projections(
-        iso_group, "corrected", iso, mags,
+        root, iso, mags,
         dx, dy, dz, dt_s, compressor, compression_level, progress_callback,
     )
 
@@ -1286,7 +1309,7 @@ def _consolidate_corrected(
         tm_int_by_index = {
             ti: _extract_timepoint(d.name) for ti, d in enumerate(tm_dirs)
         }
-        # Y/X-only mag list for the 4D projection groups
+        # Y/X-only mag list for the 4D projection group
         mags_yx: list[tuple[int, int]] = []
         seen_yx: set[tuple[int, int]] = set()
         for _mz, my, mx in mags:
@@ -1294,18 +1317,18 @@ def _consolidate_corrected(
                 seen_yx.add((my, mx))
                 mags_yx.append((my, mx))
         _write_disk_xy_projections(
-            iso_group, "raw", raw_proj, iso, tm_int_by_index,
+            root, raw_proj, iso, tm_int_by_index,
             mags_yx, dx, dy, dt_s, compressor, compression_level,
             progress_callback,
         )
 
     _write_min_intensity(
-        iso_group, companions.get("min_intensity", {}), iso,
+        root, companions.get("min_intensity", {}), iso,
         compressor, compression_level,
     )
-    _write_provenance(iso_group, iso)
-    _write_backgrounds(iso_group, raw_root)
-    _write_raw_xml(iso_group, raw_root)
+    _write_metadata(root, iso)
+    _write_backgrounds(root, raw_root)
+    _write_raw_xml(root, raw_root)
 
     root.attrs["ome"] = {
         "version": "0.5",
@@ -1343,17 +1366,14 @@ def _consolidate_fused(
     full inventory):
       - Channel axis indexes fused view PAIRS (``VW00_fused``,
         ``VW90_fused``), not single cameras.
-      - Three intensity projections (xy/xz/yz) instead of just xy —
-        produced by :func:`_write_computed_projections` from the
-        consolidated volume.
       - Combined 3D mask (``.mask.zarr`` = ``cam0_mask ∪ cam1_transformed_mask``)
         goes into ``/labels/segmentation/``.
-      - Four extra 2D aux groups: ``fusion_mask``, ``mask2D_cam0``,
-        ``mask2D_cam1``, ``transformedMask2D_cam1``.
+      - Four top-level 2D mask groups instead of corrected's two:
+        ``fusion_mask``, ``mask2D_cam0``, ``mask2D_cam1``,
+        ``transformedMask2D_cam1``.
       - No ``min_intensity`` (correction-stage artifact, not produced
         by fusion).
-      - No ``<root>.raw.projections/`` (fusion's input is corrected,
-        not raw).
+      - No ``raw_max_z`` (fusion's input is corrected, not raw).
     """
     iso = IsoviewArray(src_path, kind="fused")
     method_dir = iso.scan_root  # MultiFused_<method>/
@@ -1387,34 +1407,31 @@ def _consolidate_fused(
         label_names.append("segmentation")
     labels.attrs["ome"] = {"version": "0.5", "labels": label_names}
 
-    # /isoview custom namespace
-    iso_group = root.create_group("isoview", overwrite=True)
-
-    # 2D auxiliaries — keyed by pair (fusion_mask) or by single
-    # camera within the pair (mask2D, transformedMask2D). The
-    # single-cam ones get pivoted to per-pair indexing so the
-    # shared aux writer can use them.
+    # 2D mask groups — keyed by pair (fusion_mask) or by single camera
+    # within the pair (mask2D, transformedMask2D). The single-cam ones
+    # get pivoted to per-pair indexing so the shared aux writer can
+    # use them.
     pair_view_keys = list(iso.views)
     _write_aux_2d_per_tc(
-        iso_group, "fusion_mask", companions.get("fusion_mask", {}), iso,
+        root, "fusion_mask", companions.get("fusion_mask", {}), iso,
         compressor, compression_level, progress_callback,
     )
     _write_aux_2d_per_tc(
-        iso_group, "mask2D_cam0",
+        root, "mask2D_cam0",
         _remap_single_cam_to_pair(
             companions.get("mask2D", {}), pair_view_keys, cam_position=0,
         ),
         iso, compressor, compression_level, progress_callback,
     )
     _write_aux_2d_per_tc(
-        iso_group, "mask2D_cam1",
+        root, "mask2D_cam1",
         _remap_single_cam_to_pair(
             companions.get("mask2D", {}), pair_view_keys, cam_position=1,
         ),
         iso, compressor, compression_level, progress_callback,
     )
     _write_aux_2d_per_tc(
-        iso_group, "transformedMask2D_cam1",
+        root, "transformedMask2D_cam1",
         _remap_single_cam_to_pair(
             companions.get("transformedMask2D", {}),
             pair_view_keys, cam_position=1,
@@ -1422,17 +1439,17 @@ def _consolidate_fused(
         iso, compressor, compression_level, progress_callback,
     )
 
-    # xy/xz/yz projections from the consolidated volume
+    # max_z / max_y / max_x from the consolidated volume
     _write_computed_projections(
-        iso_group, "fused", iso, mags,
+        root, iso, mags,
         dx, dy, dz, dt_s, compressor, compression_level, progress_callback,
     )
 
-    # provenance + backgrounds + raw XML (same as corrected)
-    _write_provenance(iso_group, iso)
+    # metadata + backgrounds + raw XML (same as corrected)
+    _write_metadata(root, iso)
     raw_root = _sibling_raw_root(iso)
-    _write_backgrounds(iso_group, raw_root)
-    _write_raw_xml(iso_group, raw_root)
+    _write_backgrounds(root, raw_root)
+    _write_raw_xml(root, raw_root)
 
     root.attrs["ome"] = {
         "version": "0.5",

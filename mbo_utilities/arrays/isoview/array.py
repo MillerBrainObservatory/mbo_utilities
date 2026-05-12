@@ -1132,6 +1132,14 @@ class IsoviewArray(Shape5DMixin):
     everything else is shared.
     """
 
+    # Pre-cache the display range so the histogram opens at a sensible
+    # default for IsoView 16-bit fluorescence data instead of probing
+    # the first frame (which can be slow for large fused volumes and
+    # often yields a range biased by registration zero-fill).
+    # _compute_frame_vminmax short-circuits when these are non-None.
+    _cached_vmin = 0.0
+    _cached_vmax = 1000.0
+
     def __init__(self, path: str | Path, kind: str | None = None):
         self.base_path = Path(path)
         if not self.base_path.exists():
