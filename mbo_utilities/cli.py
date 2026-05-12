@@ -262,6 +262,14 @@ def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -
     is_flag=True,
     help="Clear environment cache and exit.",
 )
+@click.option(
+    "--gpu",
+    "gpu_index_arg",
+    type=int,
+    default=None,
+    help="Set and persist GPU adapter index. `mbo --gpu N` saves + exits; "
+         "`mbo --gpu N <path>` saves then opens. See `mbo view --list-gpus`.",
+)
 @click.pass_context
 def main(
     ctx,
@@ -272,6 +280,7 @@ def main(
     check_install=False,
     no_cache=False,
     clear_cache=False,
+    gpu_index_arg=None,
 ):
     r"""
     MBO Utilities CLI - data preview and processing tools.
@@ -321,6 +330,28 @@ def main(
         from mbo_utilities.gui.run_gui import _check_installation
         _check_installation()
         return
+
+    if gpu_index_arg is not None:
+        import fastplotlib as fpl
+        adapters = fpl.enumerate_adapters()
+        if not 0 <= gpu_index_arg < len(adapters):
+            raise click.BadParameter(
+                f"--gpu {gpu_index_arg} out of range; found {len(adapters)} "
+                f"adapter(s). Run `mbo view --list-gpus` to see them.",
+                param_hint="--gpu",
+            )
+        from mbo_utilities.preferences import set_gpu_index
+        set_gpu_index(gpu_index_arg)
+        info = getattr(adapters[gpu_index_arg], "info", {}) or {}
+        click.echo(
+            f"Saved GPU {gpu_index_arg}: "
+            f"{info.get('device', info.get('description', '?'))} "
+            f"(persisted to ~/.mbo/settings/preferences.json)"
+        )
+        # run_gui.py reads the persisted index on launch, so a path that
+        # routes to `view` will pick this up automatically.
+        if ctx.invoked_subcommand is None:
+            return
 
     # If a subcommand is invoked, skip main logic
     if ctx.invoked_subcommand is not None:
@@ -421,6 +452,8 @@ def view(data_in=None, roi=None, widget=True, metadata=False, gpu_index=None, li
                 param_hint="--gpu",
             )
         fpl.select_adapter(adapters[gpu_index])
+        from mbo_utilities.preferences import set_gpu_index
+        set_gpu_index(gpu_index)
         info = getattr(adapters[gpu_index], "info", {}) or {}
         click.echo(f"Using GPU {gpu_index}: {info.get('device', info.get('description', '?'))}")
 
