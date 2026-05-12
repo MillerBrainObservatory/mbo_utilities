@@ -62,6 +62,7 @@ from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
 from mbo_utilities.gui._metadata_editor import draw_metadata_popup
+from mbo_utilities.gui._options_popup import draw_options_popup
 
 
 import fastplotlib as fpl
@@ -1095,6 +1096,7 @@ class PreviewDataWidget(EdgeWindow):
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
         draw_help_popup(self)
+        draw_options_popup(self)
 
         super().draw_window()
 

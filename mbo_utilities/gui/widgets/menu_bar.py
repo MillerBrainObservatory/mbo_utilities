@@ -6,27 +6,15 @@ This module contains the main menu bar and process status indicator.
 
 from __future__ import annotations
 
-import logging
 import webbrowser
 from pathlib import Path
 from typing import Any
 
 from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
 
-from mbo_utilities import log as _mbo_log
 from mbo_utilities.preferences import get_last_dir
 from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
-
-
-def _is_debug_enabled() -> bool:
-    return logging.getLogger("mbo").getEffectiveLevel() <= logging.DEBUG
-
-
-def _toggle_debug_logging() -> None:
-    _mbo_log.set_global_level(
-        logging.INFO if _is_debug_enabled() else logging.DEBUG
-    )
 
 
 def draw_menu_bar(parent: Any):
@@ -83,19 +71,10 @@ def draw_menu_bar(parent: Any):
                     imgui.text(f"{arr_type} does not support saving.")
                     imgui.end_tooltip()
                 imgui.separator()
-                if imgui.begin_menu("Options", True):
-                    debug_on = _is_debug_enabled()
-                    if imgui.menu_item(
-                        "Debug logging", "", p_selected=debug_on, enabled=True
-                    )[0]:
-                        _toggle_debug_logging()
-                    if imgui.is_item_hovered():
-                        imgui.set_tooltip(
-                            "Verbose console logs (zarr chunk shapes, "
-                            "per-read decompressed:returned ratio, ms timings).\n"
-                            "Same effect as launching with MBO_DEBUG=1."
-                        )
-                    imgui.end_menu()
+                if imgui.menu_item("Options", "", p_selected=False, enabled=True)[0]:
+                    parent._show_options_popup = True
+                if imgui.is_item_hovered():
+                    imgui.set_tooltip("GPU adapter, debug logging, and other settings")
                 imgui.end_menu()
             if imgui.begin_menu("Docs", True):
                 if imgui.menu_item(
