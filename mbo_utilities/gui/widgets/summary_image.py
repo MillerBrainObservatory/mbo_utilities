@@ -95,6 +95,8 @@ def _collect_keys(metadata: dict) -> list[str]:
     if not metadata:
         return []
     found = [k for k in _PRIORITY_KEYS if _is_image_like(metadata.get(k))]
+    if not found:
+        return []
     extras = sorted(
         k for k, v in metadata.items()
         if k not in _PRIORITY_KEYS and _is_image_like(v)
@@ -299,11 +301,10 @@ class SummaryImageViewer(Widget):
 
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
-        for arr in parent._get_data_arrays():
-            md = getattr(arr, "metadata", None) or {}
-            if _collect_keys(md):
-                return True
-        return False
+        return any(
+            _collect_keys(getattr(arr, "metadata", None) or {})
+            for arr in parent._get_data_arrays()
+        )
 
     def _backend(self):
         try:
@@ -312,11 +313,13 @@ class SummaryImageViewer(Widget):
             return None
 
     def _active_array(self):
-        for arr in self.parent._get_data_arrays():
-            md = getattr(arr, "metadata", None) or {}
-            if _collect_keys(md):
-                return arr
-        return None
+        return next(
+            (
+                arr for arr in self.parent._get_data_arrays()
+                if _collect_keys(getattr(arr, "metadata", None) or {})
+            ),
+            None,
+        )
 
     def _active_metadata(self) -> dict:
         arr = self._active_array()

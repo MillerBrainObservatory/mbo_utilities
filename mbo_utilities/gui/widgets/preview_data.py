@@ -968,7 +968,8 @@ class PreviewDataWidget(EdgeWindow):
             slot = self._zstats_means[i] if i < len(self._zstats_means) else None
             if not isinstance(slot, dict) or not slot:
                 return None
-            return slot.get(c_for_mean) or slot.get(0)
+            # `or` truthiness raises on numpy arrays; use dict.get fallback.
+            return slot.get(c_for_mean, slot.get(0))
 
         any_mean_sub = self._mean_subtraction and any(
             self._zstats_done[i] and _means_for(i) is not None
