@@ -50,6 +50,41 @@ _S2P_TITLE_COLOR = imgui.ImVec4(1.0, 0.85, 0.4, 1.0)
 _SUBSECTION_COLOR = imgui.ImVec4(0.55, 0.75, 1.0, 1.0)
 
 
+# Cached hardware probe for the Parallel/Workers section. Used to help
+# users size concurrency for GPU registration/segmentation (each worker
+# gets its own CUDA context, so workers * per-process VRAM <= total VRAM).
+# Lazy because psutil/torch imports aren't free.
+_SYSTEM_INFO_CACHE: dict | None = None
+
+
+def _get_system_info() -> dict:
+    """Return {cpu_physical, cpu_logical, ram_gb, gpus: [(name, vram_gb)]}."""
+    global _SYSTEM_INFO_CACHE
+    if _SYSTEM_INFO_CACHE is not None:
+        return _SYSTEM_INFO_CACHE
+    info: dict = {
+        "cpu_physical": None, "cpu_logical": None, "ram_gb": None, "gpus": []
+    }
+    try:
+        import psutil
+        info["cpu_physical"] = psutil.cpu_count(logical=False)
+        info["cpu_logical"] = psutil.cpu_count(logical=True)
+        info["ram_gb"] = psutil.virtual_memory().total / 1024**3
+    except ImportError:
+        import os as _os
+        info["cpu_logical"] = _os.cpu_count()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                p = torch.cuda.get_device_properties(i)
+                info["gpus"].append((p.name, p.total_memory / 1024**3))
+    except (ImportError, RuntimeError):
+        pass
+    _SYSTEM_INFO_CACHE = info
+    return info
+
+
 # "Look at these first" — fields whose label is rendered in a bold font
 # inside a thin rounded box in the pipeline-settings popup, so users know
 # which knobs typically matter most. Add / remove freely; the emphasis is
@@ -3374,6 +3409,58 @@ def _draw_section_suite2p_content(self):
     imgui.spacing()
     imgui.spacing()
 
+    if not hasattr(self, "_parallel_processing"):
+        self._parallel_processing = False
+    if not hasattr(self, "_max_parallel_jobs"):
+        self._max_parallel_jobs = 2
+
+    _, self._parallel_processing = imgui.checkbox(
+        "Parallel (split planes across subprocesses)", self._parallel_processing
+    )
+    set_tooltip(
+        "Distribute selected planes across multiple background subprocesses "
+        "for true CPU/GPU parallelism. Off = one subprocess per channel "
+        "iterates every plane sequentially inside the pipeline."
+    )
+
+    if self._parallel_processing:
+        imgui.indent()
+        _num_planes = len(getattr(self, "_selected_planes", set())) or 1
+        imgui.set_next_item_width(120)
+        _, self._max_parallel_jobs = imgui.input_int(
+            "Workers", self._max_parallel_jobs, 1, 1,
+        )
+        self._max_parallel_jobs = max(1, min(_num_planes, self._max_parallel_jobs))
+        set_tooltip(
+            "Number of concurrent subprocesses. Planes are split into "
+            "this many contiguous chunks (np.array_split semantics).\n\n"
+            "GPU registration/segmentation: each worker holds its own CUDA "
+            "context (~1–2 GB VRAM baseline + plane-dependent peak). "
+            "Choose workers so workers * peak_VRAM <= total VRAM, or you'll "
+            "OOM. Per-process VRAM scales with Ly*Lx and batch_size.\n\n"
+            "CPU only: bottleneck is RAM (each worker holds binarized plane "
+            "data) and physical cores."
+        )
+
+        _info = _get_system_info()
+        _dim = imgui.ImVec4(0.6, 0.6, 0.6, 1.0)
+        if _info.get("cpu_physical"):
+            _cpu_str = f"{_info['cpu_physical']}p / {_info['cpu_logical']}t cores"
+        else:
+            _cpu_str = f"{_info.get('cpu_logical') or '?'} cores"
+        _ram_str = (
+            f"{_info['ram_gb']:.0f} GB RAM" if _info.get("ram_gb") else "RAM ?"
+        )
+        imgui.text_colored(_dim, f"{_cpu_str}  ·  {_ram_str}")
+        if _info.get("gpus"):
+            for _name, _vram in _info["gpus"]:
+                imgui.text_colored(_dim, f"GPU: {_name}  ·  {_vram:.0f} GB VRAM")
+        else:
+            imgui.text_colored(_dim, "GPU: not detected (CPU only)")
+        imgui.unindent()
+
+    imgui.spacing()
+
     # === RUN SUITE2P BUTTON ===
     # Wider button than the entry "Open" buttons so it reads as the
     # primary action. Disabled until an output path is set; green style
@@ -3973,6 +4060,21 @@ def run_process(self):
             # always pass channel for multi-channel source data (5D needs _ChannelView)
             has_channels = getattr(self, "_s2p_last_num_channels", 1) > 1
 
+            # parallel: split selected planes across `workers` subprocesses
+            # via np.array_split (contiguous chunks, almost-equal sizes).
+            # off = single chunk = current behavior (one subprocess per
+            # channel iterates planes inside pipeline()).
+            use_parallel = getattr(self, "_parallel_processing", False)
+            workers = max(1, int(getattr(self, "_max_parallel_jobs", 2)))
+            plane_list = sorted(selected_planes)
+            if use_parallel and workers > 1 and len(plane_list) > 1:
+                n_groups = min(workers, len(plane_list))
+                plane_groups = [
+                    list(g) for g in np.array_split(plane_list, n_groups)
+                ]
+            else:
+                plane_groups = [plane_list]
+
             for channel in selected_channels:
                 # per-channel output subdir when multiple channels selected
                 if multi_channel:
@@ -3980,102 +4082,106 @@ def run_process(self):
                 else:
                     output_dir = s2p_path
 
-                worker_args = {
-                    "input_path": input_path,
-                    "output_dir": output_dir,
-                    "planes": sorted(selected_planes),
-                    "roi": roi,
-                    "num_timepoints": self.s2p_extras.target_timepoints,
-                    # upstream-shaped pair; the subprocess entry point flattens
-                    # these into ops via lbm_suite2p_python.db_settings. `ops`
-                    # is intentionally omitted — settings+db is the canonical
-                    # config path going forward.
-                    "settings": self.s2p.to_dict(),
-                    "db": self.s2p_db.to_dict(),
-                    "fix_phase": self._s2p_fix_phase,
-                    "use_fft": self._s2p_use_fft,
-                    "channel": channel if (multi_channel or has_channels) else None,
-                    # User-set metadata from the GUI metadata editor
-                    # (lives on parent._custom_metadata, NOT on the source
-                    # file). The worker merges this into ops before
-                    # invoking lbm_suite2p_python.pipeline so the user's
-                    # z_step / dx / dy / fs reach ops.npy.
-                    "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
-                    # User's timepoint selection (0-based, full list).
-                    # The subprocess uses this with OutputMetadata to
-                    # reactively scale fs based on the timepoint stride.
-                    "tp_indices": (
-                        list(self._s2p_tp_parsed.final_indices)
-                        if getattr(self, "_s2p_tp_parsed", None) is not None
-                        else None
-                    ),
-                    # FULL list of selected planes (0-based) — for
-                    # reactive dz scaling via OutputMetadata.
-                    "selected_planes_0based": [p - 1 for p in sorted(selected_planes)],
-                    # axial registration
-                    "register_z": getattr(self, "_register_z", False),
-                    "max_frames": getattr(self, "_axial_max_frames", 200),
-                    "max_reg_xy": getattr(self, "_axial_max_reg_xy", 30),
-                    "s2p_settings": {
-                        # keep_raw / keep_reg are derived from the upstream
-                        # fields (db.keep_movie_raw / io.delete_bin) rather
-                        # than stored as duplicates on MboSuite2pExtras.
-                        "keep_raw": self.s2p_db.keep_movie_raw,
-                        "keep_reg": (not self.s2p.delete_bin),
-                        # force_reg / force_detect are derived from the
-                        # Skip/Run/Force radios — Force == 2.
-                        "force_reg": (self.s2p.do_registration == 2),
-                        "force_detect": (self.s2p.do_detection == 2),
-                        "accept_all_cells": self.s2p_extras.accept_all_cells,
-                        "dff_window_size": self.s2p_extras.dff_window_size,
-                        "dff_percentile": self.s2p_extras.dff_percentile,
-                        "dff_smooth_window": self.s2p_extras.dff_smooth_window,
-                        "save_json": self.s2p_extras.save_json,
-                        "correct_neuropil": self.s2p_extras.correct_neuropil,
-                        "cell_filters": build_cell_filters(
-                            self.s2p_extras.min_diameter_um_enabled,
-                            self.s2p_extras.min_diameter_um,
-                            self.s2p_extras.max_diameter_um_enabled,
-                            self.s2p_extras.max_diameter_um,
-                            baseline_filter_enabled=self.s2p_extras.baseline_filter_enabled,
-                            baseline_reject_negative_F0=self.s2p_extras.baseline_reject_negative_F0,
-                            baseline_min_F0_abs_enabled=self.s2p_extras.baseline_min_F0_abs_enabled,
-                            baseline_min_F0_abs=self.s2p_extras.baseline_min_F0_abs,
-                            baseline_min_F0_rel_enabled=self.s2p_extras.baseline_min_F0_rel_enabled,
-                            baseline_min_F0_rel=self.s2p_extras.baseline_min_F0_rel,
-                            correct_neuropil=self.s2p_extras.correct_neuropil,
+                for planes in plane_groups:
+                    worker_args = {
+                        "input_path": input_path,
+                        "output_dir": output_dir,
+                        "planes": planes,
+                        "roi": roi,
+                        "num_timepoints": self.s2p_extras.target_timepoints,
+                        # upstream-shaped pair; the subprocess entry point flattens
+                        # these into ops via lbm_suite2p_python.db_settings. `ops`
+                        # is intentionally omitted — settings+db is the canonical
+                        # config path going forward.
+                        "settings": self.s2p.to_dict(),
+                        "db": self.s2p_db.to_dict(),
+                        "fix_phase": self._s2p_fix_phase,
+                        "use_fft": self._s2p_use_fft,
+                        "channel": channel if (multi_channel or has_channels) else None,
+                        # User-set metadata from the GUI metadata editor
+                        # (lives on parent._custom_metadata, NOT on the source
+                        # file). The worker merges this into ops before
+                        # invoking lbm_suite2p_python.pipeline so the user's
+                        # z_step / dx / dy / fs reach ops.npy.
+                        "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
+                        # User's timepoint selection (0-based, full list).
+                        # The subprocess uses this with OutputMetadata to
+                        # reactively scale fs based on the timepoint stride.
+                        "tp_indices": (
+                            list(self._s2p_tp_parsed.final_indices)
+                            if getattr(self, "_s2p_tp_parsed", None) is not None
+                            else None
                         ),
-                        # unified-api dict for pipeline(). may include
-                        # "planar" and/or "volumetric" sub-keys, or be
-                        # None for off.
-                        "rastermap_kwargs": build_rastermap_kwargs(
-                            self.s2p_extras
-                        ),
-                        # rastermap Skip/Run/Force radio. Force == 2 means
-                        # delete cached model.npy in each plane dir before
-                        # the pipeline runs so lsp recomputes from scratch
-                        # (Run reuses the cached model when shape matches).
-                        "force_rastermap": (self.s2p_extras.rastermap_mode == 2),
-                    },
-                }
+                        # FULL list of selected planes (0-based) — for
+                        # reactive dz scaling via OutputMetadata.
+                        "selected_planes_0based": [p - 1 for p in plane_list],
+                        # axial registration
+                        "register_z": getattr(self, "_register_z", False),
+                        "max_frames": getattr(self, "_axial_max_frames", 200),
+                        "max_reg_xy": getattr(self, "_axial_max_reg_xy", 30),
+                        "s2p_settings": {
+                            # keep_raw / keep_reg are derived from the upstream
+                            # fields (db.keep_movie_raw / io.delete_bin) rather
+                            # than stored as duplicates on MboSuite2pExtras.
+                            "keep_raw": self.s2p_db.keep_movie_raw,
+                            "keep_reg": (not self.s2p.delete_bin),
+                            # force_reg / force_detect are derived from the
+                            # Skip/Run/Force radios — Force == 2.
+                            "force_reg": (self.s2p.do_registration == 2),
+                            "force_detect": (self.s2p.do_detection == 2),
+                            "accept_all_cells": self.s2p_extras.accept_all_cells,
+                            "dff_window_size": self.s2p_extras.dff_window_size,
+                            "dff_percentile": self.s2p_extras.dff_percentile,
+                            "dff_smooth_window": self.s2p_extras.dff_smooth_window,
+                            "save_json": self.s2p_extras.save_json,
+                            "correct_neuropil": self.s2p_extras.correct_neuropil,
+                            "cell_filters": build_cell_filters(
+                                self.s2p_extras.min_diameter_um_enabled,
+                                self.s2p_extras.min_diameter_um,
+                                self.s2p_extras.max_diameter_um_enabled,
+                                self.s2p_extras.max_diameter_um,
+                                baseline_filter_enabled=self.s2p_extras.baseline_filter_enabled,
+                                baseline_reject_negative_F0=self.s2p_extras.baseline_reject_negative_F0,
+                                baseline_min_F0_abs_enabled=self.s2p_extras.baseline_min_F0_abs_enabled,
+                                baseline_min_F0_abs=self.s2p_extras.baseline_min_F0_abs,
+                                baseline_min_F0_rel_enabled=self.s2p_extras.baseline_min_F0_rel_enabled,
+                                baseline_min_F0_rel=self.s2p_extras.baseline_min_F0_rel,
+                                correct_neuropil=self.s2p_extras.correct_neuropil,
+                            ),
+                            # unified-api dict for pipeline(). may include
+                            # "planar" and/or "volumetric" sub-keys, or be
+                            # None for off.
+                            "rastermap_kwargs": build_rastermap_kwargs(
+                                self.s2p_extras
+                            ),
+                            # rastermap Skip/Run/Force radio. Force == 2 means
+                            # delete cached model.npy in each plane dir before
+                            # the pipeline runs so lsp recomputes from scratch
+                            # (Run reuses the cached model when shape matches).
+                            "force_rastermap": (self.s2p_extras.rastermap_mode == 2),
+                        },
+                    }
 
-                description = f"Suite2p: {len(selected_planes)} plane(s)"
-                if multi_channel or has_channels:
-                    description += f" ch{channel}"
-                if roi:
-                    description += f" ROI {roi}"
+                    if len(planes) == 1:
+                        description = f"Suite2p plane{planes[0]:02d}"
+                    else:
+                        description = f"Suite2p: {len(planes)} plane(s)"
+                    if multi_channel or has_channels:
+                        description += f" ch{channel}"
+                    if roi:
+                        description += f" ROI {roi}"
 
-                pid = pm.spawn(
-                    task_type="suite2p",
-                    args=worker_args,
-                    description=description,
-                    output_path=output_dir,
-                )
-
-                if not pid:
-                    self.logger.error(
-                        f"Failed to start background process for {description}"
+                    pid = pm.spawn(
+                        task_type="suite2p",
+                        args=worker_args,
+                        description=description,
+                        output_path=output_dir,
                     )
+
+                    if not pid:
+                        self.logger.error(
+                            f"Failed to start background process for {description}"
+                        )
         else:
             # Use daemon threads (original behavior)
             # determine selected channels
