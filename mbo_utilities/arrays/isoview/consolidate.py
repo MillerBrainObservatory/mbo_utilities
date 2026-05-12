@@ -57,17 +57,18 @@ from zarr.codecs import (
 )
 
 from mbo_utilities.arrays.features._pyramid import downsample_block
-from mbo_utilities.arrays.isoview import (
+from mbo_utilities.arrays.isoview.array import (
     IsoviewArray,
     _extract_timepoint,
     _find_tm_folders,
     _resolve_corrected_spm_dir,
     _scan_flat_projections,
     _sibling_raw_root,
+    detect_isoview_kind,
 )
 from mbo_utilities.log import get as _get_logger
 
-logger = _get_logger("arrays.isoview_consolidate")
+logger = _get_logger("arrays.isoview.consolidate")
 
 
 ProgressCallback = Callable[[str, int, int], None]
@@ -1496,7 +1497,6 @@ def consolidate_isoview(
     """
     src_path = Path(src)
     if kind is None:
-        from mbo_utilities.arrays.isoview import detect_isoview_kind
         kind = detect_isoview_kind(src_path)
         if kind is None:
             raise ValueError(
