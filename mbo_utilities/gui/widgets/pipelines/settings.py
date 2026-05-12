@@ -17,6 +17,7 @@ from imgui_bundle import (
 )
 
 from mbo_utilities.gui._imgui_helpers import (
+    PopupAutoSize,
     draw_boxed_label,
     set_tooltip,
     settings_row_with_popup,
@@ -96,9 +97,8 @@ def _hi(field: str, value):
 
 @contextmanager
 def _mbo():
-    """Push _MBO_ONLY_COLOR (off-green) around a widget. Use for fields
-    that have no upstream suite2p equivalent so they're visually flagged
-    as mbo-only (cellpose_niter, accept_all_cells, dff_window_size, etc.).
+    """
+    Push _MBO_ONLY_COLOR around a widget.
     """
     imgui.push_style_color(imgui.Col_.text, _MBO_ONLY_COLOR)
     try:
@@ -109,10 +109,8 @@ def _mbo():
 
 @contextmanager
 def _ghost_button():
-    """Material-design-inspired ghost button: a faint white surface tint
-    at rest with a slightly stronger overlay on hover/active. Use for
-    secondary affordances (copy buttons, etc.) so they stay legible
-    without dominating the panel like the default chunky button fill.
+    """
+    Ghost button: a faint white surface tint at rest with a slightly stronger overlay on hover/active.
     """
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(1, 1, 1, 0.05))
     imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(1, 1, 1, 0.10))
@@ -1566,7 +1564,9 @@ def _draw_md_field(label: str, value, unit: str = "") -> None:
 
 
 def _draw_dataset_files_popup(
-    filenames: list, frames_per_file: list[int] | None = None
+    filenames: list,
+    frames_per_file: list[int] | None = None,
+    sizer: PopupAutoSize | None = None,
 ) -> None:
     """Modal popup listing each file in concatenation order.
 
@@ -1581,9 +1581,14 @@ def _draw_dataset_files_popup(
     imgui.set_next_window_size_constraints(
         imgui.ImVec2(420, 240), imgui.ImVec2(1600, 1200)
     )
+    _flags = (
+        sizer.flags(imgui.WindowFlags_.no_saved_settings)
+        if sizer is not None
+        else imgui.WindowFlags_.no_saved_settings
+    )
     opened = imgui.begin_popup_modal(
         "Dataset files##current_dataset_files_popup",
-        flags=imgui.WindowFlags_.no_saved_settings,
+        flags=_flags,
     )[0]
     if not opened:
         return
@@ -1744,7 +1749,18 @@ def _draw_current_dataset_section(self) -> None:
     # files button on its own line; size on disk on the next.
     # avoiding same_line() here so neither piece can spill past the right edge.
     n_files = len(filenames)
+    # lazy-init position-only sizer (auto_resize=False — body contains a
+    # negative-fill scrollable child that would collapse under
+    # always_auto_resize).
+    _files_sizer = getattr(self, "_files_popup_sizer", None)
+    if _files_sizer is None:
+        _files_sizer = PopupAutoSize(
+            "Dataset files##current_dataset_files_popup",
+            auto_resize=False,
+        )
+        self._files_popup_sizer = _files_sizer
     if imgui.button(f"Files ({n_files})##current_dataset_files"):
+        _files_sizer.before_open()
         imgui.open_popup("Dataset files##current_dataset_files_popup")
     imgui.text(f"Size on disk: {_format_size(size_bytes)}")
 
@@ -1753,7 +1769,7 @@ def _draw_current_dataset_section(self) -> None:
     fpf = md.get("frames_per_file")
     if not (isinstance(fpf, (list, tuple)) and len(fpf) == n_files):
         fpf = None
-    _draw_dataset_files_popup(filenames, fpf)
+    _draw_dataset_files_popup(filenames, fpf, sizer=_files_sizer)
 
     # shape with bracketed dim labels (e.g. "1024 × 4 × 256 × 256 [T,Z,Y,X]").
     # push wrap_pos so long shape strings wrap rather than clip on narrow panels.
@@ -3213,6 +3229,13 @@ def _draw_section_suite2p_content(self):
     imgui.spacing()
     if imgui.button("Open##data_options_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["data_options"] = True
+        _do_sizer = getattr(self, "_data_options_sizer", None)
+        if _do_sizer is None:
+            _do_sizer = PopupAutoSize(
+                "Data Options##data_options", auto_resize=False
+            )
+            self._data_options_sizer = _do_sizer
+        _do_sizer.before_open()
         imgui.open_popup("Data Options##data_options")
 
     imgui.spacing()
@@ -3257,6 +3280,12 @@ def _draw_section_suite2p_content(self):
     if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["pipeline_settings"] = True
         self._pipe_settings_just_opened = True
+        # NOTE: before_open() is called in the popup body below, not
+        # here. The modified-params preview between this button and the
+        # popup body uses begin_child(), which internally calls Begin()
+        # and consumes the buffered next-window-pos — so calling
+        # before_open() here loses the top-anchor position. Calling it
+        # right before begin_popup_modal() guarantees consumption order.
         imgui.open_popup("Pipeline Settings##pipeline_settings_popup")
 
     imgui.spacing()
@@ -3526,34 +3555,34 @@ def _draw_section_suite2p_content(self):
     _content_w_static = min(_content_w_static, viewport.size.x * 0.98)
 
     _just_opened = getattr(self, "_pipe_settings_just_opened", False)
-
-    # center on the viewport's true center; pivot (0.5, 0.5) puts the
-    # popup's center at that point. work_center sits below viewport.center
-    # whenever there's chrome at the top, which visibly pushes the popup
-    # downward — use the full viewport center for a true visual center.
-    _vp_center = viewport.get_center()
     _vp_size = viewport.size
 
-    if _just_opened:
-        # open at a generous default — tall enough that expanding row 2's
-        # collapsing headers doesn't immediately produce a scrollbar, and
-        # consistent across opens (no snap-to-fit, no cached small size).
-        _open_h = _vp_size.y * 0.85
-        _open_w = min(_content_w_static, _vp_size.x * 0.98)
-        imgui.set_next_window_size(
-            imgui.ImVec2(_open_w, _open_h),
-            imgui.Cond_.always,
+    # Sizing policy: always_auto_resize lets imgui resize the popup
+    # every frame to fit its content — expanding a row-2 collapsing
+    # header grows the popup, collapsing shrinks it back, no scrollbar.
+    # Lazy-init so reopening across sessions still works if the user
+    # closed the popup via the close button (sizer instance survives).
+    _pipe_sizer: PopupAutoSize = getattr(self, "_pipe_settings_sizer", None)
+    if _pipe_sizer is None:
+        _pipe_sizer = PopupAutoSize(
+            "Pipeline Settings##pipeline_settings_popup"
         )
-        imgui.set_next_window_pos(
-            _vp_center, imgui.Cond_.always, pivot=imgui.ImVec2(0.5, 0.5)
-        )
+        self._pipe_settings_sizer = _pipe_sizer
+    # Position is buffered every frame; Cond_.appearing means only the
+    # frame the popup transitions hidden→visible actually applies it.
+    # Must be called RIGHT before begin_popup_modal so no intervening
+    # Begin/BeginChild consumes the buffered next-window-pos.
+    _pipe_sizer.before_open()
 
+    # Cap the popup at the viewport so a fully-expanded popup on a
+    # small screen still fits. Min width keeps narrow columns readable;
+    # auto-resize will respect both bounds.
     imgui.set_next_window_size_constraints(
         imgui.ImVec2(min(_content_w_static, _vp_size.x * 0.98), 200.0),
         imgui.ImVec2(_vp_size.x * 0.98, _vp_size.y * 0.98),
     )
 
-    _popup_flags = imgui.WindowFlags_.no_saved_settings
+    _popup_flags = _pipe_sizer.flags(imgui.WindowFlags_.no_saved_settings)
 
     opened, visible = imgui.begin_popup_modal(
         "Pipeline Settings##pipeline_settings_popup",

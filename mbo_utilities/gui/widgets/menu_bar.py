@@ -15,6 +15,7 @@ from imgui_bundle import imgui, imgui_ctx, portable_file_dialogs as pfd
 
 from mbo_utilities import log as _mbo_log
 from mbo_utilities.preferences import get_last_dir
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 
 
@@ -229,9 +230,12 @@ def draw_keybinds_popup(parent: Any):
         parent._show_keybinds_popup = False
     if not hasattr(parent, "_keybinds_popup_actually_open"):
         parent._keybinds_popup_actually_open = False
+    if not hasattr(parent, "_keybinds_sizer"):
+        parent._keybinds_sizer = PopupAutoSize("Keybinds", auto_resize=False)
 
     # sync imgui's popup state with desired state
     if parent._show_keybinds_popup and not parent._keybinds_popup_actually_open:
+        parent._keybinds_sizer.before_open()
         imgui.open_popup("Keybinds")
         parent._keybinds_popup_actually_open = True
 

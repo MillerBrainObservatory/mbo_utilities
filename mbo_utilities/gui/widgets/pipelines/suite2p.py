@@ -14,6 +14,7 @@ from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.gui._availability import HAS_SUITE2P
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 
@@ -342,12 +343,18 @@ class Suite2pPipelineWidget(PipelineWidget):
                     pass
             self._file_dialog = None
 
+        if not hasattr(self, "_diagnostics_sizer"):
+            self._diagnostics_sizer = PopupAutoSize(
+                "Trace Quality Statistics", auto_resize=False
+            )
+
         if self._show_diagnostics_popup:
             self._diagnostics_popup_open = True
+            self._diagnostics_sizer.before_open()
             imgui.open_popup("Trace Quality Statistics")
             self._show_diagnostics_popup = False
 
-        # Set popup size
+        # Set popup size; top anchor comes from _diagnostics_sizer.
         viewport = imgui.get_main_viewport()
         popup_width = min(1200, viewport.size.x * 0.9)
         popup_height = min(800, viewport.size.y * 0.85)
@@ -572,12 +579,18 @@ class Suite2pPipelineWidget(PipelineWidget):
                     pass
             self._grid_search_dialog = None
 
+        if not hasattr(self, "_grid_search_sizer"):
+            self._grid_search_sizer = PopupAutoSize(
+                "Grid Search Results", auto_resize=False
+            )
+
         if self._show_grid_search_popup:
             self._grid_search_popup_open = True
+            self._grid_search_sizer.before_open()
             imgui.open_popup("Grid Search Results")
             self._show_grid_search_popup = False
 
-        # Set popup size
+        # Set popup size; top anchor comes from _grid_search_sizer.
         viewport = imgui.get_main_viewport()
         popup_width = min(1200, viewport.size.x * 0.9)
         popup_height = min(800, viewport.size.y * 0.85)

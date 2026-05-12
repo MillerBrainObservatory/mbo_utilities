@@ -12,6 +12,7 @@ from typing import Any
 
 from imgui_bundle import imgui, hello_imgui
 
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 from mbo_utilities.metadata import parse_filename_metadata, get_filename_suggestions
 
 def _get_suggested_metadata(parent: Any) -> list:
@@ -305,20 +306,21 @@ def draw_metadata_popup(parent: Any) -> None:
     """
     if not hasattr(parent, "_show_metadata_popup"):
         parent._show_metadata_popup = False
+    if not hasattr(parent, "_metadata_sizer"):
+        parent._metadata_sizer = PopupAutoSize(
+            "Set Metadata##MetadataPopup", auto_resize=False
+        )
 
     if parent._show_metadata_popup:
+        parent._metadata_sizer.before_open()
         imgui.open_popup("Set Metadata##MetadataPopup")
         parent._show_metadata_popup = False
 
-    # center, sized to comfortable defaults — user can resize.
+    # default size; top anchor comes from _metadata_sizer.
     io = imgui.get_io()
     screen_w, screen_h = io.display_size.x, io.display_size.y
     win_w = min(560, screen_w * 0.7)
     win_h = min(620, screen_h * 0.85)
-    imgui.set_next_window_pos(
-        imgui.ImVec2((screen_w - win_w) / 2, (screen_h - win_h) / 2),
-        imgui.Cond_.appearing,
-    )
     imgui.set_next_window_size(
         imgui.ImVec2(win_w, win_h), imgui.Cond_.first_use_ever
     )

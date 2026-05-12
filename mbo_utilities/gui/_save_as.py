@@ -18,7 +18,12 @@ from mbo_utilities.writer import imwrite
 from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_timepoint_selection, TimeSelection
 from mbo_utilities.preferences import get_last_dir, set_last_dir
-from mbo_utilities.gui._imgui_helpers import set_tooltip, checkbox_with_tooltip, draw_checkbox_grid
+from mbo_utilities.gui._imgui_helpers import (
+    PopupAutoSize,
+    set_tooltip,
+    checkbox_with_tooltip,
+    draw_checkbox_grid,
+)
 from mbo_utilities.gui._selection_ui import draw_selection_table
 from mbo_utilities.gui._metadata_editor import _check_missing_metadata
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
@@ -101,7 +106,11 @@ def _save_as_worker(path, **imwrite_kwargs):
 def draw_saveas_popup(parent: Any):
     """Draw the Save As popup dialog."""
     just_opened = False
+    # lazy-init the auto-size policy; reused across opens.
+    if not hasattr(parent, "_saveas_sizer"):
+        parent._saveas_sizer = PopupAutoSize("Save As")
     if parent._saveas_popup_open:
+        parent._saveas_sizer.before_open()
         imgui.open_popup("Save As")
         parent._saveas_popup_open = False
         # reset modal open state when reopening popup
@@ -128,15 +137,15 @@ def draw_saveas_popup(parent: Any):
     if not hasattr(parent, "_saveas_use_fft"):
         parent._saveas_use_fft = True
 
-    # set initial size (resizable by user)
-    imgui.set_next_window_size(imgui.ImVec2(500, 550), imgui.Cond_.first_use_ever)
-
     # modal_open is a bool, so we handle the 'X' button manually
     # by checking the second return value of begin_popup_modal.
+    # PopupAutoSize lets imgui resize the window to fit content every
+    # frame, so the dialog grows/shrinks as the user switches extensions
+    # (.h5 reveals the H5 dataset name field, etc.).
     opened, visible = imgui.begin_popup_modal(
         "Save As",
         p_open=parent._saveas_modal_open,
-        flags=imgui.WindowFlags_.no_saved_settings
+        flags=parent._saveas_sizer.flags(imgui.WindowFlags_.no_saved_settings),
     )
 
     if opened:

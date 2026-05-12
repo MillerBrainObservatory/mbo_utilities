@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from imgui_bundle import imgui, implot, portable_file_dialogs as pfd
 
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 
@@ -827,8 +828,14 @@ class DiagnosticsWidget:
 
     def _draw_stats_popup(self):
         """Draw ROI statistics popup."""
+        if not hasattr(self, "_stats_sizer"):
+            self._stats_sizer = PopupAutoSize(
+                "ROI Statistics", auto_resize=False
+            )
+
         if self._show_stats_popup:
             self._stats_popup_open = True
+            self._stats_sizer.before_open()
             imgui.open_popup("ROI Statistics")
             self._show_stats_popup = False
 

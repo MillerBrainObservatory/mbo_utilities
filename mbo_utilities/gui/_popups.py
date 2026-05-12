@@ -12,7 +12,7 @@ from typing import Any
 
 from imgui_bundle import imgui, imgui_ctx, ImVec2
 
-from mbo_utilities.gui._imgui_helpers import begin_popup_size
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize, begin_popup_size
 from mbo_utilities.gui._metadata import draw_metadata_inspector
 from mbo_utilities.gui.panels.debug_log import draw_scope
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
@@ -67,13 +67,16 @@ def draw_process_console_popup(parent: Any):
         parent._show_process_console = False
     if not hasattr(parent, "_process_console_size"):
         parent._process_console_size = ImVec2(500, 350)
+    if not hasattr(parent, "_process_console_sizer"):
+        parent._process_console_sizer = PopupAutoSize(
+            "Process Console", auto_resize=False
+        )
 
     if parent._show_process_console:
+        parent._process_console_sizer.before_open()
         imgui.open_popup("Process Console")
         parent._show_process_console = False
 
-    center = imgui.get_main_viewport().get_center()
-    imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
     imgui.set_next_window_size(parent._process_console_size, imgui.Cond_.appearing)
     imgui.set_next_window_size_constraints(imgui.ImVec2(350, 200), imgui.ImVec2(1200, 800))
 
