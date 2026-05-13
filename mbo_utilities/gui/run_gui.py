@@ -599,14 +599,32 @@ def _create_image_widget(data_array, widget: bool = True):
     except (ImportError, RuntimeError): # RuntimeError if qt is already selected
         RenderCanvas = None
 
+    # Clamp the default figure size to the screen's available work area
+    # so launches on shorter monitors (laptops, 1080p with taskbar) don't
+    # spawn a window that runs past the bottom of the screen. Falls back
+    # to (1000, 1000) when Qt isn't available or the query fails.
+    fig_w, fig_h = 1000, 1000
+    try:
+        from PyQt6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            # leave headroom for window chrome, side widget, and OS bars.
+            # PreviewDataWidget is ~300 px wide, added by add_gui — so the
+            # canvas itself wants the remaining width.
+            fig_w = max(400, min(fig_w, avail.width() - 360))
+            fig_h = max(400, min(fig_h, avail.height() - 120))
+    except Exception:
+        pass
+
     if RenderCanvas is not None:
         figure_kwargs = {
             "canvas": "pyqt6",
             "canvas_kwargs": {"present_method": "bitmap"},
-            "size": (1000, 1000)
+            "size": (fig_w, fig_h),
         }
     else:
-        figure_kwargs = {"size": (1000, 1000)}
+        figure_kwargs = {"size": (fig_w, fig_h)}
 
     # Determine slider dimension names from array's dims property if available
     from mbo_utilities.arrays.features import get_slider_dims
