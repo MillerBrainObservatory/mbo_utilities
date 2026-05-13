@@ -4091,8 +4091,10 @@ def run_process(self):
             plane_list = sorted(selected_planes)
             if use_parallel and workers > 1 and len(plane_list) > 1:
                 n_groups = min(workers, len(plane_list))
+                # tolist() returns python ints; list(np.ndarray) leaks
+                # np.int64 which json.dump() can't serialize.
                 plane_groups = [
-                    list(g) for g in np.array_split(plane_list, n_groups)
+                    g.tolist() for g in np.array_split(plane_list, n_groups)
                 ]
             else:
                 plane_groups = [plane_list]
