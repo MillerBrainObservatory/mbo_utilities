@@ -854,6 +854,8 @@ def _build_isoview_processing_config(args: dict):
     # plain pass-throughs — keep keys only when the widget supplied them
     for key in (
         "corrected_suffix",
+        "fused_suffix",
+        "stitcher_suffix",
         "output_format",
         "compression",
         "compression_level",
@@ -862,6 +864,7 @@ def _build_isoview_processing_config(args: dict):
         "log",
         "pyramid",
         "pyramid_max_layers",
+        "timepoints",
         "segment_mode",
         "gauss_kernel",
         "gauss_sigma",
