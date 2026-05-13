@@ -26,14 +26,16 @@ _COL_DIM = imgui.ImVec4(0.75, 0.75, 0.77, 1.0)
 
 
 def _ensure_gpu_list(parent: Any) -> None:
-    """Enumerate adapters once and stash on ``parent`` for reuse."""
+    """Read the pre-warmed adapter cache. NEVER call
+    ``fpl.enumerate_adapters()`` from here — it initializes wgpu, which
+    clobbers GLFW's WGL current-context (Glfw Error 65544) and makes
+    the host window flicker. The cache is primed in ``_run_gui_impl``
+    before ``immapp.run`` takes over the GL context.
+    """
     if getattr(parent, "_options_gpu_adapters", None) is not None:
         return
-    try:
-        import fastplotlib as fpl
-        parent._options_gpu_adapters = list(fpl.enumerate_adapters())
-    except Exception:
-        parent._options_gpu_adapters = []
+    from mbo_utilities.gui._gpu_cache import get_adapters
+    parent._options_gpu_adapters = list(get_adapters())
     labels = ["auto (default)"]
     for i, a in enumerate(parent._options_gpu_adapters):
         info = getattr(a, "info", {}) or {}

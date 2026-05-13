@@ -729,15 +729,20 @@ def _run_gui_impl(
 ):
     """Internal implementation of run_gui with all heavy imports."""
     # Apply persisted Options (GPU adapter, debug logging) before any
-    # fastplotlib Figure is created or the launch dialog renders.
+    # fastplotlib Figure is created or the launch dialog renders. Also
+    # prime the adapter cache so the file_dialog's Options popup doesn't
+    # call enumerate_adapters() from inside the imgui frame (that
+    # initializes wgpu, which on Windows clears the current WGL context
+    # and makes the host window flicker — Glfw Error 65544).
     try:
         from mbo_utilities.preferences import get_gpu_index, get_debug_logging
+        from mbo_utilities.gui import _gpu_cache
+        _gpu_cache.prime()
         _gpu_idx = get_gpu_index()
-        if _gpu_idx >= 0:
+        _adapters = _gpu_cache.get_adapters()
+        if _gpu_idx >= 0 and 0 <= _gpu_idx < len(_adapters):
             import fastplotlib as fpl
-            _adapters = fpl.enumerate_adapters()
-            if 0 <= _gpu_idx < len(_adapters):
-                fpl.select_adapter(_adapters[_gpu_idx])
+            fpl.select_adapter(_adapters[_gpu_idx])
         if get_debug_logging():
             import logging
             from mbo_utilities import log as _mbo_log

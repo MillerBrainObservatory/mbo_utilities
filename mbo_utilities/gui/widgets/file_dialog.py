@@ -8,11 +8,14 @@ from imgui_bundle import (
     icons_fontawesome_6 as fa,
 )
 from mbo_utilities.gui import _setup  # triggers setup on import
-from mbo_utilities.gui._options_popup import draw_options_popup
 from mbo_utilities.preferences import (
     get_default_open_dir,
     set_last_dir,
     add_recent_file,
+    get_gpu_index,
+    set_gpu_index,
+    get_debug_logging,
+    set_debug_logging,
 )
 from mbo_utilities.install import check_installation, cupy_install_hint, Status
 
@@ -200,12 +203,105 @@ class FileDialog:
         self.gui_modes = ["Fastplotlib viewer (default)", "Napari viewer"]
         self.selected_mode_index = 0
 
-        # Options popup state is managed by the shared draw_options_popup
-        # helper; only the trigger flag lives here.
+        # GPU adapter selection. -1 == wgpu auto-pick; otherwise an index
+        # into self._gpu_adapter_labels. Lazily populated on first render
+        # so importing FileDialog doesn't force fastplotlib import.
+        self._gpu_adapters = None  # list[wgpu adapter]
+        self._gpu_adapter_labels: list[str] = []
+        # Seed from persisted preferences so re-opens remember the user's choice.
+        self.selected_gpu_index: int = get_gpu_index()
+        self.debug_logging: bool = get_debug_logging()
         self._show_options_popup: bool = False
 
         # start dependency check immediately in background
         self._start_dependency_check()
+
+    def _ensure_gpu_list(self) -> None:
+        """Read the pre-warmed adapter cache. NEVER call
+        ``fpl.enumerate_adapters()`` from here — it initializes wgpu,
+        which clobbers GLFW's WGL current-context (Glfw Error 65544)
+        and makes the host window flicker. The cache is primed in
+        ``_run_gui_impl`` before ``immapp.run`` takes over the GL
+        context.
+        """
+        if self._gpu_adapters is not None:
+            return
+        from mbo_utilities.gui._gpu_cache import get_adapters
+        self._gpu_adapters = list(get_adapters())
+        labels = ["auto (default)"]
+        for i, a in enumerate(self._gpu_adapters):
+            info = getattr(a, "info", {}) or {}
+            name = info.get("device", info.get("description", f"adapter {i}"))
+            type_ = info.get("adapter_type", info.get("device_type", "?"))
+            labels.append(f"{i}: {name} [{type_}]")
+        self._gpu_adapter_labels = labels
+
+    def _draw_options_popup(self) -> None:
+        """Modal popup: GPU adapter selector + debug logging flag.
+
+        Both settings are persisted to ~/.mbo/settings/preferences.json on
+        change so the choice survives restarts.
+        """
+        if self._show_options_popup:
+            imgui.open_popup("##options_popup")
+            self._show_options_popup = False
+
+        popup_flags = imgui.WindowFlags_.always_auto_resize
+        if not imgui.begin_popup("##options_popup", popup_flags):
+            return
+
+        try:
+            imgui.text_colored(COL_ACCENT, f"{fa.ICON_FA_GEARS}  Options")
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            self._ensure_gpu_list()
+
+            imgui.text_colored(COL_TEXT_DIM, "GPU adapter")
+            if imgui.is_item_hovered():
+                wrapped_tooltip(
+                    "Pick which GPU to render with. 'auto' lets wgpu "
+                    "choose (usually the DiscreteGPU). Takes effect on "
+                    "the next dataset you open."
+                )
+            imgui.set_next_item_width(hello_imgui.em_size(20))
+            ui_idx = self.selected_gpu_index + 1  # 0 == "auto"
+            changed, new_ui_idx = imgui.combo(
+                "##gpu_adapter", ui_idx, self._gpu_adapter_labels
+            )
+            if changed:
+                self.selected_gpu_index = new_ui_idx - 1
+                set_gpu_index(self.selected_gpu_index)
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            changed, new_debug = imgui.checkbox("Debug logging", self.debug_logging)
+            if imgui.is_item_hovered():
+                wrapped_tooltip(
+                    "Verbose console logs (per-read timings, zarr chunk "
+                    "shapes, etc.). Same effect as launching with "
+                    "MBO_DEBUG=1."
+                )
+            if changed:
+                self.debug_logging = new_debug
+                set_debug_logging(self.debug_logging)
+                # Apply immediately so the dialog itself sees the new level.
+                try:
+                    import logging
+                    from mbo_utilities import log as _mbo_log
+                    _mbo_log.set_global_level(
+                        logging.DEBUG if self.debug_logging else logging.INFO
+                    )
+                except Exception:
+                    pass
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            if imgui.button("Close", imgui.ImVec2(hello_imgui.em_size(6), 0)):
+                imgui.close_current_popup()
+        finally:
+            imgui.end_popup()
 
     @property
     def widget_enabled(self):
@@ -592,6 +688,10 @@ class FileDialog:
             imgui.pop_style_var(2)
             imgui.pop_style_color()
 
+            # Options popup is drawn here but only renders when opened
+            # via the button on the bottom row.
+            self._draw_options_popup()
+
             # file/folder completion
             if self._open_multi and self._open_multi.ready():
                 self.selected_path = self._open_multi.result()
@@ -633,12 +733,6 @@ class FileDialog:
             pop_button_style()
 
             imgui.pop_id()
-
-        # Options popup draws OUTSIDE the ##main child and the pfd id
-        # scope. Drawing it from inside a child confused imgui's popup
-        # owner tracking — the popup auto-closed every frame and the
-        # underlying Options button re-fired the open, flashing violently.
-        draw_options_popup(self)
 
         imgui.pop_style_var(4)
         imgui.pop_style_color(8)
