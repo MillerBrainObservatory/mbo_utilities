@@ -1536,7 +1536,14 @@ def _format_size(size_bytes: int | None) -> str:
 def _dataset_size_bytes(self, filenames: list) -> int | None:
     """Sum file sizes for `filenames`, cached on `self` keyed by the
     file-list tuple. We don't poll for on-disk changes since input
-    files are read-only during a run."""
+    files are read-only during a run.
+
+    Handles directory-format containers (``.zarr``, ``.ome.zarr``,
+    suite2p ``ops/stat`` folders) by recursing through their contents.
+    ``Path.stat().st_size`` on a directory only reports the dir entry
+    size (a few KB), which is why a reloaded zarr-backed dataset
+    displayed as "0 B" before this recursion.
+    """
     if not filenames:
         return None
     key = tuple(str(f) for f in filenames)
@@ -1546,7 +1553,22 @@ def _dataset_size_bytes(self, filenames: list) -> int | None:
     total = 0
     for f in filenames:
         try:
-            total += Path(f).stat().st_size
+            p = Path(f)
+            st = p.stat()
+            from stat import S_ISDIR
+            if S_ISDIR(st.st_mode):
+                # rglob("*") doesn't include `p` itself; sum every file
+                # under it. Errors on individual entries (symlinks to
+                # missing targets, permission denied) are skipped.
+                for child in p.rglob("*"):
+                    try:
+                        cst = child.stat()
+                        if not S_ISDIR(cst.st_mode):
+                            total += cst.st_size
+                    except OSError:
+                        continue
+            else:
+                total += st.st_size
         except OSError:
             continue
     self._dataset_size_cache = (key, total)
