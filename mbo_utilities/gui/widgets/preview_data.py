@@ -1096,6 +1096,13 @@ class PreviewDataWidget(EdgeWindow):
         draw_keybinds_popup(self)
         draw_help_popup(self)
         draw_options_popup(self)
+        try:
+            from mbo_utilities.gui.widgets.isoview_crop import draw_window as _draw_iso_crop_window
+            _draw_iso_crop_window(self)
+        except Exception:
+            # Optional widget — skip silently when its deps aren't loaded
+            # (e.g. immvision unavailable in the running imgui_bundle).
+            pass
 
         super().draw_window()
 

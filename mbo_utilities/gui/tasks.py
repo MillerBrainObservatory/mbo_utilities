@@ -884,6 +884,12 @@ def _build_isoview_processing_config(args: dict):
         "pixel_spacing_z",
         "detection_objective_mag",
         "pixel_spacing_camera",
+        "crop_left",
+        "crop_top",
+        "crop_front",
+        "crop_width",
+        "crop_height",
+        "crop_depth",
     ):
         val = args.get(key)
         if val is not None:
