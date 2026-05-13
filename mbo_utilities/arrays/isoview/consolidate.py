@@ -351,6 +351,54 @@ def _make_compressors(name: str, level: int, itemsize: int) -> list | None:
     )
 
 
+def _v2_compressor(name: str, level: int):
+    """Numcodecs codec for Zarr v2 writes (BigStitcher mirror).
+
+    v2 has no sharding and takes a single compressor (not a list of
+    codecs). Mirrors :func:`_make_compressors` for the BigStitcher
+    on-the-fly path.
+    """
+    if name in (None, "none"):
+        return None
+    import numcodecs
+    if name == "gzip":
+        return numcodecs.GZip(level=level)
+    if name == "zstd":
+        return numcodecs.Zstd(level=level)
+    if name == "blosc-lz4":
+        return numcodecs.Blosc(cname="lz4", clevel=level)
+    if name == "blosc-zstd":
+        return numcodecs.Blosc(
+            cname="zstd", clevel=level, shuffle=numcodecs.Blosc.BITSHUFFLE
+        )
+    raise ValueError(
+        f"unknown compressor {name!r}; expected one of "
+        "'none', 'gzip', 'zstd', 'blosc-lz4', 'blosc-zstd'"
+    )
+
+
+def _v2_attrs(attrs: dict) -> dict:
+    """Translate any ``"version": "0.5"`` entries to ``"0.4"``.
+
+    OME-NGFF 0.5 corresponds to Zarr v3; BigStitcher only reads 0.4 +
+    Zarr v2. The omero/multiscales/labels block contents are otherwise
+    identical between the two spec versions so the rest passes through.
+    """
+    if not isinstance(attrs, dict):
+        return attrs
+    out: dict = {}
+    for k, v in attrs.items():
+        if k == "version" and v == "0.5":
+            out[k] = "0.4"
+        elif isinstance(v, dict):
+            out[k] = _v2_attrs(v)
+        elif isinstance(v, list):
+            out[k] = [_v2_attrs(x) if isinstance(x, dict) else x for x in v]
+        else:
+            out[k] = v
+    return out
+
+
 # === Output group + array creation ===
 
 def _open_output_group(out_path: Path, overwrite: bool):
@@ -1534,3 +1582,113 @@ def consolidate_isoview(
     raise ValueError(
         f"kind must be 'corrected' or 'fused'; got {kind!r}"
     )
+
+
+def to_bigstitcher(
+    src: str | Path,
+    dest: str | Path | None = None,
+    *,
+    compressor: str = "zstd",
+    compression_level: int = 3,
+    overwrite: bool = False,
+) -> Path:
+    """Mirror a consolidated v3 zarr to a transient v2 zarr for BigStitcher.
+
+    BigStitcher (and BigDataViewer's older ImageLoader path) only read
+    Zarr v2 / OME-NGFF 0.4. This writes a fresh v2 group at ``dest``
+    that contains the same image pyramid + omero/multiscales metadata
+    as the source v3 group, with sharding dropped (v2 doesn't support
+    it) and the OME version string flipped from ``"0.5"`` to ``"0.4"``.
+
+    The mirror is meant to be **transient** — produce it when you need
+    BigStitcher access, delete it when you're done. Auxiliary groups
+    (``projections/``, ``labels/``, ``raw/``, ``xy_mask`` etc.) are
+    *not* copied — BigStitcher only consumes the main image pyramid.
+
+    BigStitcher import flow:
+      1. Run this function to produce ``<src>.v2.zarr``.
+      2. In Fiji: ``Plugins → BigStitcher → Define a new dataset``,
+         pick "Zeiss Lightsheet ... → Generic OME-Zarr" (or the closest
+         loader your version exposes).
+      3. Point it at the ``.v2.zarr`` directory. BigStitcher reads
+         ``omero.channels[].label`` for channel names, ``window`` for
+         contrast, and the multiscales axes for voxel size, then
+         generates its own ``dataset.xml``.
+      4. Use BigStitcher's UI to assign per-camera angles (the OME-NGFF
+         spec has no first-class home for them, so this is a one-time
+         manual step per dataset).
+
+    Parameters
+    ----------
+    src
+        Path to a consolidated v3 ``.zarr`` (output of
+        :func:`consolidate_isoview`).
+    dest
+        Where to write the v2 mirror. Defaults to ``<src>.v2.zarr``
+        next to ``src``.
+    compressor, compression_level
+        Codec for the v2 chunks. Defaults match the v3 source so
+        on-disk size stays comparable. ``"none"`` skips compression.
+    overwrite
+        Replace ``dest`` if it exists.
+
+    Returns
+    -------
+    Path
+        Path to the v2 ``.zarr`` directory.
+    """
+    src_path = Path(src)
+    if not src_path.is_dir():
+        raise FileNotFoundError(f"source v3 zarr not found: {src_path}")
+    if dest is None:
+        dest_path = src_path.with_suffix(".v2.zarr")
+    else:
+        dest_path = Path(dest)
+        if dest_path.suffix.lower() != ".zarr":
+            dest_path = dest_path.with_suffix(".zarr")
+
+    if dest_path.exists():
+        if not overwrite:
+            raise FileExistsError(
+                f"v2 mirror already exists (pass overwrite=True): {dest_path}"
+            )
+        shutil.rmtree(dest_path)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    src_root = zarr.open_group(str(src_path), mode="r")
+    src_attrs = dict(src_root.attrs)
+    multiscales = src_attrs.get("ome", {}).get("multiscales") or []
+    if not multiscales:
+        raise ValueError(
+            f"no multiscales metadata in {src_path}; not a consolidated isoview zarr"
+        )
+
+    dst_root = zarr.open_group(str(dest_path), mode="w", zarr_format=2)
+    dst_root.attrs.update(_v2_attrs(src_attrs))
+
+    v2_codec = _v2_compressor(compressor, compression_level)
+
+    # Image pyramid only — BigStitcher consumes /0/../N/ and ignores
+    # everything else. Each level keeps the source's chunk shape and
+    # gets copied (T,C)-slab-by-slab to keep peak memory bounded.
+    level_paths = [d["path"] for d in multiscales[0]["datasets"]]
+    for lvl in level_paths:
+        src_arr = zarr.open_array(store=src_root.store, path=lvl, mode="r")
+        dst_arr = zarr.create_array(
+            store=dst_root.store,
+            name=lvl,
+            shape=src_arr.shape,
+            dtype=src_arr.dtype,
+            chunks=src_arr.chunks,
+            compressors=[v2_codec] if v2_codec is not None else None,
+            zarr_format=2,
+            overwrite=True,
+        )
+        nt = src_arr.shape[0]
+        nc = src_arr.shape[1]
+        for ti in range(nt):
+            for ci in range(nc):
+                dst_arr[ti, ci] = src_arr[ti, ci]
+
+    logger.info("to_bigstitcher: wrote %s (v2 mirror of %s)", dest_path, src_path)
+    return dest_path

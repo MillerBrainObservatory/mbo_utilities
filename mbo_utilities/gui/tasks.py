@@ -1061,6 +1061,45 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
         raise
 
 
+def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
+    """IsoView ``generate_bigstitcher_xml`` export task.
+
+    Walks ``config.fused_dir`` for VW00/VW90 pairs and writes one BDV
+    SpimData dataset per fusion method under ``config.stitcher_dir``.
+    No resampling — the VW90 pre-rotation is baked into the calibration
+    affine that BigStitcher applies at display time.
+
+    Reuses the shared isoview ProcessingConfig builder + log bridge so
+    the same path resolution and per-run log routing as correct_stack /
+    multi_fuse apply.
+    """
+    from isoview import generate_bigstitcher_xml
+
+    _bridge_isoview_logging(logger)
+
+    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor.update(0.01, "Initializing generate_bigstitcher_xml...")
+
+    try:
+        config = _build_isoview_processing_config(args)
+        logger.info(
+            f"generate_bigstitcher_xml: input={config.input_dir}, "
+            f"fused_dir={config.fused_dir}, "
+            f"stitcher_dir={config.stitcher_dir}"
+        )
+        monitor.update(0.05, "Writing BDV zarr + dataset.xml...")
+        xml_path = generate_bigstitcher_xml(
+            config, method=args.get("method"),
+        )
+        logger.info(f"  wrote: {xml_path}")
+        monitor.finish(f"generate_bigstitcher_xml complete: {xml_path}")
+        logger.info("generate_bigstitcher_xml completed successfully")
+    except Exception as e:
+        monitor.fail(str(e), details={"traceback": traceback.format_exc()})
+        logger.exception(f"generate_bigstitcher_xml failed: {e}")
+        raise
+
+
 # Registry
 TASKS = {
     "save_as": task_save_as,
@@ -1068,4 +1107,5 @@ TASKS = {
     "isoview": task_isoview,
     "isoview_correct": task_correct_stack,
     "isoview_fuse": task_multi_fuse,
+    "isoview_bigstitcher": task_generate_bigstitcher,
 }

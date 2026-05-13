@@ -12,6 +12,8 @@ Public API:
 - :func:`detect_isoview_kind` — auto-detect which kind a path belongs to.
 - :func:`consolidate_isoview` — collapse one output tree into a single
   OME-NGFF 0.5 zarr group.
+- :func:`to_bigstitcher` — produce a transient Zarr v2 / OME-NGFF 0.4
+  mirror of a consolidated zarr for BigStitcher import.
 - :func:`isoview_to_ome_zarr` — thin convenience wrapper to write any
   kind to OME-Zarr without the full consolidation step.
 
@@ -31,11 +33,15 @@ from mbo_utilities.arrays.isoview.array import (
     detect_isoview_kind,
     isoview_to_ome_zarr,
 )
-from mbo_utilities.arrays.isoview.consolidate import consolidate_isoview
+from mbo_utilities.arrays.isoview.consolidate import (
+    consolidate_isoview,
+    to_bigstitcher,
+)
 
 __all__ = [
     "IsoviewArray",
     "consolidate_isoview",
     "detect_isoview_kind",
     "isoview_to_ome_zarr",
+    "to_bigstitcher",
 ]
