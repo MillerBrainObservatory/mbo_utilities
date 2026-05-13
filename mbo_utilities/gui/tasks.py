@@ -931,8 +931,8 @@ def _bridge_isoview_logging(worker_logger: logging.Logger) -> None:
 
     isoview uses its own top-level ``isoview`` logger; by default only
     WARNING+ flows to stderr and INFO/DEBUG lands in
-    ``<output_dir>/Results/MultiFused_*/fusion.log`` — which the GUI
-    user can't see in real time. This helper attaches a forwarding
+    ``<fused_dir>/<method>/fusion.log`` — which the GUI user can't see
+    in real time. This helper attaches a forwarding
     handler that mirrors INFO+ records to whatever handlers are on
     the worker logger (stdout + per-task file), sets ``isoview``'s
     propagation to ``False`` so nothing double-prints, and is idempotent
@@ -1022,15 +1022,11 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
 
     try:
         config = _build_isoview_processing_config(args)
-        fusion_log_path = (
-            Path(config.output_dir)
-            / "Results"
-            / f"MultiFused_{config.blending_method}"
-            / "fusion.log"
-        )
+        fused_dir = Path(config.fused_dir)
+        fusion_log_path = fused_dir / config.blending_method / "fusion.log"
         logger.info(
             f"multi_fuse: input={config.input_dir}, "
-            f"output={config.output_dir}, blending={config.blending_method}, "
+            f"fused_dir={fused_dir}, blending={config.blending_method}, "
             f"workers={config.workers}"
         )
         logger.info(f"isoview per-run log: {fusion_log_path} (DEBUG records)")
@@ -1038,16 +1034,15 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
         multi_fuse(config)
 
         # Optional folder-suffix rename: the pipeline always writes to
-        # Results/MultiFused_<method>/. If the user supplied output_suffix
+        # <fused_dir>/<method>/. If the user supplied output_suffix
         # (e.g. "param-set-1"), move that folder to
-        # Results/MultiFused_<method>_<suffix>/ so multiple parameter
-        # sweeps can coexist. Skipped silently when suffix is None/blank
-        # or the source folder is missing (e.g. all tiles were skipped).
+        # <fused_dir>/<method>_<suffix>/ so multiple parameter sweeps
+        # can coexist. Skipped silently when suffix is None/blank or
+        # the source folder is missing (e.g. all tiles were skipped).
         suffix = args.get("output_suffix")
         if suffix:
-            results_dir = Path(config.output_dir) / "Results"
-            src = results_dir / f"MultiFused_{config.blending_method}"
-            dst = results_dir / f"MultiFused_{config.blending_method}_{suffix}"
+            src = fused_dir / config.blending_method
+            dst = fused_dir / f"{config.blending_method}_{suffix}"
             if src.is_dir():
                 if dst.exists():
                     logger.warning(

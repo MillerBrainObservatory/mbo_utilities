@@ -6,7 +6,7 @@ output trees produced by the Keller-lab IsoView lightsheet pipeline:
 | Kind         | Layout                                                                                                  | View key             | Channel labels        |
 | ------------ | ------------------------------------------------------------------------------------------------------- | -------------------- | --------------------- |
 | `corrected`  | `<root>.corrected/SPM##/TM######/SPM##_TM######_CM##.<ext>`                                              | `cam` (int)          | `CM00`, `CM01`, …     |
-| `fused`      | `<root>.corrected/Results/MultiFused_<method>/SPM##/TM######/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>` | `(cam0, cam1, vw)`   | `VW00_fused`, …       |
+| `fused`      | `<root>.fused/<method>/{SPM##\|TM######}/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>` | `(cam0, cam1, vw)`   | `VW00_fused`, …       |
 | `raw`        | `<root>/SPC##_TM#####_ANG###_CM#_CHN##_PH#.stack`                                                       | `(cam, chn)`         | `CM0_CHN00`, …        |
 | `clusterpt`  | `<root>/TM######/SPM##_TM######_CM##_CHN##.klb`                                                         | `(cam, chn)`         | `CM00_CHN00`, …       |
 
@@ -111,8 +111,8 @@ class changes required.
 
 Decision order (most specific first):
 
-1. If any ancestor matches `Results/MultiFused_*/SPM##/…` → `"fused"`.
-2. If any ancestor matches `.corrected/SPM##/…` (and isn't under `Results/`) → `"corrected"`.
+1. If the path is at, or under, a `<raw>.fused/` directory → `"fused"`.
+2. If any ancestor matches `.corrected/SPM##/…` → `"corrected"`.
 3. If the directory contains raw `.stack` files → `"raw"`.
 4. If `TM######/` subfolders contain `.klb` files → `"clusterpt"`.
 5. Otherwise → `None`.
@@ -124,8 +124,8 @@ A file path is normalized to its parent directory before testing.
 | Helper                                  | Maps                                                                                  | Returns                                                            |
 | --------------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `_resolve_corrected_spm_dir(p)`         | the `.corrected/` root, an SPM## descendant, a TM###### descendant, or any ancestor   | the `SPM##` directory under `.corrected/`                          |
-| `_resolve_fused_method_dir(p)`          | the `.corrected/Results/MultiFused_<method>/` tree (or any ancestor)                  | the `MultiFused_<method>` directory                                |
-| `_first_method_dir(results_dir)`        | `Results/` → first `MultiFused_*` dir (preferring `MultiFused_geometric`)             |                                                                    |
+| `_resolve_fused_method_dir(p)`          | the `<raw>.fused/<method>/` tree (or any ancestor, or a `.corrected/` whose `.fused/` sibling exists) | the `<method>` directory under `<raw>.fused/`             |
+| `_first_method_dir(fused_root)`         | `<raw>.fused/` → first method dir (preferring `geometric`)                                            |                                                                    |
 
 ### Volume scanners (one per kind)
 
@@ -143,7 +143,7 @@ All four scanners return `({}, [], [])` when no volumes are found.
 | Helper                            | Behavior                                                                                                                                                                       |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `_scan_flat_projections(dir)`     | Walks a flat `<dataset>.{raw,corrected}.projections/` directory. Matches `SPM##_TM##_CM##.{xy,xz,yz}Projection.tif`. Returns `{"axes", "views", "files"}` or `None`.            |
-| `_scan_fused_projections(method)` | Walks `MultiFused_*/SPM##/TM######/` for `*Projection.tif` files. Handles both `CM##_CM##_VW##` and bare `VW##` naming.                                                       |
+| `_scan_fused_projections(method)` | Walks `<raw>.fused/<method>/{SPM##\|TM######}/` for `*Projection.tif` files. Handles both `CM##_CM##_VW##` and bare `VW##` naming.                                            |
 | `_corrected_projections(arr)`     | Looks for `<root>.corrected.projections/` next to the array's `.corrected` directory.                                                                                          |
 | `_fused_projections(arr)`         | Delegates to `_scan_fused_projections(arr.scan_root)`.                                                                                                                         |
 | `_raw_projections(arr)`           | Looks for `<root>.raw.projections/` next to the raw acquisition directory.                                                                                                     |
