@@ -486,8 +486,7 @@ class PreviewDataWidget(EdgeWindow):
 
         Per-array slots are dicts keyed by channel int; compute_zstats
         populates one key per channel for multi-channel arrays, just
-        ``{0: ...}`` for single-channel. ``_zstats_channel_selection``
-        is the user's UI choice (-1 = follow C slider).
+        ``{0: ...}`` for single-channel.
         """
         self._zstats = [{} for _ in range(self.num_graphics)]
         self._zstats_means = [{} for _ in range(self.num_graphics)]
@@ -496,7 +495,6 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_running = [False] * self.num_graphics
         self._zstats_progress = [0.0] * self.num_graphics
         self._zstats_current_z = [0] * self.num_graphics
-        self._zstats_channel_selection = -1
 
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
