@@ -285,18 +285,10 @@ def _get_or_upload(parent: Any, view: int, timepoint: int) -> Any | None:
 
 
 def _initial_display_range(parent: Any, arr: Any) -> tuple[float, float]:
-    """Pick a (vmin, vmax) from the first available projection so the
-    initial preview isn't black / saturated. Falls back to (0, 1)."""
-    for view, tp_paths in parent._iso_crop_proj_index.items():
-        if not tp_paths:
-            continue
-        first_tp = sorted(tp_paths.keys())[0]
-        proj = _load_projection(tp_paths[first_tp])
-        if proj is None:
-            continue
-        from mbo_utilities.gui.widgets.summary_image import _auto_range
-        return _auto_range(proj)
-    return 0.0, 1.0
+    """Default to (0, 1000) — matches the host viewer's isoview defaults
+    so contrast stays consistent across the main canvas and this window.
+    """
+    return 0.0, 1000.0
 
 
 def _ensure_loaded_for(parent: Any, arr: Any) -> None:
