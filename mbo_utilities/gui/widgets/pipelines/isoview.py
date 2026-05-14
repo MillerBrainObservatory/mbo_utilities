@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from imgui_bundle import hello_imgui, imgui
+from imgui_bundle import hello_imgui, icons_fontawesome_6 as fa, imgui
 
 from mbo_utilities.gui._imgui_helpers import (
     PopupAutoSize,
@@ -65,6 +65,32 @@ def _default_workers() -> int:
     return max(1, min(4, cpu // 2))
 
 
+def _auto_detect_spark_jar() -> str:
+    """Find a bigstitcher-spark fat JAR built locally, else return empty."""
+    home = Path.home()
+    candidates = list((home / "repos" / "BigStitcher-Spark" / "target").glob(
+        "BigStitcher-Spark-*-SNAPSHOT.jar"
+    ))
+    # prefer non-sources, non-tests jars
+    real = [
+        p for p in candidates
+        if "sources" not in p.name and "tests" not in p.name
+    ]
+    return str(real[0]) if real else ""
+
+
+def _auto_detect_spark_jdk() -> str:
+    """Find a portable JDK 11 in the conventional side-dir, else empty."""
+    home = Path.home()
+    candidates = sorted(
+        (home / "repos" / "bigstitcher-spark-build").glob("jdk-11*")
+    )
+    for p in candidates:
+        if (p / "bin" / "java.exe").is_file() or (p / "bin" / "java").is_file():
+            return str(p)
+    return ""
+
+
 def _input_w() -> float:
     """Default width for numeric inputs in the popup."""
     return hello_imgui.em_size(8)
@@ -92,6 +118,16 @@ def _hint(text: str) -> None:
     """Wrapped subtitle/help text in the same blue Suite2p uses."""
     imgui.push_text_wrap_pos(0.0)
     imgui.text_colored(_SUBSECTION_COLOR, text)
+    imgui.pop_text_wrap_pos()
+
+
+def _text_disabled_wrapped(text: str) -> None:
+    """``text_disabled`` that wraps at the current content region edge.
+    Plain ``text_disabled`` doesn't wrap, so long captions like the
+    Spark JDK warning clip at narrow column widths.
+    """
+    imgui.push_text_wrap_pos(0.0)
+    imgui.text_disabled(text)
     imgui.pop_text_wrap_pos()
 
 
@@ -160,13 +196,12 @@ def _available_modes(arr: Any) -> list[str]:
     elif arr.kind == "corrected":
         if has_pkg:
             modes.append(_MODE_FUSE)
-        modes.append(_MODE_CONSOLIDATE)
-        if has_pkg:
             modes.append(_MODE_STITCHER)
+        modes.append(_MODE_CONSOLIDATE)
     elif arr.kind == "fused":
-        modes.append(_MODE_CONSOLIDATE)
         if has_pkg:
             modes.append(_MODE_STITCHER)
+        modes.append(_MODE_CONSOLIDATE)
     return modes
 
 
@@ -224,6 +259,41 @@ class IsoviewPipelineWidget(PipelineWidget):
         # truth as the Fuse mode's transform checkbox.
         self._stitcher_output_path: str = ""
         self._stitcher_suffix: str = ".stitcher"
+        # Opt-in feature-based coarse alignment (3D blob detection +
+        # pairwise-difference histogram). When False, only the
+        # calibration affines are emitted; the user runs BigStitcher's
+        # interest-point registration after opening the XML.
+        self._stitcher_coarse_align: bool = True
+
+        # bigstitcher-spark registration step (opt-in via separate "Run
+        # registration" button — mutates the exported dataset.xml).
+        # ``spark_root`` is either the executables directory produced
+        # by bigstitcher-spark's install script, or a fat JAR file.
+        # ``java_home`` overrides the system Java (Spark 3.3.x requires
+        # Java 8-17; >=21 fails at runtime). Defaults auto-detect the
+        # built JAR + JDK 11 in ~/repos/ if present.
+        self._stitcher_spark_root: str = _auto_detect_spark_jar()
+        self._stitcher_spark_java_home: str = _auto_detect_spark_jdk()
+        # Detection / match defaults are tuned for cellular fluorescence
+        # data (the common isoview case — GCaMP-labelled neurons,
+        # spheroids, etc.), not sub-resolution beads. sigma=4.0 matches
+        # ~6-pixel cell bodies, threshold=0.0004 keeps ~80-150 detections
+        # per view (we need >=12 correspondences after descriptor
+        # matching), and FAST_ROTATION tolerates the orthogonal
+        # VW00<->VW90 geometry where PRECISE_TRANSLATION's local
+        # descriptor fails. For bead datasets, dial sigma=1.8 /
+        # threshold=0.008 / PRECISE_TRANSLATION back in via the popup.
+        self._stitcher_spark_label: str = "beads"
+        self._stitcher_spark_sigma: float = 4.0
+        self._stitcher_spark_threshold: float = 0.0004
+        self._stitcher_spark_min_intensity: float = 0.0
+        self._stitcher_spark_max_intensity: float = 65535.0
+        self._stitcher_spark_downsample_xy: int = 2
+        self._stitcher_spark_downsample_z: int = 1
+        self._stitcher_spark_match_algorithm: str = "FAST_ROTATION"
+        self._stitcher_spark_transformation_model: str = "AFFINE"
+        self._stitcher_spark_regularization_model: str = "RIGID"
+        self._stitcher_spark_dialog: Any = None
 
         # Fused-tree top-level suffix. Distinct from
         # `_fuse_output_suffix` which is a per-method tag inside the
@@ -486,13 +556,18 @@ class IsoviewPipelineWidget(PipelineWidget):
         finally:
             imgui.end_popup()
 
-    def _draw_popup_columns(self, columns: list[tuple[str, Any]]) -> None:
+    def _draw_popup_columns(
+        self, columns: "list[tuple[str, Any] | tuple[str, Any, bool]]",
+    ) -> None:
         """Render a row of equal-width bordered child boxes.
 
-        ``columns`` is a list of ``(title, draw_fn)``. Each box gets a
-        yellow ``_TITLE_COLOR`` header, matching Suite2p's pipeline
-        popup. Boxes auto-resize their height; widths split the row
-        evenly.
+        ``columns`` is a list of ``(title, draw_fn)`` or
+        ``(title, draw_fn, collapsing)``. Each box gets a yellow
+        ``_TITLE_COLOR`` header, matching Suite2p's pipeline popup. When
+        ``collapsing=True`` the title renders as a collapsing header
+        (collapsed by default each open) — same idiom Suite2p uses for
+        its row-2 advanced columns. Boxes auto-resize their height;
+        widths split the row evenly.
         """
         if not columns:
             return
@@ -502,7 +577,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         spacing_x = style.item_spacing.x
         col_w = max(_natural_col_w(), (avail_x - spacing_x * (n - 1)) / n)
         box_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
-        for i, (title, draw_fn) in enumerate(columns):
+        for i, col in enumerate(columns):
+            if len(col) == 3:
+                title, draw_fn, collapsing = col
+            else:
+                title, draw_fn = col
+                collapsing = False
             if i > 0:
                 imgui.same_line()
             imgui.begin_child(
@@ -510,10 +590,21 @@ class IsoviewPipelineWidget(PipelineWidget):
                 imgui.ImVec2(col_w, 0),
                 box_flags,
             )
-            imgui.text_colored(_TITLE_COLOR, title)
-            imgui.spacing()
             try:
-                draw_fn()
+                if collapsing:
+                    imgui.set_next_item_open(False, imgui.Cond_.appearing)
+                    imgui.push_style_color(imgui.Col_.text, _TITLE_COLOR)
+                    expanded = imgui.collapsing_header(
+                        f"{title}##iso_col_hdr_{title}"
+                    )
+                    imgui.pop_style_color()
+                    if expanded:
+                        imgui.spacing()
+                        draw_fn()
+                else:
+                    imgui.text_colored(_TITLE_COLOR, title)
+                    imgui.spacing()
+                    draw_fn()
             finally:
                 imgui.end_child()
 
@@ -521,7 +612,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._draw_popup_columns([
             ("I/O options", self._draw_consolidate_io_box),
             ("Codec", self._draw_consolidate_codec_box),
-            ("Microscope (override XML)", self._draw_microscope_overrides_box),
+            ("Microscope (override XML)",
+             self._draw_microscope_overrides_box, True),
         ])
 
     def _draw_correct_popup_rows(self) -> None:
@@ -532,7 +624,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         ])
         imgui.spacing()
         self._draw_popup_columns([
-            ("Microscope (override XML)", self._draw_microscope_overrides_box),
+            ("Microscope (override XML)",
+             self._draw_microscope_overrides_box, True),
         ])
 
     def _draw_fuse_popup_rows(self) -> None:
@@ -543,8 +636,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         ])
         imgui.spacing()
         self._draw_popup_columns([
-            ("Registration search", self._draw_fuse_search_box),
-            ("Microscope (override XML)", self._draw_microscope_overrides_box),
+            ("Registration search", self._draw_fuse_search_box, True),
+            ("Microscope (override XML)",
+             self._draw_microscope_overrides_box, True),
         ])
 
     def _draw_stitcher_popup_rows(self) -> None:
@@ -552,11 +646,41 @@ class IsoviewPipelineWidget(PipelineWidget):
         as the single source of truth for the VW90 pre-rotation sign —
         the two modes write to the same ``ProcessingConfig.cameras_rotated``
         field so they share one value.
+
+        Single row, two columns:
+        - Column 1: a "BigStitcher / Spark registration" box that
+          stacks every registration-related subgroup as a collapsing
+          header (View transforms + Interest point detection open by
+          default, Spark runtime + Matching & solver collapsed).
+        - Column 2: Microscope (override XML), unrelated to BigStitcher
+          but reused across isoview pipelines.
         """
         self._draw_popup_columns([
-            ("View transforms", self._draw_stitcher_transforms_box),
-            ("Microscope (override XML)", self._draw_microscope_overrides_box),
+            ("BigStitcher / Spark registration",
+             self._draw_stitcher_grouped_box),
+            ("Microscope (override XML)",
+             self._draw_microscope_overrides_box),
         ])
+
+    def _draw_stitcher_grouped_box(self) -> None:
+        """Render all BigStitcher / Spark subgroups in a single column
+        as colored subsection headers (always visible — no collapsing).
+        """
+        subgroups = [
+            ("View transforms", self._draw_stitcher_transforms_box),
+            ("Interest point detection",
+             self._draw_stitcher_spark_detect_box),
+            ("Spark runtime", self._draw_stitcher_spark_runtime_box),
+            ("Matching & solver", self._draw_stitcher_spark_match_box),
+        ]
+        for i, (title, draw_fn) in enumerate(subgroups):
+            if i > 0:
+                imgui.spacing()
+                imgui.spacing()
+            imgui.text_colored(_SUBSECTION_COLOR, title)
+            imgui.separator()
+            imgui.spacing()
+            draw_fn()
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
@@ -567,6 +691,219 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Flips the VW90 pre-rotation from +90° to -90° around X. "
                 "Shared with the Fuse mode's transform — same "
                 "ProcessingConfig.cameras_rotated field."
+            )
+
+            _, self._stitcher_coarse_align = imgui.checkbox(
+                "Coarse align (blob features)", self._stitcher_coarse_align,
+            )
+            set_tooltip(
+                "Opt-in. Runs a feature-based coarse registration "
+                "(3D blob detection in both views, pairwise-difference "
+                "histogram in shared world space) and bakes the "
+                "resulting translation into VW00's calibration as a "
+                "second ViewTransform. Off by default — when off, "
+                "only the per-view calibration affines are written "
+                "and you'd run BigStitcher's interest-point "
+                "registration manually to align the views."
+            )
+
+    def _draw_stitcher_spark_runtime_box(self) -> None:
+        """Spark JAR / JDK paths — set once per machine, rarely re-tuned."""
+        with tooltip_marks_right():
+            _text_disabled_wrapped("Spark JAR or executables dir:")
+            # Reserve room for the folder-browse button so the input
+            # field doesn't push the icon off the right edge of the
+            # column. Inner_spacing + button width on the right.
+            style = imgui.get_style()
+            btn_w = imgui.calc_text_size(fa.ICON_FA_FOLDER_OPEN).x \
+                + 2 * style.frame_padding.x
+            avail_x = imgui.get_content_region_avail().x
+            imgui.set_next_item_width(
+                max(40.0, avail_x - style.item_inner_spacing.x - btn_w)
+            )
+            _, self._stitcher_spark_root = imgui.input_text(
+                "##spark_root", self._stitcher_spark_root or "",
+            )
+            imgui.same_line(0, style.item_inner_spacing.x)
+            if imgui.button(fa.ICON_FA_FOLDER_OPEN + "##spark_root_browse"):
+                default = self._stitcher_spark_root or str(Path.home())
+                try:
+                    self._stitcher_spark_dialog = pfd.select_folder(
+                        "Select bigstitcher-spark executables dir", default,
+                    )
+                except Exception:
+                    self._stitcher_spark_dialog = None
+            set_tooltip(
+                "Path to bigstitcher-spark — either the directory "
+                "produced by its ./install script (containing "
+                "detect-interestpoints, match-interestpoints, solver "
+                "scripts) or a fat JAR (mvn -P fatjar)."
+            )
+
+            _text_disabled_wrapped(
+                "Java home (JDK 8-17 — Spark 3.3 incompat with 21+):"
+            )
+            imgui.set_next_item_width(-1)
+            _, self._stitcher_spark_java_home = imgui.input_text(
+                "##spark_java_home", self._stitcher_spark_java_home or "",
+            )
+            set_tooltip(
+                "Path to a JDK 8-17 install (Spark 3.3.x requires it; "
+                "Java >=21 fails at runtime). Leave blank to use the "
+                "system default `java` on PATH."
+            )
+
+    def _draw_stitcher_spark_detect_box(self) -> None:
+        """Difference-of-Gaussian detection parameters. The two knobs
+        users actually retune between runs are ``sigma`` (feature size
+        in voxels at the downsampled scale) and ``threshold`` (peak
+        cutoff after normalization). Defaults are bead-tuned — for
+        calcium-imaging / cellular data sigma ~3-4 and threshold
+        ~0.0005-0.001 usually find enough features.
+        """
+        with tooltip_marks_right():
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_label = imgui.input_text(
+                "Label", self._stitcher_spark_label or "beads",
+            )
+            set_tooltip(
+                "Interest-point label written into the XML (`-l`). "
+                "Distinct labels let multiple detection runs coexist "
+                "in the same dataset."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_sigma = imgui.input_float(
+                "DoG sigma", self._stitcher_spark_sigma, 0.1, 1.0, "%.2f",
+            )
+            set_tooltip(
+                "Difference-of-Gaussian sigma (`-s`), in voxels at "
+                "the downsampled scale. Match your typical feature "
+                "diameter / ~2.355 (Gaussian FWHM relation). 1.8 for "
+                "beads, 3-4 for cell bodies, larger for blobs."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_threshold = imgui.input_float(
+                "DoG threshold", self._stitcher_spark_threshold,
+                0.0005, 0.005, "%.4f",
+            )
+            set_tooltip(
+                "DoG response threshold (`-t`) after intensity "
+                "normalization. Lower = more (and weaker) detections. "
+                "0.008 = bead default, 0.001-0.002 for cellular data. "
+                "Aim for 100-500 points/view in the worker log."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_min_intensity = imgui.input_float(
+                "Min intensity", self._stitcher_spark_min_intensity,
+                0.0, 100.0, "%.1f",
+            )
+            set_tooltip(
+                "Block normalization minimum (`--minIntensity`). "
+                "Mandatory — Spark blocks can't auto-detect this. "
+                "Use 0 unless you have a hot background."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_max_intensity = imgui.input_float(
+                "Max intensity", self._stitcher_spark_max_intensity,
+                0.0, 1000.0, "%.1f",
+            )
+            set_tooltip(
+                "Block normalization maximum (`--maxIntensity`). "
+                "65535 for uint16, 255 for uint8. The DoG threshold "
+                "applies to the [0, 1]-normalized signal."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_downsample_xy = imgui.input_int(
+                "Downsample XY", self._stitcher_spark_downsample_xy, 1, 1,
+            )
+            set_tooltip(
+                "`-dsxy`. Detection is performed on this downsampled "
+                "resolution; results are then re-projected. 2 is "
+                "usually fine and 4x faster than 1."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_downsample_z = imgui.input_int(
+                "Downsample Z", self._stitcher_spark_downsample_z, 1, 1,
+            )
+            set_tooltip(
+                "`-dsz`. Z downsampling. Usually 1 for already-"
+                "anisotropic light-sheet data."
+            )
+
+    def _draw_stitcher_spark_match_box(self) -> None:
+        """Pairwise matching algorithm + solver model. These change
+        much less often than detection params — set once per dataset
+        type, leave alone.
+
+        Labels live above each combo (not to the right) so the long
+        enum previews like ``PRECISE_TRANSLATION`` aren't clipped by
+        a narrow column.
+        """
+        with tooltip_marks_right():
+            algos = [
+                "PRECISE_TRANSLATION", "FAST_TRANSLATION",
+                "FAST_ROTATION", "ICP",
+            ]
+            try:
+                idx = algos.index(self._stitcher_spark_match_algorithm)
+            except ValueError:
+                idx = 0
+            _text_disabled_wrapped("Match algorithm")
+            imgui.set_next_item_width(-1)
+            changed, new_idx = imgui.combo(
+                "##spark_match_algo", idx, algos,
+            )
+            if changed:
+                self._stitcher_spark_match_algorithm = algos[new_idx]
+            set_tooltip(
+                "`-m`. PRECISE_TRANSLATION = high-accuracy descriptor "
+                "matcher, needs >=12 points/view. FAST_TRANSLATION = "
+                "geometric hashing, tolerates very different content. "
+                "FAST_ROTATION = handles small rotations between "
+                "views. ICP = refinement after coarse alignment."
+            )
+
+            tms = ["AFFINE", "RIGID", "TRANSLATION"]
+            try:
+                idx = tms.index(self._stitcher_spark_transformation_model)
+            except ValueError:
+                idx = 0
+            _text_disabled_wrapped("Transformation")
+            imgui.set_next_item_width(-1)
+            changed, new_idx = imgui.combo(
+                "##spark_match_tm", idx, tms,
+            )
+            if changed:
+                self._stitcher_spark_transformation_model = tms[new_idx]
+            set_tooltip(
+                "`-tm`. Solver's per-view transformation model. "
+                "AFFINE allows shear/anisotropic scaling; RIGID is "
+                "rotation+translation only; TRANSLATION is pure shift."
+            )
+
+            rms = ["RIGID", "AFFINE", "TRANSLATION", "IDENTITY", "NONE"]
+            try:
+                idx = rms.index(self._stitcher_spark_regularization_model)
+            except ValueError:
+                idx = 0
+            _text_disabled_wrapped("Regularize with")
+            imgui.set_next_item_width(-1)
+            changed, new_idx = imgui.combo(
+                "##spark_match_rm", idx, rms,
+            )
+            if changed:
+                self._stitcher_spark_regularization_model = rms[new_idx]
+            set_tooltip(
+                "`-rm`. Regularization model. Blends the main "
+                "transformation toward a simpler one (lambda=0.1 by "
+                "default). RIGID keeps the affine close to a rigid "
+                "transform — good for two-view orthogonal stitching."
             )
 
     def _draw_consolidate_io_box(self) -> None:
@@ -1101,12 +1438,70 @@ class IsoviewPipelineWidget(PipelineWidget):
             "fused_suffix": self._fuse_fused_suffix,
             "stitcher_suffix": self._stitcher_suffix,
             "cameras_rotated": self._fuse_cameras_rotated,
+            "coarse_align": self._stitcher_coarse_align,
         }
         args.update(self._microscope_kwargs())
         self._spawn(
             "isoview_bigstitcher", args,
             description=f"BigStitcher XML: {raw_root.name}",
             output_path=self._stitcher_output_path or str(raw_root),
+        )
+
+    def _submit_spark_register(self, arr: Any) -> None:
+        """Run bigstitcher-spark's detect → match → solve pipeline against
+        the dataset.xml previously emitted by :meth:`_submit_stitcher`.
+        """
+        from mbo_utilities.arrays.isoview.array import _sibling_raw_root
+
+        if not self._stitcher_spark_root:
+            self._last_status = (
+                "Set the bigstitcher-spark executables dir (or fat JAR) "
+                "first."
+            )
+            return
+
+        scan_root = Path(arr.scan_root)
+        raw_root = _sibling_raw_root(arr)
+        if raw_root is None:
+            anchor = scan_root.parent
+            for suf in (".corrected", ".fused"):
+                if anchor.name.endswith(suf):
+                    raw_root = anchor.parent / anchor.name[: -len(suf)]
+                    break
+        if raw_root is None or not raw_root.is_dir():
+            self._last_status = (
+                "Cannot locate raw acquisition root. Run Export first."
+            )
+            return
+
+        stitcher_root = raw_root.parent / f"{raw_root.name}{self._stitcher_suffix}"
+        xml_candidates = sorted(stitcher_root.glob("*/dataset.xml"))
+        if not xml_candidates:
+            self._last_status = (
+                f"No dataset.xml under {stitcher_root}. Run Export first."
+            )
+            return
+        xml_path = xml_candidates[0]
+
+        args = {
+            "xml_path": str(xml_path),
+            "spark_root": self._stitcher_spark_root,
+            "java_home": self._stitcher_spark_java_home or None,
+            "label": self._stitcher_spark_label,
+            "sigma": float(self._stitcher_spark_sigma),
+            "threshold": float(self._stitcher_spark_threshold),
+            "min_intensity": float(self._stitcher_spark_min_intensity),
+            "max_intensity": float(self._stitcher_spark_max_intensity),
+            "downsample_xy": int(self._stitcher_spark_downsample_xy),
+            "downsample_z": int(self._stitcher_spark_downsample_z),
+            "match_algorithm": self._stitcher_spark_match_algorithm,
+            "transformation_model": self._stitcher_spark_transformation_model,
+            "regularization_model": self._stitcher_spark_regularization_model,
+        }
+        self._spawn(
+            "isoview_bigstitcher_register", args,
+            description=f"BigStitcher-Spark register: {xml_path.parent.name}",
+            output_path=str(xml_path.parent),
         )
 
     def _submit_correct(self, arr: Any) -> None:
@@ -1307,65 +1702,65 @@ class IsoviewPipelineWidget(PipelineWidget):
 
     def _draw_iso_current_dataset(self, arr: Any) -> None:
         """Current dataset block — path + Files (N) popup + shape + size +
-        kind / dx / dy / dz / fs. Mirrors the suite2p layout.
+        Data state / dx / dy / dz / fs.
         """
         from mbo_utilities.metadata import get_param
 
         imgui.text_colored(_SUBSECTION_COLOR, "Current dataset")
         set_tooltip(
             "The IsoviewArray currently loaded in the viewer.\n"
-            "`kind` selects which pipelines apply (raw → Correct, "
+            "Data state selects which pipelines apply (raw → Correct, "
             "corrected → Fuse/Consolidate, fused → Consolidate)."
         )
         imgui.spacing()
         imgui.spacing()
 
-        # path — front-truncated so the filename tail stays visible.
-        path_str = str(arr.scan_root) if getattr(arr, "scan_root", None) else ""
-        avail_x = imgui.get_content_region_avail().x
-        display_path = _truncate_to_width(path_str or "(in-memory)", avail_x)
-        imgui.text_unformatted(display_path)
-        if display_path != (path_str or "(in-memory)") and imgui.is_item_hovered():
-            imgui.set_tooltip(path_str)
-
-        # filenames (concatenation order)
+        # filenames (concatenation order) — collected up-front so the
+        # readout block below can render in one wrapped style scope.
         filenames = list(getattr(arr, "filenames", []) or [])
-
         n_files = len(filenames)
         if self._iso_files_sizer is None:
             self._iso_files_sizer = PopupAutoSize(
                 "Dataset files##current_dataset_files_popup",
                 auto_resize=False,
             )
-        if imgui.button(f"Files ({n_files})##iso_dataset_files"):
-            self._iso_files_sizer.before_open()
-            imgui.open_popup("Dataset files##current_dataset_files_popup")
 
+        # Dim-gray + wrap matches the Output options "Result:" treatment
+        # so the dataset readout never runs past the side-panel edge.
+        path_str = str(arr.scan_root) if getattr(arr, "scan_root", None) else ""
         size_bytes = _dataset_size_bytes(self, filenames)
-        imgui.text(f"Size on disk: {_format_size(size_bytes)}")
 
-        _draw_dataset_files_popup(filenames, None, sizer=self._iso_files_sizer)
-
-        # shape with dim labels
         shape = tuple(arr.shape)
         dims = "TCZYX" if len(shape) == 5 else None
         shape_text = " × ".join(str(s) for s in shape)
         if dims and len(dims) == len(shape):
             shape_text = f"{shape_text} [{','.join(dims)}]"
+
         imgui.push_text_wrap_pos(0.0)
         try:
-            imgui.text(f"Shape: {shape_text}")
+            imgui.text_unformatted(f"Path: {path_str or '(in-memory)'}")
+            imgui.text_unformatted(f"Size on disk: {_format_size(size_bytes)}")
+            imgui.text_unformatted(f"Shape: {shape_text}")
+            imgui.text_unformatted(f"Data state: {arr.kind}")
+            md = dict(getattr(arr, "metadata", {}) or {})
+            for label, key, unit in (
+                ("Frame rate", "fs", "Hz"),
+                ("dx", "dx", "µm"),
+                ("dy", "dy", "µm"),
+                ("dz", "dz", "µm"),
+            ):
+                v = get_param(md, key)
+                if v is None:
+                    continue
+                imgui.text_unformatted(f"{label}: {v} {unit}".rstrip())
         finally:
             imgui.pop_text_wrap_pos()
 
-        imgui.text(f"kind: {arr.kind}")
-
-        # scalar metadata
-        md = dict(getattr(arr, "metadata", {}) or {})
-        _draw_md_field("Frame rate", get_param(md, "fs"), "Hz")
-        _draw_md_field("dx", get_param(md, "dx"), "µm")
-        _draw_md_field("dy", get_param(md, "dy"), "µm")
-        _draw_md_field("dz", get_param(md, "dz"), "µm")
+        imgui.spacing()
+        if imgui.button(f"Files ({n_files})##iso_dataset_files"):
+            self._iso_files_sizer.before_open()
+            imgui.open_popup("Dataset files##current_dataset_files_popup")
+        _draw_dataset_files_popup(filenames, None, sizer=self._iso_files_sizer)
 
         imgui.spacing()
         imgui.spacing()
@@ -1447,13 +1842,65 @@ class IsoviewPipelineWidget(PipelineWidget):
             imgui.pop_text_wrap_pos()
             imgui.pop_style_color()
         imgui.spacing()
+        imgui.spacing()
+
+    def _draw_iso_segment_readout(self, arr: Any) -> None:
+        """Segmentation threshold Run-tab block — only meaningful for
+        kinds where ``correct_stack`` will run (raw, corrected). Hidden
+        for fused (which doesn't run segmentation). The trailing
+        separator is emitted inside this function so a hidden readout
+        leaves no orphan separator behind.
+        """
+        if getattr(arr, "kind", None) == "fused":
+            return
+        from mbo_utilities.gui.widgets import isoview_segment as seg_window
+
+        imgui.text_colored(_SUBSECTION_COLOR, "Segmentation threshold")
+        set_tooltip(
+            "Threshold + gaussian smoothing + mask percentile that drive "
+            "foreground/background separation in correct_stack. Edit "
+            "opens a live preview with sliders and per-view masks.",
+            align="right",
+        )
+        imgui.spacing()
+        if imgui.button("Edit...##iso_seg_edit", imgui.ImVec2(_BTN_W, 0)):
+            seg_window.open_window(self.parent)
+        imgui.same_line()
+        if imgui.button("Reset##iso_seg_reset", imgui.ImVec2(_BTN_W, 0)):
+            self._correct_segment_threshold = 0.4
+            self._correct_mask_percentile = 1.0
+            self._correct_gauss_sigma = 2.0
+            self._correct_gauss_kernel = 5
+        imgui.push_style_color(
+            imgui.Col_.text, imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
+        )
+        imgui.push_text_wrap_pos(0.0)
+        try:
+            imgui.text_unformatted(
+                f"threshold={self._correct_segment_threshold:.3f}  "
+                f"mask_pct={self._correct_mask_percentile:.2f}  "
+                f"sigma={self._correct_gauss_sigma:.2f}  "
+                f"kernel={self._correct_gauss_kernel}"
+            )
+        finally:
+            imgui.pop_text_wrap_pos()
+            imgui.pop_style_color()
+        imgui.spacing()
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
 
     def _draw_iso_crop_readout(self, arr: Any) -> None:
         """Crop bounds Run-tab block — only meaningful for ``fused``
         IsoviewArrays (the only kind whose volumes carry both VW00 and
-        VW90 in the same coordinate space). Hidden for other kinds.
+        VW90 in the same coordinate space) AND only when the active
+        action is Fuse (crop bounds feed multi_fuse). Hidden otherwise.
+        The trailing separator is emitted inside this function so a
+        hidden readout leaves no orphan separator behind.
         """
         if getattr(arr, "kind", None) != "fused":
+            return
+        if self._selected_mode != _MODE_FUSE:
             return
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         from mbo_utilities.gui.widgets import isoview_crop as crop_window
@@ -1481,6 +1928,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             imgui.pop_text_wrap_pos()
             imgui.pop_style_color()
         imgui.spacing()
+        imgui.spacing()
+        imgui.separator()
         imgui.spacing()
 
     def _draw_iso_data_slicing(self, max_frames: int) -> None:
@@ -1628,26 +2077,32 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.separator()
         imgui.spacing()
 
-        # MODE PICKER — only when >1 mode applies.
+        # MODE PICKER — always shown so the active action is visible
+        # even when only one applies. When the list is a single mode the
+        # combo still reads as a static label of the current action.
+        imgui.text_colored(_SUBSECTION_COLOR, "Action")
+        set_tooltip(
+            "Which IsoView pipeline to run on this dataset.\n"
+            "Correct/Fuse require `pip install isoview`.",
+            align="right",
+        )
+        imgui.spacing()
+        try:
+            idx = modes.index(self._selected_mode)
+        except (ValueError, TypeError):
+            idx = 0
+        imgui.set_next_item_width(180)
         if len(modes) > 1:
-            imgui.text_colored(_SUBSECTION_COLOR, "Action")
-            set_tooltip(
-                "Which IsoView pipeline to run on this dataset.\n"
-                "Correct/Fuse require `pip install isoview`.",
-                align="right",
-            )
-            imgui.spacing()
-            try:
-                idx = modes.index(self._selected_mode)
-            except (ValueError, TypeError):
-                idx = 0
-            imgui.set_next_item_width(180)
             changed, new_idx = imgui.combo("##iso_mode", idx, modes)
             if changed:
                 self._selected_mode = modes[new_idx]
-            imgui.spacing()
-            imgui.separator()
-            imgui.spacing()
+        else:
+            imgui.begin_disabled()
+            imgui.combo("##iso_mode", 0, modes)
+            imgui.end_disabled()
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
 
         # OUTPUT OPTIONS — format / compressor / workers / pyramid /
         # overwrite. Moved out of the Parameters popup so the Run tab
@@ -1661,10 +2116,13 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.separator()
         imgui.spacing()
 
-        # CROP BOUNDS — per-view XYZ box, edited in the standalone window.
+        # CROP BOUNDS — per-view XYZ box (fused only). Emits its own
+        # trailing separator when content is drawn.
         self._draw_iso_crop_readout(arr)
-        imgui.separator()
-        imgui.spacing()
+
+        # SEGMENTATION — adaptive threshold + gauss params (non-fused
+        # only). Emits its own trailing separator when content is drawn.
+        self._draw_iso_segment_readout(arr)
 
         # PARAMETERS AND SETTINGS — small Open button → popup.
         imgui.text_colored(_SUBSECTION_COLOR, "Parameters and settings")
@@ -1712,6 +2170,44 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
         if clicked and has_path:
             self._submit_active(arr)
+
+        # BigStitcher-Spark "Run registration" button — only shown in
+        # the BigStitcher Export mode, sits below the main Run button.
+        # All Spark / BigStitcher knobs live in the Parameters popup;
+        # nothing about registration is duplicated on the side panel.
+        if self._selected_mode == _MODE_STITCHER:
+            imgui.spacing()
+            spark_ready = bool(self._stitcher_spark_root)
+            if not spark_ready:
+                imgui.begin_disabled()
+            if imgui.button(
+                "Run BigStitcher registration##spark_run",
+                imgui.ImVec2(_RUN_W, 0),
+            ):
+                self._submit_spark_register(arr)
+            if not spark_ready:
+                imgui.end_disabled()
+                if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
+                    imgui.set_tooltip(
+                        "Set the bigstitcher-spark path in the "
+                        "Parameters popup first."
+                    )
+
+            # Poll the spark_root folder picker dialog if open.
+            dlg = self._stitcher_spark_dialog
+            if dlg is not None:
+                try:
+                    ready = dlg.ready(0)
+                except TypeError:
+                    ready = dlg.ready()
+                if ready:
+                    try:
+                        result = dlg.result()
+                    except Exception:
+                        result = ""
+                    if result:
+                        self._stitcher_spark_root = result
+                    self._stitcher_spark_dialog = None
 
         if self._last_status:
             imgui.spacing()
