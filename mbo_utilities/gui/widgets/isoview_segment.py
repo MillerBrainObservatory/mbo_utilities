@@ -32,6 +32,12 @@ from scipy.ndimage import convolve1d
 
 _DEFAULT_CAMERA_VIEW_MAP = {0: 0, 1: 0, 2: 90, 3: 90}
 _VIEW_COLORS = {0: (1.0, 0.35, 0.35, 1.0), 90: (1.0, 0.95, 0.4, 1.0)}
+_CAMERA_COLORS = {
+    0: (1.0, 0.35, 0.35, 1.0),
+    1: (1.0, 0.85, 0.4, 1.0),
+    2: (0.4, 0.9, 0.6, 1.0),
+    3: (0.5, 0.75, 1.0, 1.0),
+}
 _TINT_RGB = (0.2, 0.95, 0.6)  # foreground overlay color (cyan-green)
 
 _SLIDER_W = 220
@@ -75,15 +81,25 @@ def _view_int_from_label(label: str) -> int | None:
         return None
 
 
+def _is_raw(arr: Any) -> bool:
+    return str(getattr(arr, "kind", "") or "").lower() == "raw"
+
+
 def _build_projection_index(
     arr: Any, projections: dict | None,
 ) -> dict[int, dict[int, Path]]:
-    """``{view_int: {timepoint: xy_projection_path}}``."""
+    """``{key: {timepoint: xy_projection_path}}``.
+
+    For raw arrays, key is the camera int (CM00→0, CM01→1, ...) so each
+    camera renders its own preview. For corrected/fused arrays the key
+    is the view int (VW00→0, VW90→90).
+    """
     if not projections:
         return {}
     if "xy" not in (projections.get("axes") or []):
         return {}
     cv = _camera_view_map(arr)
+    raw_mode = _is_raw(arr)
 
     per_view_by_label: dict[int, dict[str, dict[int, Path]]] = {}
     for (axis, label, t), path in (projections.get("files") or {}).items():
@@ -92,15 +108,18 @@ def _build_projection_index(
         raw_int = _view_int_from_label(label)
         if raw_int is None:
             continue
-        view_int = cv.get(raw_int, raw_int) if label.startswith("CM") else raw_int
-        per_view_by_label.setdefault(view_int, {}).setdefault(label, {})[int(t)] = Path(path)
+        if label.startswith("CM"):
+            key = raw_int if raw_mode else cv.get(raw_int, raw_int)
+        else:
+            key = raw_int
+        per_view_by_label.setdefault(key, {}).setdefault(label, {})[int(t)] = Path(path)
 
     out: dict[int, dict[int, Path]] = {}
-    for view_int, by_label in per_view_by_label.items():
+    for key, by_label in per_view_by_label.items():
         if not by_label:
             continue
         chosen = sorted(by_label.keys())[0]
-        out[view_int] = dict(by_label[chosen])
+        out[key] = dict(by_label[chosen])
     return out
 
 
@@ -503,13 +522,7 @@ def draw_window(parent: Any) -> None:
 
         imgui.text_colored(
             imgui.ImVec4(0.55, 0.75, 1.0, 1.0),
-            f"Source: {arr.scan_root}",
-        )
-        imgui.text_colored(
-            imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
-            "Live preview applies the same XY gaussian + adaptive level the "
-            "pipeline uses, on the XY max-projection per view. Apply leaves "
-            "the values in the Run tab popup; Cancel restores the snapshot.",
+            f"{arr.scan_root}",
         )
         imgui.spacing()
         _draw_display_controls(parent)
@@ -654,19 +667,26 @@ def _draw_view_previews(parent: Any, iso: Any) -> None:
     spacing = 12.0
     cell_w = max(280.0, (avail_x - spacing * (n - 1)) / n)
 
+    arr = _get_iso_array(parent)
+    raw_mode = arr is not None and _is_raw(arr)
     for i, view in enumerate(views):
         if i > 0:
             imgui.same_line(0.0, spacing)
         imgui.begin_group()
         try:
-            _draw_one_view(parent, iso, view, cell_w)
+            _draw_one_view(parent, iso, view, cell_w, raw_mode)
         finally:
             imgui.end_group()
 
 
-def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float) -> None:
-    color = _VIEW_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
-    imgui.text_colored(imgui.ImVec4(*color), f"VW{view:02d}")
+def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float, raw_mode: bool = False) -> None:
+    if raw_mode:
+        color = _CAMERA_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
+        label_text = f"CM{view:02d}"
+    else:
+        color = _VIEW_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
+        label_text = f"VW{view:02d}"
+    imgui.text_colored(imgui.ImVec4(*color), label_text)
 
     tp = int(parent._iso_seg_current_tp)
     sigma = float(iso._correct_gauss_sigma)
