@@ -343,9 +343,15 @@ def _ensure_loaded_for(parent: Any, arr: Any) -> None:
 
 
 def open_window(parent: Any) -> None:
-    """Trigger the crop editor on next frame. Idempotent."""
+    """Trigger the crop editor on next frame. Idempotent.
+
+    Invalidates the cache so the window re-seeds pending bounds from
+    crop_state — keeps the floating window reactive to manual edits
+    made in the Parameters popup between opens.
+    """
     _ensure_window_state(parent)
     parent._show_iso_crop_window = True
+    parent._iso_crop_cache_key = None
 
 
 def close_window(parent: Any) -> None:
@@ -416,20 +422,15 @@ def draw_window(parent: Any) -> None:
 
         imgui.text_colored(
             imgui.ImVec4(0.55, 0.75, 1.0, 1.0),
-            f"Source: {arr.scan_root}",
-        )
-        imgui.text_colored(
-            imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
-            "Bounds are recorded against the raw root and forwarded to "
-            "correct_stack & multi_fuse as crop_left/top/front/width/"
-            "height/depth.",
+            f"{arr.scan_root}",
         )
         imgui.spacing()
         _draw_display_controls(parent, arr)
         imgui.separator()
 
-        for view in sorted(parent._iso_crop_shapes):
-            _draw_view_section(parent, arr, view)
+        sorted_views = sorted(parent._iso_crop_shapes)
+        for i, view in enumerate(sorted_views):
+            _draw_view_section(parent, arr, view, is_first=(i == 0))
             imgui.spacing()
 
         imgui.separator()
@@ -522,7 +523,7 @@ def _draw_display_controls(parent: Any, arr: Any) -> None:
         parent._iso_crop_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
-def _draw_view_section(parent: Any, arr: Any, view: int) -> None:
+def _draw_view_section(parent: Any, arr: Any, view: int, *, is_first: bool = False) -> None:
     nz, ny, nx = parent._iso_crop_shapes[view]
 
     # All edits go through pending state so the user can Cancel cleanly.
@@ -558,6 +559,17 @@ def _draw_view_section(parent: Any, arr: Any, view: int) -> None:
                 imgui.ImVec4(0.7, 0.85, 0.7, 1.0),
                 f"kept ({z1 - z0}, {y1 - y0}, {x1 - x0})",
             )
+            if is_first and len(parent._iso_crop_shapes) > 1:
+                if imgui.button("Apply to all", imgui.ImVec2(120, 0)):
+                    for other_view, shp in parent._iso_crop_shapes.items():
+                        if other_view == view:
+                            continue
+                        o_nz, o_ny, o_nx = shp
+                        parent._iso_crop_pending[other_view] = {
+                            "z": (min(z0, o_nz - 1), min(z1, o_nz)),
+                            "y": (min(y0, o_ny - 1), min(y1, o_ny)),
+                            "x": (min(x0, o_nx - 1), min(x1, o_nx)),
+                        }
         finally:
             imgui.end_group()
 
@@ -595,22 +607,21 @@ def _apply_button_style():
 
 
 def _drag_pair(axis: str, lo: int, hi: int, vmin: int, vmax: int) -> tuple[int, int]:
-    """Render two compact ``drag_int`` widgets for the (lo, hi) pair of
-    one axis. Both accept double-click-to-type for exact entry.
-
-    Returns the post-edit (lo, hi). Bounds-clamping (lo<hi) is left to
-    the caller so the upstream clamp logic stays in one place.
+    """Render two compact ``slider_int`` widgets for the (lo, hi) pair.
+    Ctrl-click any slider to type a value directly.
     """
     imgui.text(axis)
     imgui.same_line()
     imgui.set_next_item_width(_DRAG_W)
-    _, lo = imgui.drag_int(
-        f"##iso_crop_{axis}_lo", int(lo), 1.0, int(vmin), max(int(vmin), int(vmax) - 1),
+    _, lo = imgui.slider_int(
+        f"##iso_crop_{axis}_lo", int(lo), int(vmin), max(int(vmin), int(vmax) - 1),
+        "%d",
     )
     imgui.same_line()
     imgui.set_next_item_width(_DRAG_W)
-    _, hi = imgui.drag_int(
-        f"##iso_crop_{axis}_hi", int(hi), 1.0, int(vmin) + 1, int(vmax),
+    _, hi = imgui.slider_int(
+        f"##iso_crop_{axis}_hi", int(hi), int(vmin) + 1, int(vmax),
+        "%d",
     )
     return int(lo), int(hi)
 
