@@ -1103,6 +1103,11 @@ class PreviewDataWidget(EdgeWindow):
             # Optional widget — skip silently when its deps aren't loaded
             # (e.g. immvision unavailable in the running imgui_bundle).
             pass
+        try:
+            from mbo_utilities.gui.widgets.isoview_segment import draw_window as _draw_iso_seg_window
+            _draw_iso_seg_window(self)
+        except Exception:
+            pass
 
         super().draw_window()
 
