@@ -1108,6 +1108,11 @@ class PreviewDataWidget(EdgeWindow):
             _draw_iso_seg_window(self)
         except Exception:
             pass
+        try:
+            from mbo_utilities.gui.widgets.isoview_deadpixel import draw_window as _draw_iso_dp_window
+            _draw_iso_dp_window(self)
+        except Exception:
+            pass
 
         super().draw_window()
 

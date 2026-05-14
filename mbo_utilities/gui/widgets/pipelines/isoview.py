@@ -624,6 +624,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         ])
         imgui.spacing()
         self._draw_popup_columns([
+            ("Shared", self._draw_correct_shared_box),
             ("Microscope (override XML)",
              self._draw_microscope_overrides_box, True),
         ])
@@ -1051,39 +1052,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             imgui.set_next_item_width(_input_w())
-            _, self._correct_background_percentile = imgui.input_float(
-                "Background pct",
-                self._correct_background_percentile,
-                0.5, 5.0, "%.2f",
-            )
-            set_tooltip(
-                "Percentile (0–100) used to estimate the background "
-                "intensity for dead-pixel correction."
-            )
-
-    def _draw_correct_advanced_box(self) -> None:
-        with tooltip_marks_right():
-            _, self._correct_median_kernel_enabled = imgui.checkbox(
-                "Median filter", self._correct_median_kernel_enabled,
-            )
-            set_tooltip("Dead-pixel correction via per-plane median filter.")
-            if self._correct_median_kernel_enabled:
-                imgui.set_next_item_width(_input_w())
-                _, self._correct_median_kernel_size = imgui.input_int(
-                    "Kernel (N×N)", self._correct_median_kernel_size, 1, 1,
-                )
-                set_tooltip("Square kernel size for the median filter.")
-
-            imgui.set_next_item_width(_input_w())
-            _, self._correct_subsample_factor = imgui.input_int(
-                "Subsample factor", self._correct_subsample_factor, 1, 10,
-            )
-            set_tooltip(
-                "Stride for percentile estimation.\n"
-                "Higher = faster but noisier."
-            )
-
-            imgui.set_next_item_width(_input_w())
             _, self._correct_gauss_kernel = imgui.input_int(
                 "Gaussian kernel", self._correct_gauss_kernel, 1, 1,
             )
@@ -1116,6 +1084,42 @@ class IsoviewPipelineWidget(PipelineWidget):
             set_tooltip(
                 "Block size (along Z) for memory-bounded Gaussian "
                 "filtering.\nSmaller = less RAM, more block edges."
+            )
+
+    def _draw_correct_advanced_box(self) -> None:
+        with tooltip_marks_right():
+            _, self._correct_median_kernel_enabled = imgui.checkbox(
+                "Median filter", self._correct_median_kernel_enabled,
+            )
+            set_tooltip("Dead-pixel correction via per-plane median filter.")
+            if self._correct_median_kernel_enabled:
+                imgui.set_next_item_width(_input_w())
+                _, self._correct_median_kernel_size = imgui.input_int(
+                    "Kernel (N×N)", self._correct_median_kernel_size, 1, 1,
+                )
+                set_tooltip("Square kernel size for the median filter.")
+
+            imgui.set_next_item_width(_input_w())
+            _, self._correct_background_percentile = imgui.input_float(
+                "Background pct",
+                self._correct_background_percentile,
+                0.5, 5.0, "%.2f",
+            )
+            set_tooltip(
+                "Percentile (0–100) used to estimate the camera "
+                "background intensity."
+            )
+
+    def _draw_correct_shared_box(self) -> None:
+        with tooltip_marks_right():
+            imgui.set_next_item_width(_input_w())
+            _, self._correct_subsample_factor = imgui.input_int(
+                "Subsample factor", self._correct_subsample_factor, 1, 10,
+            )
+            set_tooltip(
+                "Stride for percentile estimation.\n"
+                "Used by both segmentation and pixel correction.\n"
+                "Higher = faster but noisier."
             )
 
     def _draw_fuse_io_box(self) -> None:
@@ -1700,6 +1704,20 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         return max_frames
 
+    def _draw_isoview_missing_banner(self) -> None:
+        warn = imgui.ImVec4(0.95, 0.55, 0.25, 1.0)
+        cmd = imgui.ImVec4(0.6, 0.8, 1.0, 1.0)
+        imgui.spacing()
+        imgui.push_text_wrap_pos(0.0)
+        try:
+            imgui.text_colored(warn, "isoview not installed")
+            imgui.text_colored(cmd, "pip install isoview")
+        finally:
+            imgui.pop_text_wrap_pos()
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
     def _draw_iso_current_dataset(self, arr: Any) -> None:
         """Current dataset block — path + Files (N) popup + shape + size +
         Data state / dx / dy / dz / fs.
@@ -1725,9 +1743,15 @@ class IsoviewPipelineWidget(PipelineWidget):
                 auto_resize=False,
             )
 
-        # Dim-gray + wrap matches the Output options "Result:" treatment
-        # so the dataset readout never runs past the side-panel edge.
+        # 2-col table with a slight indent under the section header. The
+        # name cell shows the last folder/file component only; full path
+        # appears in a hover tooltip so long paths never blow past the
+        # side-panel edge.
         path_str = str(arr.scan_root) if getattr(arr, "scan_root", None) else ""
+        if path_str:
+            short_name = Path(path_str).name or path_str
+        else:
+            short_name = "(in-memory)"
         size_bytes = _dataset_size_bytes(self, filenames)
 
         shape = tuple(arr.shape)
@@ -1736,31 +1760,61 @@ class IsoviewPipelineWidget(PipelineWidget):
         if dims and len(dims) == len(shape):
             shape_text = f"{shape_text} [{','.join(dims)}]"
 
-        imgui.push_text_wrap_pos(0.0)
-        try:
-            imgui.text_unformatted(f"Path: {path_str or '(in-memory)'}")
-            imgui.text_unformatted(f"Size on disk: {_format_size(size_bytes)}")
-            imgui.text_unformatted(f"Shape: {shape_text}")
-            imgui.text_unformatted(f"Data state: {arr.kind}")
-            md = dict(getattr(arr, "metadata", {}) or {})
-            for label, key, unit in (
-                ("Frame rate", "fs", "Hz"),
-                ("dx", "dx", "µm"),
-                ("dy", "dy", "µm"),
-                ("dz", "dz", "µm"),
-            ):
-                v = get_param(md, key)
-                if v is None:
-                    continue
-                imgui.text_unformatted(f"{label}: {v} {unit}".rstrip())
-        finally:
-            imgui.pop_text_wrap_pos()
+        md = dict(getattr(arr, "metadata", {}) or {})
+        rows: list[tuple[str, str, str | None]] = [
+            ("Name", short_name, path_str or None),
+            ("Size on disk", _format_size(size_bytes), None),
+            ("Shape", shape_text, None),
+            ("Data state", str(arr.kind), None),
+        ]
+        for label, key, unit in (
+            ("Frame rate", "fs", "Hz"),
+            ("dx", "dx", "µm"),
+            ("dy", "dy", "µm"),
+            ("dz", "dz", "µm"),
+        ):
+            v = get_param(md, key)
+            if v is None:
+                continue
+            rows.append((label, f"{v} {unit}".rstrip(), None))
 
-        imgui.spacing()
-        if imgui.button(f"Files ({n_files})##iso_dataset_files"):
-            self._iso_files_sizer.before_open()
-            imgui.open_popup("Dataset files##current_dataset_files_popup")
-        _draw_dataset_files_popup(filenames, None, sizer=self._iso_files_sizer)
+        imgui.indent(8)
+        try:
+            tflags = (
+                imgui.TableFlags_.sizing_stretch_prop
+                | imgui.TableFlags_.no_borders_in_body
+                | imgui.TableFlags_.pad_outer_x
+            )
+            if imgui.begin_table("iso_current_dataset_table", 2, tflags):
+                imgui.table_setup_column(
+                    "field", imgui.TableColumnFlags_.width_fixed, 90.0
+                )
+                imgui.table_setup_column(
+                    "value", imgui.TableColumnFlags_.width_stretch
+                )
+                for label, value, hover in rows:
+                    imgui.table_next_row()
+                    imgui.table_set_column_index(0)
+                    imgui.text_unformatted(label)
+                    imgui.table_set_column_index(1)
+                    imgui.push_text_wrap_pos(0.0)
+                    try:
+                        imgui.text_unformatted(value)
+                    finally:
+                        imgui.pop_text_wrap_pos()
+                    if hover and imgui.is_item_hovered():
+                        imgui.set_tooltip(hover)
+                imgui.end_table()
+
+            imgui.spacing()
+            if imgui.button(f"Files ({n_files})##iso_dataset_files"):
+                self._iso_files_sizer.before_open()
+                imgui.open_popup("Dataset files##current_dataset_files_popup")
+            _draw_dataset_files_popup(
+                filenames, None, sizer=self._iso_files_sizer
+            )
+        finally:
+            imgui.unindent(8)
 
         imgui.spacing()
         imgui.spacing()
@@ -1881,6 +1935,45 @@ class IsoviewPipelineWidget(PipelineWidget):
                 f"mask_pct={self._correct_mask_percentile:.2f}  "
                 f"sigma={self._correct_gauss_sigma:.2f}  "
                 f"kernel={self._correct_gauss_kernel}"
+            )
+        finally:
+            imgui.pop_text_wrap_pos()
+            imgui.pop_style_color()
+        imgui.spacing()
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
+    def _draw_iso_deadpixel_readout(self, arr: Any) -> None:
+        """Dead-pixel Run-tab block — raw/corrected only."""
+        if getattr(arr, "kind", None) == "fused":
+            return
+        from mbo_utilities.gui.widgets import isoview_deadpixel as dp_window
+
+        imgui.text_colored(_SUBSECTION_COLOR, "Dead-pixel correction")
+        set_tooltip(
+            "Median-filter window + background percentile for "
+            "dead-pixel detection in correct_stack. Edit opens a live "
+            "preview with the flagged pixels highlighted.",
+            align="right",
+        )
+        imgui.spacing()
+        if imgui.button("Edit...##iso_dp_edit", imgui.ImVec2(_BTN_W, 0)):
+            dp_window.open_window(self.parent)
+        imgui.same_line()
+        if imgui.button("Reset##iso_dp_reset", imgui.ImVec2(_BTN_W, 0)):
+            self._correct_background_percentile = 3.0
+            self._correct_median_kernel_size = 5
+            self._correct_median_kernel_enabled = True
+        imgui.push_style_color(
+            imgui.Col_.text, imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
+        )
+        imgui.push_text_wrap_pos(0.0)
+        try:
+            on = "on" if self._correct_median_kernel_enabled else "off"
+            imgui.text_unformatted(
+                f"median={on}  kernel={self._correct_median_kernel_size}  "
+                f"bg_pct={self._correct_background_percentile:.2f}"
             )
         finally:
             imgui.pop_text_wrap_pos()
@@ -2045,19 +2138,18 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         self._ensure_defaults(arr)
 
+        # Top-of-tab banner: an isoview dataset is loaded but the python
+        # package isn't importable. The Correct/Fuse/BigStitcher XML
+        # actions all need it.
+        if not _isoview_pkg_available():
+            self._draw_isoview_missing_banner()
+
         modes = _available_modes(arr)
         if not modes:
             imgui.text_colored(
                 imgui.ImVec4(0.8, 0.5, 0.3, 1.0),
                 f"No isoview action available for kind={arr.kind!r}.",
             )
-            if arr.kind == "raw" and not _isoview_pkg_available():
-                imgui.spacing()
-                imgui.text("Install the isoview package to run correct_stack:")
-                imgui.text_colored(
-                    imgui.ImVec4(0.6, 0.8, 1.0, 1.0),
-                    "uv pip install isoview",
-                )
             return
         if self._selected_mode not in modes:
             self._selected_mode = modes[0]
@@ -2077,10 +2169,15 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.separator()
         imgui.spacing()
 
-        # MODE PICKER — always shown so the active action is visible
-        # even when only one applies. When the list is a single mode the
-        # combo still reads as a static label of the current action.
-        imgui.text_colored(_SUBSECTION_COLOR, "Action")
+        # PROCESSING STEP — centered, no trailing separator so the
+        # combo reads as a header for everything below.
+        label = "Processing Step"
+        avail = imgui.get_content_region_avail().x
+        label_w = imgui.calc_text_size(label).x
+        imgui.set_cursor_pos_x(
+            imgui.get_cursor_pos_x() + max(0.0, (avail - label_w) * 0.5)
+        )
+        imgui.text_colored(_SUBSECTION_COLOR, label)
         set_tooltip(
             "Which IsoView pipeline to run on this dataset.\n"
             "Correct/Fuse require `pip install isoview`.",
@@ -2091,7 +2188,11 @@ class IsoviewPipelineWidget(PipelineWidget):
             idx = modes.index(self._selected_mode)
         except (ValueError, TypeError):
             idx = 0
-        imgui.set_next_item_width(180)
+        combo_w = 180.0
+        imgui.set_cursor_pos_x(
+            imgui.get_cursor_pos_x() + max(0.0, (avail - combo_w) * 0.5)
+        )
+        imgui.set_next_item_width(combo_w)
         if len(modes) > 1:
             changed, new_idx = imgui.combo("##iso_mode", idx, modes)
             if changed:
@@ -2100,8 +2201,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             imgui.begin_disabled()
             imgui.combo("##iso_mode", 0, modes)
             imgui.end_disabled()
-        imgui.spacing()
-        imgui.separator()
         imgui.spacing()
 
         # OUTPUT OPTIONS — format / compressor / workers / pyramid /
@@ -2124,6 +2223,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         # only). Emits its own trailing separator when content is drawn.
         self._draw_iso_segment_readout(arr)
 
+        # DEAD-PIXEL — median filter + background percentile (non-fused).
+        self._draw_iso_deadpixel_readout(arr)
+
         # PARAMETERS AND SETTINGS — small Open button → popup.
         imgui.text_colored(_SUBSECTION_COLOR, "Parameters and settings")
         set_tooltip(
@@ -2145,19 +2247,29 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
         imgui.spacing()
+        imgui.separator()
         imgui.spacing()
 
-        # RUN — big green, centered, disabled until output path is set.
+        # RUN — big green, centered. In BigStitcher mode, the export
+        # button sits side-by-side with the Spark "Run registration"
+        # button, both centered as a pair.
         has_path = bool(self._current_output_path())
         run_label = _RUN_LABELS.get(self._selected_mode or "", "Run")
+        is_stitcher = self._selected_mode == _MODE_STITCHER
+        spark_ready = bool(self._stitcher_spark_root) if is_stitcher else False
+        spacing_x = imgui.get_style().item_spacing.x
+        if is_stitcher:
+            total_w = _RUN_W * 2 + spacing_x
+        else:
+            total_w = _RUN_W
+        avail = imgui.get_content_region_avail().x
+        if avail > total_w:
+            imgui.set_cursor_pos_x(
+                imgui.get_cursor_pos_x() + (avail - total_w) * 0.5
+            )
         with _green_button():
             if not has_path:
                 imgui.begin_disabled()
-            avail = imgui.get_content_region_avail().x
-            if avail > _RUN_W:
-                imgui.set_cursor_pos_x(
-                    imgui.get_cursor_pos_x() + (avail - _RUN_W) * 0.5
-                )
             clicked = imgui.button(run_label, imgui.ImVec2(_RUN_W, 0))
             if not has_path:
                 imgui.end_disabled()
@@ -2171,20 +2283,15 @@ class IsoviewPipelineWidget(PipelineWidget):
         if clicked and has_path:
             self._submit_active(arr)
 
-        # BigStitcher-Spark "Run registration" button — only shown in
-        # the BigStitcher Export mode, sits below the main Run button.
-        # All Spark / BigStitcher knobs live in the Parameters popup;
-        # nothing about registration is duplicated on the side panel.
-        if self._selected_mode == _MODE_STITCHER:
-            imgui.spacing()
-            spark_ready = bool(self._stitcher_spark_root)
+        register_clicked = False
+        if is_stitcher:
+            imgui.same_line()
             if not spark_ready:
                 imgui.begin_disabled()
-            if imgui.button(
+            register_clicked = imgui.button(
                 "Run BigStitcher registration##spark_run",
                 imgui.ImVec2(_RUN_W, 0),
-            ):
-                self._submit_spark_register(arr)
+            )
             if not spark_ready:
                 imgui.end_disabled()
                 if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
@@ -2192,6 +2299,8 @@ class IsoviewPipelineWidget(PipelineWidget):
                         "Set the bigstitcher-spark path in the "
                         "Parameters popup first."
                     )
+            if register_clicked and spark_ready:
+                self._submit_spark_register(arr)
 
             # Poll the spark_root folder picker dialog if open.
             dlg = self._stitcher_spark_dialog
