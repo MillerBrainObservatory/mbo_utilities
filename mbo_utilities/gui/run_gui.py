@@ -641,6 +641,17 @@ def _create_image_widget(data_array, widget: bool = True):
         window_funcs = None
         window_sizes = None
 
+    def _is_isoview(arr) -> bool:
+        """IsoviewArray has a `kind` attribute set to raw/corrected/fused."""
+        return getattr(arr, "kind", None) in {"raw", "corrected", "fused", "clusterpt"}
+
+    # Isoview fluorescence sits in the 0..few-hundred-counts range; the
+    # generic (-100, 4000) default washes it out completely.
+    if _is_isoview(data_array):
+        graphic_kwargs = {"vmin": 0, "vmax": 1000}
+    else:
+        graphic_kwargs = {"vmin": -100, "vmax": 4000}
+
     def _squeeze_for_viewer(arr):
         """drop every singleton non-spatial dim so fastplotlib's ndim-2
         slider count matches get_slider_dims output.
@@ -687,7 +698,7 @@ def _create_image_widget(data_array, widget: bool = True):
             cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            graphic_kwargs=graphic_kwargs,
         )
     else:
         iw = fpl.ImageWidget(
@@ -698,7 +709,7 @@ def _create_image_widget(data_array, widget: bool = True):
             cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            graphic_kwargs=graphic_kwargs,
         )
 
     iw.show()
