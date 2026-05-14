@@ -1604,16 +1604,16 @@ wheels = [
 
 [[package]]
 name = "lbm-suite2p-python"
-version = "3.0.5"
+version = "3.0.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mbo-utilities" },
     { name = "setuptools" },
     { name = "suite2p" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/00/81/36cbedbc091d04ace5c41f4207623b5b055941f7eeff8a8c5ba88af7f299/lbm_suite2p_python-3.0.5.tar.gz", hash = "sha256:a65dfdc61ab6298cb184502df3ce64fa5824a81b8b9d3f94973c1ddcc39746fd", size = 167478, upload-time = "2026-05-11T16:11:05.815Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/09/a5/70272b2a328ed9f5713089ce44f3d01f8dc2f7275bb78ab9fa1de496ad3e/lbm_suite2p_python-3.0.6.tar.gz", hash = "sha256:0e71213699468d860fb690f5f77980f3b9c36e2c5c3bf8f130e4267eda1f05f2", size = 171829, upload-time = "2026-05-14T18:55:26.642Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/21/75ebdf109e735be8f3c54726eb3137c707f513cc930ac13ee43ef2a16154/lbm_suite2p_python-3.0.5-py3-none-any.whl", hash = "sha256:04f06ba159d6423ca9ffcc8aff002e6a7bd7db24a0f0d9a3173eab6ff205b966", size = 162236, upload-time = "2026-05-11T16:11:04.746Z" },
+    { url = "https://files.pythonhosted.org/packages/be/aa/d49856211adfd7bef5610cd476cb47b3678ae77140c96144225a10f59354/lbm_suite2p_python-3.0.6-py3-none-any.whl", hash = "sha256:84686fe7d726f8d58f99b0f20028d44501c261fcd7f666b7ca75b4e9918e2d86", size = 166525, upload-time = "2026-05-14T18:55:25.341Z" },
 ]
 
 [[package]]
@@ -1853,7 +1853,7 @@ requires-dist = [
     { name = "jupyter-rfb", specifier = ">=0.5.1" },
     { name = "jupyterlab", specifier = ">=4.2.6" },
     { name = "jupytext", marker = "extra == 'docs'" },
-    { name = "lbm-suite2p-python", specifier = ">=3.0.5" },
+    { name = "lbm-suite2p-python", specifier = ">=3.0.6" },
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
