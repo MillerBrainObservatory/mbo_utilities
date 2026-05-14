@@ -4,7 +4,7 @@ Task registry for background worker processes.
 This module contains the actual logic for background tasks:
 - TaskMonitor: Helper for reporting progress to a JSON sidecar file.
 - task_save_as: Generic array conversion/saving.
-- task_suite2p: Suite2p pipeline with safe serial extraction + parallel processing.
+- task_suite2p: Suite2p pipeline.
 - TASKS: Registry mapping task names to functions.
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import os
 import traceback
@@ -399,6 +400,13 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         flattened.update(ops)
         ops = flattened
     s2p_settings = args.get("s2p_settings", {})
+    logger.info(
+        f"task_suite2p: parallel knobs from GUI -> "
+        f"workers={s2p_settings.get('workers')!r}, "
+        f"threads_per_worker={s2p_settings.get('threads_per_worker')!r}, "
+        f"skip_volumetric={s2p_settings.get('skip_volumetric')!r}; "
+        f"s2p_settings has workers key: {'workers' in s2p_settings}"
+    )
 
     # Merge GUI-set custom metadata (e.g. dz from the metadata editor)
     # into ops. The user explicitly set these in the editor, so they win
@@ -687,6 +695,9 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             rastermap_kwargs=s2p_settings.get("rastermap_kwargs"),
             writer_kwargs=writer_kwargs,
             progress_callback=_progress,
+            workers=s2p_settings.get("workers", 1),
+            skip_volumetric=s2p_settings.get("skip_volumetric", False),
+            threads_per_worker=s2p_settings.get("threads_per_worker"),
         )
 
         monitor.finish("Suite2p pipeline completed.")
@@ -1098,7 +1109,9 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
         )
         monitor.update(0.05, "Writing BDV zarr + dataset.xml...")
         xml_path = generate_bigstitcher_xml(
-            config, method=args.get("method"),
+            config,
+            method=args.get("method"),
+            coarse_align=args.get("coarse_align", False),
         )
         logger.info(f"  wrote: {xml_path}")
         monitor.finish(f"generate_bigstitcher_xml complete: {xml_path}")
@@ -1109,6 +1122,268 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
         raise
 
 
+# bigstitcher-spark command → main class for `java -cp <jar> <class>` invocation.
+# The fat JAR built by `mvn -P fatjar` has no Main-Class in its manifest, so
+# we dispatch by classname instead.
+_SPARK_COMMAND_CLASSES = {
+    "detect-interestpoints": "net.preibisch.bigstitcher.spark.SparkInterestPointDetection",
+    "match-interestpoints": "net.preibisch.bigstitcher.spark.SparkGeometricDescriptorMatching",
+    "solver": "net.preibisch.bigstitcher.spark.Solver",
+    "resave": "net.preibisch.bigstitcher.spark.SparkResaveN5",
+    "stitching": "net.preibisch.bigstitcher.spark.SparkPairwiseStitching",
+    "affine-fusion": "net.preibisch.bigstitcher.spark.SparkAffineFusion",
+    "nonrigid-fusion": "net.preibisch.bigstitcher.spark.SparkNonRigidFusion",
+    "create-fusion-container": "net.preibisch.bigstitcher.spark.CreateFusionContainer",
+    "downsample": "net.preibisch.bigstitcher.spark.SparkDownsample",
+}
+
+
+def _resolve_spark_executable(
+    spark_root: Path,
+    command: str,
+    java_home: str | None = None,
+) -> list[str]:
+    """Resolve a bigstitcher-spark CLI command into a runnable argv prefix.
+
+    ``spark_root`` may point at either:
+    - A directory containing the executable wrapper scripts produced by
+      bigstitcher-spark's ``./install`` step.
+    - A fat JAR built with ``mvn -P fatjar``. The JAR is invoked via
+      ``java -cp <jar> <main-class>`` because the shaded manifest has
+      no Main-Class entry.
+
+    ``java_home`` overrides which JDK is used in fat-JAR mode. Required
+    when the system default Java is incompatible (Spark 3.3.x needs
+    Java 8–17; Java 21+ fails at runtime).
+    """
+    candidates = [
+        spark_root / command,
+        spark_root / f"{command}.bat",
+        spark_root / f"{command}.cmd",
+        spark_root / f"{command}.sh",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return [str(p)]
+
+    if spark_root.is_file() and spark_root.suffix.lower() == ".jar":
+        main_class = _SPARK_COMMAND_CLASSES.get(command)
+        if main_class is None:
+            raise ValueError(
+                f"unknown bigstitcher-spark command: {command!r}. "
+                f"Known: {sorted(_SPARK_COMMAND_CLASSES)}"
+            )
+        if java_home:
+            java_exe = Path(java_home) / "bin" / "java.exe"
+            if not java_exe.is_file():
+                java_exe = Path(java_home) / "bin" / "java"
+            java = str(java_exe)
+        else:
+            import shutil as _shutil
+            java = _shutil.which("java") or "java"
+        return [java, "-cp", str(spark_root), main_class]
+
+    raise FileNotFoundError(
+        f"could not resolve bigstitcher-spark command {command!r} under {spark_root}. "
+        f"Expected an executable script (e.g. {command}, {command}.bat) "
+        f"or a fat JAR file."
+    )
+
+
+def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
+    """Run bigstitcher-spark's detect → match → solver pipeline.
+
+    Mutates the dataset.xml in place, adding interest-point detections,
+    pairwise matches, and the solved per-view ViewTransforms.
+
+    Required args:
+      - xml_path: path to dataset.xml
+      - spark_root: path to bigstitcher-spark executables dir OR fat JAR
+
+    Optional args (with sensible defaults for beads/precise descriptor):
+      - label: interest point label (default "beads")
+      - sigma: DoG sigma (default 1.8)
+      - threshold: DoG threshold (default 0.008)
+      - downsample_xy: -dsxy (default 2)
+      - downsample_z: -dsz (default 1)
+      - min_intensity / max_intensity: normalization range (default 0/65535)
+      - match_algorithm: -m (default PRECISE_TRANSLATION)
+      - transformation_model: -tm (default AFFINE)
+      - regularization_model: -rm (default RIGID)
+      - lambda_reg: --lambda (default 0.1)
+      - view_registration_scope: -vr (default ALL_AGAINST_ALL)
+      - ransac_min_inliers: -rmni (default 4; bigstitcher default 12 is too
+        strict for sparse-overlap bead datasets like orthogonal isoview)
+      - ransac_max_error: -rme (default 5.0 px)
+      - clear_correspondences: bool (default True)
+    """
+    import subprocess
+
+    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor.update(0.01, "Initializing bigstitcher-spark...")
+
+    xml_path = Path(args["xml_path"]).resolve()
+    if not xml_path.is_file():
+        raise FileNotFoundError(f"dataset.xml not found: {xml_path}")
+    # BigStitcher-Spark's URITools rejects "D:/..." as ambiguous with a
+    # URI scheme. Pass an explicit file URI so Windows drive paths parse
+    # cleanly regardless of slash direction.
+    xml_arg = xml_path.as_uri()
+
+    spark_root = Path(args["spark_root"]).resolve()
+    if not spark_root.exists():
+        raise FileNotFoundError(f"spark_root does not exist: {spark_root}")
+
+    label = str(args.get("label", "beads"))
+    sigma = float(args.get("sigma", 1.8))
+    threshold = float(args.get("threshold", 0.008))
+    dsxy = int(args.get("downsample_xy", 2))
+    dsz = int(args.get("downsample_z", 1))
+    min_intensity = float(args.get("min_intensity", 0))
+    max_intensity = float(args.get("max_intensity", 65535))
+    match_algorithm = str(args.get("match_algorithm", "PRECISE_TRANSLATION"))
+    transformation_model = str(args.get("transformation_model", "AFFINE"))
+    regularization_model = str(args.get("regularization_model", "RIGID"))
+    lambda_reg = float(args.get("lambda_reg", 0.1))
+    view_registration_scope = str(
+        args.get("view_registration_scope", "ALL_AGAINST_ALL")
+    )
+    ransac_min_inliers = int(args.get("ransac_min_inliers", 4))
+    ransac_max_error = float(args.get("ransac_max_error", 5.0))
+    clear_correspondences = bool(args.get("clear_correspondences", True))
+    verbose = bool(args.get("verbose", False))
+    java_home = args.get("java_home") or None
+    # JVM/Spark flags for standalone (non-spark-submit) execution.
+    # Mirrors what BigStitcher-Spark's install script bakes into its
+    # wrapper executables: `-Xmx<N>g -Dspark.master=local[N]`.
+    spark_threads = int(args.get("spark_threads", max(2, (os.cpu_count() or 4) // 2)))
+    spark_memory_gb = int(args.get("spark_memory_gb", 8))
+
+    def _inject_jvm_args(argv: list[str]) -> list[str]:
+        # Only inject when invoking via `java -cp …`; leave script-mode
+        # invocations alone (their wrappers set these themselves).
+        if len(argv) >= 3 and argv[1] == "-cp" and argv[0].lower().endswith(
+            ("java", "java.exe")
+        ):
+            return [
+                argv[0],
+                f"-Xmx{spark_memory_gb}g",
+                f"-Dspark.master=local[{spark_threads}]",
+                *argv[1:],
+            ]
+        return argv
+
+    # Lines worth keeping from spark stdout: summary counts, per-pair match
+    # outcomes, solved transforms, and error/exception traces. Everything else
+    # (per-job DoG progress, spark log4j chatter, JVM illegal-access warnings,
+    # progress bars, etc) is dropped unless verbose=True.
+    _keep_stdout = re.compile(
+        r"Saved xml"
+        r"|^Done\b"
+        r"|Total number of"
+        r"|Transformation Models:"
+        r"|^tpId=\d+ setupId=\d+: (\d+$|\()"
+        r"|Computed all interest points, statistics:"
+        r"|Defined pairs"
+        r"|Identified \d+ subset"
+        r"|Pairwise model"
+        r"|In total[: ]"
+        r"|NO Model found"
+        r"|No corresponding points"
+        r"|: Model found"
+        r"|(Avg|Min|Max) Error:"
+        r"|prealigned all tiles"
+        r"|Global optimization"
+        r"|Total number of jobs for"
+        r"|Removed \d+ pairs because"
+        r"|Exception|Caused by|\bERROR\b|\bError\b"
+    )
+    _stderr_noise = (
+        "Compression 'org.janelia.saalfeldlab.n5.blosc.BloscCompression'",
+        "Using Spark's default log4j",
+        "WARNING: An illegal reflective access",
+        "WARNING: Illegal reflective access",
+        "WARNING: Please consider reporting",
+        "WARNING: Use --illegal-access",
+        "WARNING: All illegal access",
+        "WARNING: sun.reflect.Reflection",
+    )
+
+    def _run(label_step: str, prog: float, argv: list[str]) -> None:
+        logger.info(f"{label_step}:")
+        if verbose:
+            logger.info("  " + " ".join(argv))
+        monitor.update(prog, f"BigStitcher-Spark: {label_step}")
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, check=False,
+        )
+        failed = proc.returncode != 0
+        if proc.stdout:
+            for line in proc.stdout.splitlines():
+                if verbose or failed or _keep_stdout.search(line):
+                    logger.info(f"  [stdout] {line}")
+        if proc.stderr:
+            for line in proc.stderr.splitlines():
+                if verbose or failed or not any(
+                    n in line for n in _stderr_noise
+                ):
+                    logger.info(f"  [stderr] {line}")
+        if failed:
+            raise RuntimeError(
+                f"{label_step} failed with exit code {proc.returncode}; "
+                f"see worker log for stdout/stderr"
+            )
+
+    # 1. detect-interestpoints
+    detect_argv = _inject_jvm_args(
+        _resolve_spark_executable(spark_root, "detect-interestpoints", java_home)
+    ) + [
+        "-x", xml_arg,
+        "-l", label,
+        "-s", str(sigma),
+        "-t", str(threshold),
+        "-dsxy", str(dsxy),
+        "-dsz", str(dsz),
+        "--minIntensity", str(min_intensity),
+        "--maxIntensity", str(max_intensity),
+    ]
+    _run("detect-interestpoints", 0.1, detect_argv)
+
+    # 2. match-interestpoints
+    match_argv = _inject_jvm_args(
+        _resolve_spark_executable(spark_root, "match-interestpoints", java_home)
+    ) + [
+        "-x", xml_arg,
+        "-l", label,
+        "-m", match_algorithm,
+        "-tm", transformation_model,
+        "-rm", regularization_model,
+        "--lambda", str(lambda_reg),
+        "-vr", view_registration_scope,
+        "-rmni", str(ransac_min_inliers),
+        "-rme", str(ransac_max_error),
+    ]
+    if clear_correspondences:
+        match_argv.append("--clearCorrespondences")
+    _run("match-interestpoints", 0.5, match_argv)
+
+    # 3. solver
+    solver_argv = _inject_jvm_args(
+        _resolve_spark_executable(spark_root, "solver", java_home)
+    ) + [
+        "-x", xml_arg,
+        "-s", "IP",
+        "-l", label,
+        "-tm", transformation_model,
+        "-rm", regularization_model,
+        "--lambda", str(lambda_reg),
+    ]
+    _run("solver", 0.85, solver_argv)
+
+    monitor.finish(f"BigStitcher registration complete: {xml_path}")
+    logger.info(f"BigStitcher registration completed; XML updated: {xml_path}")
+
+
 # Registry
 TASKS = {
     "save_as": task_save_as,
@@ -1117,4 +1392,5 @@ TASKS = {
     "isoview_correct": task_correct_stack,
     "isoview_fuse": task_multi_fuse,
     "isoview_bigstitcher": task_generate_bigstitcher,
+    "isoview_bigstitcher_register": task_bigstitcher_register,
 }
