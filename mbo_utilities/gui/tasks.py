@@ -179,7 +179,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
     Generic save/convert task.
     Supports saving any readable array to .zarr, .h5, .tiff, .bin, etc.
     """
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.0, "Initializing save task...")
 
     input_path = args["input_path"]
@@ -369,7 +369,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     """
     from lbm_suite2p_python import pipeline
 
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing Suite2p pipeline...")
 
     input_path = args["input_path"]
@@ -893,7 +893,6 @@ def _build_isoview_processing_config(args: dict):
         "flip_horizontal",
         "flip_vertical",
         "rotation",
-        "cameras_rotated",
         "front_flag",
         "pixel_spacing_z",
         "detection_objective_mag",
@@ -1000,7 +999,7 @@ def task_correct_stack(args: dict, logger: logging.Logger) -> None:
 
     _bridge_isoview_logging(logger)
 
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing correct_stack...")
 
     try:
@@ -1037,7 +1036,7 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
 
     _bridge_isoview_logging(logger)
 
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing multi_fuse...")
 
     try:
@@ -1097,7 +1096,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
 
     _bridge_isoview_logging(logger)
 
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing generate_bigstitcher_xml...")
 
     try:
@@ -1219,7 +1218,7 @@ def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
     """
     import subprocess
 
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing bigstitcher-spark...")
 
     xml_path = Path(args["xml_path"]).resolve()
