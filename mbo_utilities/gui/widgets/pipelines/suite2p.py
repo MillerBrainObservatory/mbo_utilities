@@ -96,8 +96,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._last_max_frames = 1000
         self._selected_planes = set()
         self._show_plane_popup = False
-        self._parallel_processing = False
-        self._max_parallel_jobs = 2
 
         # scan-phase correction for suite2p run (separate from display, default True)
         self._s2p_fix_phase = True
@@ -178,8 +176,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         self.parent._last_max_frames = self._last_max_frames
         self.parent._selected_planes = self._selected_planes
         self.parent._show_plane_popup = self._show_plane_popup
-        self.parent._parallel_processing = self._parallel_processing
-        self.parent._max_parallel_jobs = self._max_parallel_jobs
         self.parent._s2p_savepath_flash_start = self._savepath_flash_start
         self.parent._s2p_show_savepath_popup = self._show_savepath_popup
         self.parent._current_pipeline = "suite2p"
@@ -201,8 +197,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._last_max_frames = getattr(self.parent, "_last_max_frames", 1000)
         self._selected_planes = getattr(self.parent, "_selected_planes", set())
         self._show_plane_popup = getattr(self.parent, "_show_plane_popup", False)
-        self._parallel_processing = getattr(self.parent, "_parallel_processing", False)
-        self._max_parallel_jobs = getattr(self.parent, "_max_parallel_jobs", 2)
         self._savepath_flash_start = getattr(self.parent, "_s2p_savepath_flash_start", None)
         self._show_savepath_popup = getattr(self.parent, "_s2p_show_savepath_popup", False)
         self._s2p_fix_phase = getattr(self.parent, "_s2p_fix_phase", True)
