@@ -29,6 +29,7 @@ from imgui_bundle import hello_imgui, icons_fontawesome_6 as fa, imgui
 
 from mbo_utilities.gui._imgui_helpers import (
     PopupAutoSize,
+    draw_boxed_label,
     set_tooltip,
     tooltip_marks_right,
 )
@@ -152,7 +153,20 @@ _RUN_LABELS = {
     _MODE_CONSOLIDATE: "Run consolidation",
     _MODE_CORRECT: "Run correct_stack",
     _MODE_FUSE: "Run multi_fuse",
-    _MODE_STITCHER: "Export BigStitcher XML",
+    _MODE_STITCHER: "Export XML",
+}
+
+# "Look at these first" — labels rendered in a thin rounded box (bold
+# when self.parent._bold_font is available) inside the Parameters popup.
+# Mirrors Suite2p's _IMPORTANT_FIELDS treatment.
+_ISOVIEW_IMPORTANT_FIELDS: set[str] = {
+    # Correct (raw -> correct_stack)
+    "segment_threshold",
+    # Fuse (corrected -> multi_fuse)
+    "blending_method",
+    "blending_range",
+    "transition_plane",
+    "front_flag",
 }
 
 
@@ -254,9 +268,7 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         # BigStitcher-export state. The destination is derived
         # (sibling of the raw root, suffix=".stitcher") so we only show
-        # the suffix + a filename preview. The cameras_rotated flag
-        # ships in the Parameters popup, sharing the same source-of-
-        # truth as the Fuse mode's transform checkbox.
+        # the suffix + a filename preview.
         self._stitcher_output_path: str = ""
         self._stitcher_suffix: str = ".stitcher"
         # Opt-in feature-based coarse alignment (3D blob detection +
@@ -328,7 +340,6 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._fuse_flip_horizontal: bool = True
         self._fuse_flip_vertical: bool = False
         self._fuse_rotation: int = 0
-        self._fuse_cameras_rotated: bool = False
         self._fuse_transition_plane: int = -1  # -1 = None (center)
         self._fuse_front_flag: int = 1
         self._fuse_search_x_start: int = -50
@@ -347,6 +358,11 @@ class IsoviewPipelineWidget(PipelineWidget):
         # Popup visibility — set True to open on next frame.
         self._show_settings_popup: bool = False
         self._popup_just_opened: bool = False
+        # Crop-window handoff: when the user clicks Edit inside the
+        # Parameters popup we close the popup and open the floating
+        # crop window. Reopen the popup when the crop window closes.
+        self._reopen_settings_after_crop: bool = False
+        self._crop_was_open: bool = False
 
         # Data slicing (timepoints). Initialized on first redraw per dataset
         # via _init_iso_selection_state. Attribute names follow the suite2p
@@ -439,7 +455,20 @@ class IsoviewPipelineWidget(PipelineWidget):
         return "_output_dir"
 
     def _current_output_path(self) -> str:
-        return getattr(self, self._output_path_attr(), "") or ""
+        explicit = getattr(self, self._output_path_attr(), "") or ""
+        if explicit:
+            return explicit
+        # CORRECT mode against raw data intentionally leaves _output_dir
+        # empty so isoview's ProcessingConfig derives the output from
+        # input_dir + corrected_suffix. Mirror that derivation here so
+        # the Run-tab gate doesn't block on the empty string.
+        if self._selected_mode == _MODE_CORRECT:
+            arr = self._get_array()
+            sr = getattr(arr, "scan_root", None) if arr is not None else None
+            if sr is not None:
+                suffix = self._correct_corrected_suffix or ""
+                return f"{Path(sr).resolve()}{suffix}"
+        return ""
 
     def _spawn(self, task_type: str, args: dict, description: str,
                output_path: str | None) -> None:
@@ -637,16 +666,107 @@ class IsoviewPipelineWidget(PipelineWidget):
         ])
         imgui.spacing()
         self._draw_popup_columns([
+            ("Crop bounds", self._draw_fuse_crop_box),
             ("Registration search", self._draw_fuse_search_box, True),
             ("Microscope (override XML)",
              self._draw_microscope_overrides_box, True),
         ])
 
+    def _draw_fuse_crop_box(self) -> None:
+        """Crop-bounds editor inside the Fuse Parameters popup.
+
+        Edit closes this popup and hands off to the floating crop window
+        (preview + drags); when that window closes the popup is
+        reopened. Manual numeric entries below the buttons write
+        straight into ``_isoview_crop_state`` so they're picked up by
+        the floating window the next time Edit is pressed.
+        """
+        from mbo_utilities.gui import _isoview_crop_state as crop_state
+        from mbo_utilities.gui.widgets import isoview_crop as crop_window
+
+        arr = self._get_array()
+        shape = getattr(arr, "shape", None) if arr is not None else None
+        if not shape or len(shape) != 5:
+            imgui.text_disabled("(no compatible dataset)")
+            return
+        _, _, nz, ny, nx = shape
+
+        meta = getattr(arr, "metadata", None) or {}
+        cv = meta.get("camera_view_map") or {0: 0, 1: 0, 2: 90, 3: 90}
+        views = sorted({int(v) for v in cv.values()})
+        if not views:
+            views = [0, 90]
+
+        with tooltip_marks_right():
+            if imgui.button("Edit...##fuse_crop_edit", imgui.ImVec2(_BTN_W, 0)):
+                self._show_settings_popup = False
+                imgui.close_current_popup()
+                self._reopen_settings_after_crop = True
+                crop_window.open_window(self.parent)
+            imgui.same_line()
+            if imgui.button("Clear##fuse_crop_clear", imgui.ImVec2(_BTN_W, 0)):
+                crop_state.clear(arr)
+            set_tooltip(
+                "Edit opens the side-by-side crop window. Manual values "
+                "below are reactive — typing them then clicking Edit "
+                "pre-loads them into the preview."
+            )
+
+        imgui.spacing()
+        crops = crop_state.get_crops(arr)
+        for view in views:
+            existing = crops.get(view) or {}
+            bounds = {
+                "Z": existing.get("z", (0, nz)),
+                "Y": existing.get("y", (0, ny)),
+                "X": existing.get("x", (0, nx)),
+            }
+            limits = {"Z": (0, nz), "Y": (0, ny), "X": (0, nx)}
+            imgui.text_colored(_SUBSECTION_COLOR, f"VW{view:02d}")
+            imgui.indent(12)
+            changed = False
+            new_bounds: dict[str, tuple[int, int]] = {}
+            for axis in ("Z", "Y", "X"):
+                lo, hi = bounds[axis]
+                vmin, vmax = limits[axis]
+                new_lo, new_hi = self._draw_axis_inputs(
+                    view, axis, lo, hi, vmin, vmax,
+                )
+                new_bounds[axis] = (new_lo, new_hi)
+                if (new_lo, new_hi) != (lo, hi):
+                    changed = True
+            imgui.unindent(12)
+            if changed:
+                crop_state.set_view_bounds(
+                    arr, view,
+                    z=new_bounds["Z"], y=new_bounds["Y"], x=new_bounds["X"],
+                    shape=(nz, ny, nx),
+                )
+            imgui.spacing()
+
+    def _draw_axis_inputs(
+        self, view: int, axis: str, lo: int, hi: int, vmin: int, vmax: int,
+    ) -> tuple[int, int]:
+        """One row: ``{axis}: [lo] [hi]  /max``. Clamps lo<hi inline."""
+        imgui.text(f"{axis}:")
+        imgui.same_line()
+        imgui.set_next_item_width(72)
+        _, lo_new = imgui.input_int(
+            f"##fuse_crop_vw{view}_{axis}_lo", int(lo), 0, 0,
+        )
+        imgui.same_line()
+        imgui.set_next_item_width(72)
+        _, hi_new = imgui.input_int(
+            f"##fuse_crop_vw{view}_{axis}_hi", int(hi), 0, 0,
+        )
+        imgui.same_line()
+        imgui.text_disabled(f"/ {vmax}")
+        lo_new = max(int(vmin), min(int(lo_new), int(vmax) - 1))
+        hi_new = max(lo_new + 1, min(int(hi_new), int(vmax)))
+        return int(lo_new), int(hi_new)
+
     def _draw_stitcher_popup_rows(self) -> None:
-        """BigStitcher Parameters popup. Reuses ``_fuse_cameras_rotated``
-        as the single source of truth for the VW90 pre-rotation sign —
-        the two modes write to the same ``ProcessingConfig.cameras_rotated``
-        field so they share one value.
+        """BigStitcher Parameters popup.
 
         Single row, two columns:
         - Column 1: a "BigStitcher / Spark registration" box that
@@ -685,15 +805,6 @@ class IsoviewPipelineWidget(PipelineWidget):
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
-            _, self._fuse_cameras_rotated = imgui.checkbox(
-                "Cameras rotated", self._fuse_cameras_rotated,
-            )
-            set_tooltip(
-                "Flips the VW90 pre-rotation from +90° to -90° around X. "
-                "Shared with the Fuse mode's transform — same "
-                "ProcessingConfig.cameras_rotated field."
-            )
-
             _, self._stitcher_coarse_align = imgui.checkbox(
                 "Coarse align (blob features)", self._stitcher_coarse_align,
             )
@@ -1065,9 +1176,11 @@ class IsoviewPipelineWidget(PipelineWidget):
 
             imgui.set_next_item_width(_input_w())
             _, self._correct_segment_threshold = imgui.input_float(
-                "Threshold", self._correct_segment_threshold,
+                "##segment_threshold", self._correct_segment_threshold,
                 0.01, 0.1, "%.3f",
             )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            self._emp_label("segment_threshold", "Threshold")
             set_tooltip("Foreground threshold after Gaussian smoothing (0–1).")
 
             imgui.set_next_item_width(_input_w())
@@ -1197,9 +1310,11 @@ class IsoviewPipelineWidget(PipelineWidget):
             except ValueError:
                 idx = 0
             imgui.set_next_item_width(_input_w())
-            changed, new_idx = imgui.combo("Blending method", idx, methods)
+            changed, new_idx = imgui.combo("##blending_method", idx, methods)
             if changed:
                 self._fuse_blending_method = methods[new_idx]
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            self._emp_label("blending_method", "Blending method")
             set_tooltip(
                 "  geometric  fixed transition plane\n"
                 "  adaptive   per-XY tenengrad-driven blend\n"
@@ -1220,24 +1335,30 @@ class IsoviewPipelineWidget(PipelineWidget):
 
             imgui.set_next_item_width(_input_w())
             _, self._fuse_blending_range = imgui.input_int(
-                "Blending range", self._fuse_blending_range, 1, 5,
+                "##blending_range", self._fuse_blending_range, 1, 5,
             )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            self._emp_label("blending_range", "Blending range")
             set_tooltip(
                 "Transition zone width in Z-planes for geometric blending."
             )
 
             imgui.set_next_item_width(_input_w())
             _, self._fuse_transition_plane = imgui.input_int(
-                "Transition plane", self._fuse_transition_plane, 1, 5,
+                "##transition_plane", self._fuse_transition_plane, 1, 5,
             )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            self._emp_label("transition_plane", "Transition plane")
             set_tooltip(
                 "Z-index for geometric blending.\n−1 = use volume center."
             )
 
             imgui.set_next_item_width(_input_w())
             _, self._fuse_front_flag = imgui.input_int(
-                "Front camera", self._fuse_front_flag, 1, 1,
+                "##front_flag", self._fuse_front_flag, 1, 1,
             )
+            imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+            self._emp_label("front_flag", "Front camera")
             set_tooltip(
                 "Which camera carries the sharper signal at low Z.\n"
                 "  1 = reference camera (cam0)\n"
@@ -1261,13 +1382,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Flip vertical", self._fuse_flip_vertical,
             )
             set_tooltip("Flip the second camera vertically before fusion.")
-
-            _, self._fuse_cameras_rotated = imgui.checkbox(
-                "Cameras rotated", self._fuse_cameras_rotated,
-            )
-            set_tooltip(
-                "Skip the final reslice for VW90 when cameras are rotated."
-            )
 
             rotations = ["0", "+90 (cw)", "−90 (ccw)"]
             idx = {0: 0, 1: 1, -1: 2}.get(self._fuse_rotation, 0)
@@ -1441,7 +1555,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             "corrected_suffix": self._correct_corrected_suffix,
             "fused_suffix": self._fuse_fused_suffix,
             "stitcher_suffix": self._stitcher_suffix,
-            "cameras_rotated": self._fuse_cameras_rotated,
             "coarse_align": self._stitcher_coarse_align,
         }
         args.update(self._microscope_kwargs())
@@ -1513,9 +1626,10 @@ class IsoviewPipelineWidget(PipelineWidget):
         if self._correct_median_kernel_enabled:
             k = max(1, int(self._correct_median_kernel_size))
             median_kernel = [k, k]
+        resolved_out = self._current_output_path()
         args = {
             "input_path": str(arr.scan_root),
-            "output_dir": self._output_dir or None,
+            "output_dir": resolved_out or None,
             "corrected_suffix": self._correct_corrected_suffix,
             "output_format": self._output_format,
             "compression": (
@@ -1547,7 +1661,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._spawn(
             "isoview_correct", args,
             description=f"correct_stack: {Path(arr.scan_root).name}",
-            output_path=self._output_dir or str(arr.scan_root),
+            output_path=resolved_out or str(arr.scan_root),
         )
 
     def _submit_fuse(self, arr: Any) -> None:
@@ -1604,7 +1718,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             "flip_horizontal": self._fuse_flip_horizontal,
             "flip_vertical": self._fuse_flip_vertical,
             "rotation": self._fuse_rotation,
-            "cameras_rotated": self._fuse_cameras_rotated,
             "search_offsets_x": [
                 self._fuse_search_x_start,
                 self._fuse_search_x_stop,
@@ -1703,6 +1816,21 @@ class IsoviewPipelineWidget(PipelineWidget):
                 self._iso_tp_error = str(e)
 
         return max_frames
+
+    def _emp_label(self, field: str, text: str) -> None:
+        """Render an external label for an inline widget.
+
+        Important params (members of :data:`_ISOVIEW_IMPORTANT_FIELDS`)
+        get a boxed bold label; everything else is plain text. Pair with
+        ``imgui.<widget>("##field", ...)`` + ``imgui.same_line(0,
+        item_inner_spacing.x)`` to replicate imgui's default inline-label
+        placement, then call this.
+        """
+        if field in _ISOVIEW_IMPORTANT_FIELDS:
+            bold_font = getattr(self.parent, "_bold_font", None)
+            draw_boxed_label(text, font=bold_font)
+        else:
+            imgui.text(text)
 
     def _draw_isoview_missing_banner(self) -> None:
         warn = imgui.ImVec4(0.95, 0.55, 0.25, 1.0)
@@ -1899,13 +2027,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.spacing()
 
     def _draw_iso_segment_readout(self, arr: Any) -> None:
-        """Segmentation threshold Run-tab block — only meaningful for
-        kinds where ``correct_stack`` will run (raw, corrected). Hidden
-        for fused (which doesn't run segmentation). The trailing
-        separator is emitted inside this function so a hidden readout
-        leaves no orphan separator behind.
+        """Segmentation threshold Run-tab block — only meaningful on
+        raw data (where ``correct_stack`` will run). Hidden otherwise.
+        Trailing separator emitted inline so a hidden readout leaves
+        no orphan separator behind.
         """
-        if getattr(arr, "kind", None) == "fused":
+        if getattr(arr, "kind", None) != "raw":
             return
         from mbo_utilities.gui.widgets import isoview_segment as seg_window
 
@@ -1945,8 +2072,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.spacing()
 
     def _draw_iso_deadpixel_readout(self, arr: Any) -> None:
-        """Dead-pixel Run-tab block — raw/corrected only."""
-        if getattr(arr, "kind", None) == "fused":
+        """Dead-pixel Run-tab block — raw only."""
+        if getattr(arr, "kind", None) != "raw":
             return
         from mbo_utilities.gui.widgets import isoview_deadpixel as dp_window
 
@@ -1975,48 +2102,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 f"median={on}  kernel={self._correct_median_kernel_size}  "
                 f"bg_pct={self._correct_background_percentile:.2f}"
             )
-        finally:
-            imgui.pop_text_wrap_pos()
-            imgui.pop_style_color()
-        imgui.spacing()
-        imgui.spacing()
-        imgui.separator()
-        imgui.spacing()
-
-    def _draw_iso_crop_readout(self, arr: Any) -> None:
-        """Crop bounds Run-tab block — only meaningful for ``fused``
-        IsoviewArrays (the only kind whose volumes carry both VW00 and
-        VW90 in the same coordinate space) AND only when the active
-        action is Fuse (crop bounds feed multi_fuse). Hidden otherwise.
-        The trailing separator is emitted inside this function so a
-        hidden readout leaves no orphan separator behind.
-        """
-        if getattr(arr, "kind", None) != "fused":
-            return
-        if self._selected_mode != _MODE_FUSE:
-            return
-        from mbo_utilities.gui import _isoview_crop_state as crop_state
-        from mbo_utilities.gui.widgets import isoview_crop as crop_window
-
-        imgui.text_colored(_SUBSECTION_COLOR, "Crop bounds")
-        set_tooltip(
-            "Per-view XYZ crop. Available on fused datasets only. "
-            "Edit opens a side-by-side window with drags and a "
-            "masked XY max-projection preview.",
-            align="right",
-        )
-        imgui.spacing()
-        if imgui.button("Edit...##iso_crop_edit", imgui.ImVec2(_BTN_W, 0)):
-            crop_window.open_window(self.parent)
-        imgui.same_line()
-        if imgui.button("Clear##iso_crop_clear", imgui.ImVec2(_BTN_W, 0)):
-            crop_state.clear(arr)
-        imgui.push_style_color(
-            imgui.Col_.text, imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
-        )
-        imgui.push_text_wrap_pos(0.0)
-        try:
-            imgui.text_unformatted(f"Active: {crop_state.summary(arr)}")
         finally:
             imgui.pop_text_wrap_pos()
             imgui.pop_style_color()
@@ -2154,6 +2239,24 @@ class IsoviewPipelineWidget(PipelineWidget):
         if self._selected_mode not in modes:
             self._selected_mode = modes[0]
 
+        # Crop window just closed and we owe the user a reopened
+        # Parameters popup. open_popup() must be called BEFORE
+        # _draw_settings_popup so begin_popup_modal sees the open state
+        # this frame.
+        crop_open_now = getattr(self.parent, "_iso_crop_window_open", False)
+        if (
+            self._reopen_settings_after_crop
+            and self._crop_was_open
+            and not crop_open_now
+        ):
+            self._show_settings_popup = True
+            self._popup_just_opened = True
+            imgui.open_popup(
+                "Isoview Pipeline Settings##isoview_pipeline_settings_popup"
+            )
+            self._reopen_settings_after_crop = False
+        self._crop_was_open = crop_open_now
+
         # popup lifecycle: open_popup() must be called from the same
         # imgui frame as begin_popup_modal(); we keep the visibility flag
         # for state but always re-open here when it's True and not
@@ -2215,10 +2318,6 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.separator()
         imgui.spacing()
 
-        # CROP BOUNDS — per-view XYZ box (fused only). Emits its own
-        # trailing separator when content is drawn.
-        self._draw_iso_crop_readout(arr)
-
         # SEGMENTATION — adaptive threshold + gauss params (non-fused
         # only). Emits its own trailing separator when content is drawn.
         self._draw_iso_segment_readout(arr)
@@ -2252,17 +2351,21 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         # RUN — big green, centered. In BigStitcher mode, the export
         # button sits side-by-side with the Spark "Run registration"
-        # button, both centered as a pair.
+        # button, both centered as a pair. Per-button width shrinks
+        # below _RUN_W when the side panel is too narrow to fit both
+        # at full size — so the right button never gets clipped.
         has_path = bool(self._current_output_path())
         run_label = _RUN_LABELS.get(self._selected_mode or "", "Run")
         is_stitcher = self._selected_mode == _MODE_STITCHER
         spark_ready = bool(self._stitcher_spark_root) if is_stitcher else False
         spacing_x = imgui.get_style().item_spacing.x
-        if is_stitcher:
-            total_w = _RUN_W * 2 + spacing_x
-        else:
-            total_w = _RUN_W
         avail = imgui.get_content_region_avail().x
+        if is_stitcher:
+            btn_w = max(80.0, min(_RUN_W, (avail - spacing_x) / 2.0))
+            total_w = btn_w * 2 + spacing_x
+        else:
+            btn_w = min(_RUN_W, max(80.0, avail))
+            total_w = btn_w
         if avail > total_w:
             imgui.set_cursor_pos_x(
                 imgui.get_cursor_pos_x() + (avail - total_w) * 0.5
@@ -2270,7 +2373,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         with _green_button():
             if not has_path:
                 imgui.begin_disabled()
-            clicked = imgui.button(run_label, imgui.ImVec2(_RUN_W, 0))
+            clicked = imgui.button(run_label, imgui.ImVec2(btn_w, 0))
             if not has_path:
                 imgui.end_disabled()
         if (
@@ -2289,8 +2392,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             if not spark_ready:
                 imgui.begin_disabled()
             register_clicked = imgui.button(
-                "Run BigStitcher registration##spark_run",
-                imgui.ImVec2(_RUN_W, 0),
+                "Run registration##spark_run",
+                imgui.ImVec2(btn_w, 0),
             )
             if not spark_ready:
                 imgui.end_disabled()
