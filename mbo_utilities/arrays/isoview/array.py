@@ -40,6 +40,12 @@ logger = _get_logger("arrays.isoview")
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 _SPM_PATTERN = re.compile(r"^SPM\d+$")
 _FUSED_SUFFIX = ".fused"
+# Match the `.fused` token at the end of a directory name, optionally
+# followed by user-added qualifiers like ``.fused-dx-fixed`` or
+# ``.fused_v2`` — anything starting with ``.fused`` then end-of-string
+# or one of ``-/./_``. ``.fusedfoo`` deliberately does not match.
+_FUSED_TAIL_RE = re.compile(r"\.fused(?:[-._].*)?$")
+_CORRECTED_TAIL_RE = re.compile(r"\.corrected(?:[-._].*)?$")
 _AUX_PATTERNS = (
     "Mask", "mask", "minIntensity", "coords", "Projection", "configuration",
     "transformation", "intensityCorrection", "referenceMinIntensity",
@@ -601,14 +607,14 @@ def _resolve_corrected_spm_dir(p: Path) -> Path | None:
         return p
     if _has_tm_pattern(p.name) and p.parent and _SPM_PATTERN.match(p.parent.name):
         return p.parent
-    if p.name.endswith(".corrected"):
+    if _CORRECTED_TAIL_RE.search(p.name):
         spms = sorted(
             d for d in p.iterdir()
             if d.is_dir() and _SPM_PATTERN.match(d.name)
         )
         return spms[0] if spms else None
     for ancestor in p.parents:
-        if ancestor.name.endswith(".corrected"):
+        if _CORRECTED_TAIL_RE.search(ancestor.name):
             spms = sorted(
                 d for d in ancestor.iterdir()
                 if d.is_dir() and _SPM_PATTERN.match(d.name)
@@ -620,7 +626,7 @@ def _resolve_corrected_spm_dir(p: Path) -> Path | None:
 
 
 def _is_fused_root(p: Path) -> bool:
-    return p.name.endswith(_FUSED_SUFFIX)
+    return _FUSED_TAIL_RE.search(p.name) is not None
 
 
 def _is_method_dir(p: Path) -> bool:
@@ -648,10 +654,18 @@ def _resolve_fused_method_dir(p: Path) -> Path | None:
         return parents[0]
     if _is_fused_root(p) and p.is_dir():
         return _first_method_dir(p)
-    if p.name.endswith(".corrected"):
-        sibling = p.parent / f"{p.name[: -len('.corrected')]}{_FUSED_SUFFIX}"
-        if sibling.is_dir():
-            return _first_method_dir(sibling)
+    m = _CORRECTED_TAIL_RE.search(p.name)
+    if m:
+        stem = p.name[: m.start()]
+        # Prefer the literal ``.fused`` sibling; fall back to any
+        # ``<stem>.fused*`` variant created with a custom suffix.
+        literal = p.parent / f"{stem}{_FUSED_SUFFIX}"
+        if literal.is_dir():
+            return _first_method_dir(literal)
+        for sibling in sorted(p.parent.iterdir()) if p.parent.is_dir() else []:
+            if sibling.is_dir() and sibling.name.startswith(f"{stem}.fused"):
+                if _is_fused_root(sibling):
+                    return _first_method_dir(sibling)
     for ancestor in parents:
         if _is_fused_root(ancestor) and ancestor.is_dir():
             return _first_method_dir(ancestor)
@@ -950,8 +964,8 @@ _PIPELINE_INFOS = (
         name="isoview-corrected",
         description="IsoView corrected per-camera output",
         input_patterns=[
-            "**/*.corrected/SPM??/TM??????/SPM??_TM??????_CM??.zarr",
-            "**/*.corrected/SPM??/TM??????/SPM??_TM??????_CM??.tif",
+            "**/*.corrected*/SPM??/TM??????/SPM??_TM??????_CM??.zarr",
+            "**/*.corrected*/SPM??/TM??????/SPM??_TM??????_CM??.tif",
         ],
         output_patterns=[], input_extensions=["zarr", "tif"],
         output_extensions=[], marker_files=[], category="reader",
@@ -960,10 +974,10 @@ _PIPELINE_INFOS = (
         name="isoview-fused",
         description="IsoView fused output",
         input_patterns=[
-            "**/*.fused/*/TM??????/*.fusedStack.*",
-            "**/*.fused/*/TM??????/SPM??_TM??????_CM??_CM??_VW??.*",
-            "**/*.fused/*/SPM??/*.fusedStack.*",
-            "**/*.fused/*/SPM??/SPM??_TM??????_CM??_CM??_VW??.*",
+            "**/*.fused*/*/TM??????/*.fusedStack.*",
+            "**/*.fused*/*/TM??????/SPM??_TM??????_CM??_CM??_VW??.*",
+            "**/*.fused*/*/SPM??/*.fusedStack.*",
+            "**/*.fused*/*/SPM??/SPM??_TM??????_CM??_CM??_VW??.*",
         ],
         output_patterns=[], input_extensions=["klb", "tif", "zarr"],
         output_extensions=[], marker_files=[], category="reader",
@@ -1000,9 +1014,12 @@ def _sibling_raw_root(arr: "IsoviewArray") -> Path | None:
     ``.fused/`` tree.
     """
     def _strip(name: str) -> str | None:
-        for suf in (".corrected", _FUSED_SUFFIX):
-            if name.endswith(suf):
-                return name[: -len(suf)]
+        m = _CORRECTED_TAIL_RE.search(name)
+        if m:
+            return name[: m.start()]
+        m = _FUSED_TAIL_RE.search(name)
+        if m:
+            return name[: m.start()]
         return None
 
     candidates = [arr.scan_root, *arr.scan_root.parents]
@@ -1054,7 +1071,7 @@ def _klb_xml_dirs(arr: "IsoviewArray") -> list[Path]:
 
 def _corrected_projections(arr: "IsoviewArray") -> dict | None:
     corrected_root = arr.scan_root.parent
-    if not corrected_root.name.endswith(".corrected"):
+    if not _CORRECTED_TAIL_RE.search(corrected_root.name):
         return None
     return _scan_flat_projections(
         corrected_root.parent / f"{corrected_root.name}.projections"
@@ -1207,6 +1224,25 @@ class IsoviewArray(Shape5DMixin):
         first_view = self._view_keys[0]
         first_path = self._tp_paths[first_tp][first_view]
         self._probe_shape(first_path)
+
+        # When per-view crops are applied at fusion time, sibling views
+        # in the same fused tree can have different (Z, Y, X) shapes.
+        # Probe each view once and store per-view shape; the global
+        # ``.shape`` then reports the per-axis maximum, and short slabs
+        # get zero-padded into the result slot in __getitem__.
+        self._view_shapes: dict = {first_view: (self._nz, self._ny, self._nx)}
+        for vk in self._view_keys[1:]:
+            p = self._tp_paths[first_tp].get(vk)
+            if p is None:
+                continue
+            try:
+                with LazyVolume(p, dimensions=self._stack_dimensions()) as v:
+                    self._view_shapes[vk] = tuple(int(d) for d in v.shape)
+            except Exception:
+                continue
+        self._nz = max(s[0] for s in self._view_shapes.values())
+        self._ny = max(s[1] for s in self._view_shapes.values())
+        self._nx = max(s[2] for s in self._view_shapes.values())
 
         # XML metadata sweep — common fields merge into self._metadata,
         # per-camera fields land in self._camera_metadata. Raw kind has
@@ -1450,7 +1486,17 @@ class IsoviewArray(Shape5DMixin):
                     slab = slab[:, np.newaxis, :]
                 if isinstance(x_key, int):
                     slab = slab[:, :, np.newaxis]
-                result[ti, ci, ...] = slab
+                # Per-view crops can make sibling views smaller than the
+                # global max shape advertised in .shape — drop the slab
+                # into the top-left corner of the result slot and leave
+                # padding pixels at zero.
+                target = result[ti, ci]
+                if slab.shape == target.shape:
+                    target[...] = slab
+                else:
+                    sz, sy, sx = (min(slab.shape[i], target.shape[i]) for i in range(3))
+                    target[...] = 0
+                    target[:sz, :sy, :sx] = slab[:sz, :sy, :sx]
 
         int_indexed = [
             isinstance(t_key, int), isinstance(c_key, int),
