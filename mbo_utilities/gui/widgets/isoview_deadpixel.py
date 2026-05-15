@@ -519,8 +519,8 @@ def draw_window(parent: Any) -> None:
 
         imgui.separator()
         if imgui.button("Reset to defaults##iso_dp_reset", imgui.ImVec2(160, 0)):
-            iso._correct_background_percentile = 3.0
-            iso._correct_median_kernel_size = 5
+            iso._correct_background_percentile = 5.0
+            iso._correct_median_kernel_size = 3
             iso._correct_median_kernel_enabled = True
         imgui.same_line()
         if imgui.button("Cancel##iso_dp_cancel", imgui.ImVec2(120, 0)):

@@ -320,7 +320,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         # Correct-mode state
         self._correct_corrected_suffix: str = ".corrected"
         self._correct_segment_mode: int = 1
-        self._correct_apply_seg_mask: bool = True
+        self._correct_apply_seg_mask: bool = False
         self._correct_do_tenengrad: bool = False
         self._correct_background_percentile: float = 5.0
         self._correct_median_kernel_size: int = 3
@@ -341,7 +341,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._fuse_flip_vertical: bool = False
         self._fuse_rotation: int = 0
         self._fuse_transition_plane: int = -1  # -1 = None (center)
-        self._fuse_front_flag: int = 1
+        self._fuse_front_flag: int = 2
         self._fuse_search_x_start: int = -50
         self._fuse_search_x_stop: int = 50
         self._fuse_search_x_step: int = 10
@@ -2089,8 +2089,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             dp_window.open_window(self.parent)
         imgui.same_line()
         if imgui.button("Reset##iso_dp_reset", imgui.ImVec2(_BTN_W, 0)):
-            self._correct_background_percentile = 3.0
-            self._correct_median_kernel_size = 5
+            self._correct_background_percentile = 5.0
+            self._correct_median_kernel_size = 3
             self._correct_median_kernel_enabled = True
         imgui.push_style_color(
             imgui.Col_.text, imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
