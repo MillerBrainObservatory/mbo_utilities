@@ -386,3 +386,41 @@ def get_default_open_dir() -> Path:
 
     # Fall back to home
     return Path.home()
+
+
+_OPTIONS_KEY = "options"
+
+
+def _get_options() -> dict:
+    return dict(_load_preferences().get(_OPTIONS_KEY) or {})
+
+
+def _set_option(name: str, value: Any) -> None:
+    prefs = _load_preferences()
+    opts = dict(prefs.get(_OPTIONS_KEY) or {})
+    opts[name] = value
+    prefs[_OPTIONS_KEY] = opts
+    _save_preferences(prefs)
+
+
+def get_gpu_index() -> int:
+    """Return the persisted GPU adapter index (-1 means wgpu auto-pick)."""
+    try:
+        return int(_get_options().get("gpu_index", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
+def set_gpu_index(index: int) -> None:
+    """Persist the GPU adapter index for future launches."""
+    _set_option("gpu_index", int(index))
+
+
+def get_debug_logging() -> bool:
+    """Return the persisted debug-logging flag (default False)."""
+    return bool(_get_options().get("debug_logging", False))
+
+
+def set_debug_logging(enabled: bool) -> None:
+    """Persist the debug-logging flag for future launches."""
+    _set_option("debug_logging", bool(enabled))

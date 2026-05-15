@@ -153,19 +153,11 @@ def _current_channel(parent: Any) -> int:
 
 
 def _selected_channel(parent: Any) -> int:
-    """Return the channel zstats should display.
-
-    ``parent._zstats_channel_selection`` holds the user's UI choice:
-    -1 means "follow the C slider"; any other int pins to that channel.
-    Clamps to ``[0, nc-1]`` and falls back to 0 for single-channel data.
-    """
+    """Channel zstats should display: always follows the C slider."""
     nc = max(1, int(getattr(parent, "nc", 1) or 1))
     if nc <= 1:
         return 0
-    sel = int(getattr(parent, "_zstats_channel_selection", -1))
-    if sel < 0:
-        return _current_channel(parent) % nc
-    return max(0, min(sel, nc - 1))
+    return _current_channel(parent) % nc
 
 
 def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
@@ -493,8 +485,6 @@ def refresh_zstats(parent: Any):
     parent._zstats_running = [False] * n
     parent._zstats_progress = [0.0] * n
     parent._zstats_current_z = [0] * n
-    if not hasattr(parent, "_zstats_channel_selection"):
-        parent._zstats_channel_selection = -1
 
     # Reset progress state for each graphic to allow new progress display
     for i in range(n):
@@ -535,39 +525,12 @@ def refresh_zstats(parent: Any):
     compute_zstats(parent)
 
 
-def _draw_channel_selector(parent: Any, nc: int) -> None:
-    """Channel picker for multi-channel arrays. ``-1`` follows the C
-    slider (default); explicit values pin the table/graph to that
-    channel regardless of where the slider is."""
-    sel = int(getattr(parent, "_zstats_channel_selection", -1))
-    labels = ["Follow C slider"] + [f"C{c}" for c in range(nc)]
-    values = [-1] + list(range(nc))
-    try:
-        current_idx = values.index(sel)
-    except ValueError:
-        current_idx = 0
-        parent._zstats_channel_selection = -1
-
-    imgui.set_next_item_width(160)
-    changed, new_idx = imgui.combo("Channel##zstats", current_idx, labels)
-    if changed:
-        parent._zstats_channel_selection = values[new_idx]
-
-    if values[current_idx] == -1:
-        imgui.same_line()
-        resolved = _selected_channel(parent)
-        imgui.text_colored(
-            imgui.ImVec4(0.65, 0.65, 0.65, 1.0), f"-> C{resolved}"
-        )
-
-
 def draw_stats_section(parent: Any):
     """Draw the z-stats visualization section."""
     if not any(parent._zstats_done):
         return
 
     stats_list = parent._zstats
-    nc = max(1, int(getattr(parent, "nc", 1) or 1))
     channel = _selected_channel(parent)
     is_single_zplane = parent.nz == 1  # Single bar for 1 plane
     is_dual_zplane = parent.nz == 2    # Grouped bars for 2 planes
@@ -582,11 +545,6 @@ def draw_stats_section(parent: Any):
             imgui.ImVec4(0.8, 1.0, 0.2, 1.0), "Z-Plane Summary Stats"
         )
 
-    # Channel selector for multi-channel data — sits above the array
-    # selector so a user can scope the view first, then pick an array.
-    if nc > 1:
-        _draw_channel_selector(parent, nc)
-        imgui.separator()
 
     # ROI selector — show a graphic only when its channel slot is populated.
     array_labels = [

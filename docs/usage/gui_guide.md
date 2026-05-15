@@ -311,7 +311,6 @@ Suite2p always runs on the dataset currently loaded in the viewer. If you used S
 - all suite2p parameters exposed with descriptions
 - output directory selection
 - scan-phase correction options for processing
-- parallel processing controls
 
 ### Spatial Crop
 

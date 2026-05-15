@@ -12,10 +12,107 @@ from typing import Any
 
 from imgui_bundle import imgui, imgui_ctx, ImVec2
 
-from mbo_utilities.gui._imgui_helpers import begin_popup_size
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize, begin_popup_size
 from mbo_utilities.gui._metadata import draw_metadata_inspector
+from mbo_utilities.gui._options_popup import _ensure_gpu_list
 from mbo_utilities.gui.panels.debug_log import draw_scope
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
+from mbo_utilities.preferences import get_gpu_index
+
+
+_SYS_TITLE = imgui.ImVec4(0.5, 0.8, 1.0, 1.0)
+_SYS_LABEL = imgui.ImVec4(0.7, 0.7, 0.72, 1.0)
+_SYS_ACCENT = imgui.ImVec4(0.95, 0.85, 0.45, 1.0)
+
+
+def _draw_system_info_header(parent: Any) -> None:
+    """Compact system-capacity header for the Process Console.
+
+    Shows: CPU cores, live available/total RAM, selected GPU adapter
+    (from preferences), and the deduplicated list of physical GPUs.
+    Live RAM is cheap to probe each frame (~µs syscall); GPU and CPU
+    counts are cached on first call.
+    """
+    _ensure_gpu_list(parent)
+
+    # CPU + RAM via psutil (live RAM each frame).
+    try:
+        import psutil
+        cpu_phys = psutil.cpu_count(logical=False)
+        cpu_log = psutil.cpu_count(logical=True)
+        vm = psutil.virtual_memory()
+        cpu_str = (
+            f"{cpu_phys}p / {cpu_log}t"
+            if cpu_phys else f"{cpu_log or '?'}"
+        )
+        ram_str = f"{vm.available/1024**3:.1f} / {vm.total/1024**3:.1f} GB"
+    except ImportError:
+        import os as _os
+        cpu_str = f"{_os.cpu_count() or '?'}"
+        ram_str = "?"
+
+    adapters = getattr(parent, "_options_gpu_adapters", []) or []
+
+    # Selected adapter resolved from persisted preferences. -1 == auto.
+    sel_idx = get_gpu_index()
+    if 0 <= sel_idx < len(adapters):
+        info_d = getattr(adapters[sel_idx], "info", {}) or {}
+        sel_name = info_d.get("device", "?")
+        sel_backend = info_d.get("backend_type", "")
+        selected_str = (
+            f"{sel_name} [{sel_backend}]" if sel_backend else sel_name
+        )
+    else:
+        selected_str = "auto (wgpu picks)"
+
+    # Deduplicate physical GPUs by device name; skip software/CPU adapters
+    # so the list shows only real hardware the user can render with.
+    seen: set[str] = set()
+    gpu_names: list[str] = []
+    for a in adapters:
+        info_d = getattr(a, "info", {}) or {}
+        name = info_d.get("device", "?")
+        adapter_type = info_d.get("adapter_type", "?")
+        if adapter_type in ("CPU", "Unknown"):
+            continue
+        if name not in seen:
+            seen.add(name)
+            gpu_names.append(name)
+    gpus_str = ", ".join(gpu_names) if gpu_names else "none detected"
+
+    imgui.text_colored(_SYS_TITLE, "System")
+    imgui.separator()
+    imgui.spacing()
+
+    if imgui.begin_table(
+        "##sysinfo_table", 2, imgui.TableFlags_.sizing_fixed_fit
+    ):
+        imgui.table_setup_column(
+            "k", imgui.TableColumnFlags_.width_fixed, 140
+        )
+        imgui.table_setup_column(
+            "v", imgui.TableColumnFlags_.width_stretch
+        )
+
+        def _row(k: str, v: str, value_color: Any = None) -> None:
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.text_colored(_SYS_LABEL, k)
+            imgui.table_next_column()
+            if value_color is not None:
+                imgui.text_colored(value_color, v)
+            else:
+                imgui.text(v)
+
+        _row("CPU cores:", cpu_str)
+        _row("RAM (avail/total):", ram_str)
+        _row("GPU (selected):", selected_str, value_color=_SYS_ACCENT)
+        _row("GPU (available):", gpus_str)
+
+        imgui.end_table()
+
+    imgui.spacing()
+    imgui.spacing()
 
 
 def draw_tools_popups(parent: Any):
@@ -67,13 +164,16 @@ def draw_process_console_popup(parent: Any):
         parent._show_process_console = False
     if not hasattr(parent, "_process_console_size"):
         parent._process_console_size = ImVec2(500, 350)
+    if not hasattr(parent, "_process_console_sizer"):
+        parent._process_console_sizer = PopupAutoSize(
+            "Process Console", auto_resize=False
+        )
 
     if parent._show_process_console:
+        parent._process_console_sizer.before_open()
         imgui.open_popup("Process Console")
         parent._show_process_console = False
 
-    center = imgui.get_main_viewport().get_center()
-    imgui.set_next_window_pos(center, imgui.Cond_.appearing, imgui.ImVec2(0.5, 0.5))
     imgui.set_next_window_size(parent._process_console_size, imgui.Cond_.appearing)
     imgui.set_next_window_size_constraints(imgui.ImVec2(350, 200), imgui.ImVec2(1200, 800))
 
@@ -91,6 +191,10 @@ def draw_process_console_popup(parent: Any):
             # save current size for next time
             parent._process_console_size = imgui.get_window_size()
 
+            # System info header — pinned above the scrollable list so it
+            # stays visible regardless of how many processes are queued.
+            _draw_system_info_header(parent)
+
             pm = get_process_manager()
             pm.cleanup_finished()
             running = pm.get_running()
@@ -98,7 +202,8 @@ def draw_process_console_popup(parent: Any):
             from mbo_utilities.gui.widgets.progress_bar import _get_active_progress_items
             progress_items = _get_active_progress_items(parent)
 
-            # calculate content area (leave space for close button)
+            # recompute available height AFTER the header so the scroll
+            # area gets exactly what's left, minus footer space.
             avail = imgui.get_content_region_avail()
             content_height = avail.y - 35  # space for separator + close button
 

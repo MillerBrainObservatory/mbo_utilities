@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.0.4"
+version = "3.0.6"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -49,7 +49,7 @@ dependencies = [
 	"napari-animation",
 	"numba>=0.60.0",
 	"suite2p>=1.0.0.1",
-	"lbm_suite2p_python>=3.0.5",
+	"lbm_suite2p_python>=3.0.6",
 ]
 
 [project.scripts]
@@ -68,6 +68,12 @@ Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 rastermap = [
     "rastermap",
 ]
+# Isoview multi-view fusion / BigStitcher XML generation.
+# isoview pins python==3.12.9; restrict the dep to that interpreter so uv
+# can resolve [all] across the broader requires-python range.
+# isoview = [
+#     "isoview ; python_full_version == '3.12.9'",
+# ]
 # PyTorch for neural network operations
 # torch = [
 #     "torch",

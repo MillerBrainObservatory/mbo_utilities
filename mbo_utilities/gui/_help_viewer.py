@@ -13,6 +13,8 @@ from typing import Any
 
 from imgui_bundle import imgui, ImVec2
 
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize
+
 
 # cached doc content
 _doc_cache: dict[str, str] = {}
@@ -52,18 +54,20 @@ def draw_help_popup(parent: Any) -> None:
     if not hasattr(parent, "_help_selected_doc"):
         parent._help_selected_doc = 0
 
+    if not hasattr(parent, "_help_sizer"):
+        parent._help_sizer = PopupAutoSize(
+            "Help##HelpViewer", auto_resize=False
+        )
+
     if parent._show_help_popup:
+        parent._help_sizer.before_open()
         imgui.open_popup("Help##HelpViewer")
         parent._show_help_popup = False
 
-    # center popup on screen
+    # default size on first use; top anchor comes from _help_sizer.
     io = imgui.get_io()
     screen_w, screen_h = io.display_size.x, io.display_size.y
     win_w, win_h = min(650, screen_w * 0.7), min(550, screen_h * 0.7)
-    imgui.set_next_window_pos(
-        ImVec2((screen_w - win_w) / 2, (screen_h - win_h) / 2),
-        imgui.Cond_.appearing,
-    )
     imgui.set_next_window_size(ImVec2(win_w, win_h), imgui.Cond_.first_use_ever)
     imgui.set_next_window_size_constraints(ImVec2(400, 300), ImVec2(1200, 900))
 

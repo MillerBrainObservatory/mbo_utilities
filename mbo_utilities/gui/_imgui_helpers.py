@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 
 __all__ = [
+    "PopupAutoSize",
     "begin_popup_size",
     "checkbox_with_tooltip",
     "draw_boxed_label",
@@ -117,6 +118,90 @@ def begin_popup_size():
     h = min(max(h, 20), 60)
 
     return hello_imgui.em_to_vec2(w, h)
+
+
+class PopupAutoSize:
+    """Make a modal popup track its content size on every frame.
+
+    Wraps ``WindowFlags_.always_auto_resize`` so the popup always fits
+    its content — expanding a collapsing header inside the popup grows
+    the window, collapsing it shrinks it back. No caching, no snap,
+    no scrollbars from layout drift.
+
+    Usage:
+
+        sizer = PopupAutoSize("My Popup##id")     # construct once
+        ...
+        sizer.before_open()                       # before open_popup()
+        imgui.open_popup("My Popup##id")
+        ...
+        opened, visible = imgui.begin_popup_modal(
+            "My Popup##id",
+            p_open=True,
+            flags=sizer.flags(imgui.WindowFlags_.no_saved_settings),
+        )
+
+    Manual user-driven resizing is disabled by ``always_auto_resize``;
+    that's a deliberate trade — the goal is "popup fits content", so
+    handing resizing back to imgui removes both the scrollbar-on-grow
+    failure mode and any need to double-click an edge.
+    """
+
+    def __init__(
+        self,
+        popup_id: str,
+        *,
+        anchor: str = "top",
+        top_offset: float = 4.0,
+        auto_resize: bool = True,
+    ) -> None:
+        """``anchor`` is one of ``"top"`` (horizontally centered, hanging
+        from just below the title bar — recommended for popups that may
+        grow tall as the user expands collapsing sections) or ``"center"``
+        (viewport-centered). ``top_offset`` is the gap in pixels between
+        the title bar and the popup's top edge when ``anchor="top"``.
+
+        Set ``auto_resize=False`` to keep imgui's ``always_auto_resize``
+        flag off — useful for popups whose body contains a ``begin_child``
+        with negative-fill height (e.g. a scrollable list), which would
+        collapse to zero size under auto-resize. The position policy
+        still applies.
+        """
+        self.popup_id = popup_id
+        self.anchor = anchor
+        self.top_offset = top_offset
+        self.auto_resize = auto_resize
+
+    def before_open(self) -> None:
+        """Call just before ``open_popup`` so the popup positions on appear."""
+        viewport = imgui.get_main_viewport()
+        if self.anchor == "center":
+            imgui.set_next_window_pos(
+                viewport.get_center(),
+                imgui.Cond_.appearing,
+                pivot=ImVec2(0.5, 0.5),
+            )
+            return
+        # default "top": horizontally centered in the work area, top edge
+        # ``top_offset`` px below the viewport's usable top (work_pos.y
+        # already excludes any host menu bar imgui draws).
+        work_pos = viewport.work_pos
+        work_size = viewport.work_size
+        imgui.set_next_window_pos(
+            ImVec2(work_pos.x + work_size.x * 0.5, work_pos.y + self.top_offset),
+            imgui.Cond_.appearing,
+            pivot=ImVec2(0.5, 0.0),
+        )
+
+    def flags(self, extra: int = 0) -> int:
+        """Return the flag mask for ``begin_popup_modal``.
+
+        Adds ``always_auto_resize`` unless ``auto_resize=False`` was
+        passed at construction.
+        """
+        if not self.auto_resize:
+            return int(extra)
+        return int(extra) | int(imgui.WindowFlags_.always_auto_resize)
 
 
 # =============================================================================

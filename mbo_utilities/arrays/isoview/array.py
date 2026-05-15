@@ -7,8 +7,10 @@ default) selects which scanner and channel-labeling scheme to use:
 - ``"corrected"`` — per-camera corrected output at
   ``<root>.corrected/SPM##/TM######/SPM##_TM######_CM##.<ext>``.
 - ``"fused"`` — multi-fused output at
-  ``<root>.corrected/Results/MultiFused_*/SPM##/TM######/
+  ``<root>.fused/<method>/{SPM##|TM######}/
   SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>``.
+  Tiled projects keep an ``SPM##`` nesting; timelapse projects have
+  ``TM######`` directly under the method dir.
 - ``"raw"`` — raw acquisition stacks at
   ``<root>/SPC##_TM#####_ANG###_CM#_CHN##_PH#.stack``.
 - ``"clusterpt"`` — clusterPT KLB outputs at
@@ -37,7 +39,13 @@ logger = _get_logger("arrays.isoview")
 
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 _SPM_PATTERN = re.compile(r"^SPM\d+$")
-_METHOD_PATTERN = re.compile(r"^MultiFused_")
+_FUSED_SUFFIX = ".fused"
+# Match the `.fused` token at the end of a directory name, optionally
+# followed by user-added qualifiers like ``.fused-dx-fixed`` or
+# ``.fused_v2`` — anything starting with ``.fused`` then end-of-string
+# or one of ``-/./_``. ``.fusedfoo`` deliberately does not match.
+_FUSED_TAIL_RE = re.compile(r"\.fused(?:[-._].*)?$")
+_CORRECTED_TAIL_RE = re.compile(r"\.corrected(?:[-._].*)?$")
 _AUX_PATTERNS = (
     "Mask", "mask", "minIntensity", "coords", "Projection", "configuration",
     "transformation", "intensityCorrection", "referenceMinIntensity",
@@ -599,14 +607,14 @@ def _resolve_corrected_spm_dir(p: Path) -> Path | None:
         return p
     if _has_tm_pattern(p.name) and p.parent and _SPM_PATTERN.match(p.parent.name):
         return p.parent
-    if p.name.endswith(".corrected"):
+    if _CORRECTED_TAIL_RE.search(p.name):
         spms = sorted(
             d for d in p.iterdir()
             if d.is_dir() and _SPM_PATTERN.match(d.name)
         )
         return spms[0] if spms else None
     for ancestor in p.parents:
-        if ancestor.name.endswith(".corrected"):
+        if _CORRECTED_TAIL_RE.search(ancestor.name):
             spms = sorted(
                 d for d in ancestor.iterdir()
                 if d.is_dir() and _SPM_PATTERN.match(d.name)
@@ -617,53 +625,67 @@ def _resolve_corrected_spm_dir(p: Path) -> Path | None:
     return None
 
 
-def _resolve_fused_method_dir(p: Path) -> Path | None:
-    """Locate the MultiFused_<method>/ directory holding fused outputs.
+def _is_fused_root(p: Path) -> bool:
+    return _FUSED_TAIL_RE.search(p.name) is not None
 
-    Accepts the method dir itself, an SPM## child, a TM###### grandchild,
-    a ``Results/`` directory, or a ``.corrected/`` root (prefers
-    MultiFused_geometric when present). Returns ``None`` when no such
-    method dir is reachable.
+
+def _is_method_dir(p: Path) -> bool:
+    """A method dir is any directory whose parent ends in ``.fused``."""
+    return p.parent is not None and _is_fused_root(p.parent)
+
+
+def _resolve_fused_method_dir(p: Path) -> Path | None:
+    """Locate the ``<raw>.fused/<method>/`` directory holding fused outputs.
+
+    Accepts the method dir itself, an ``SPM##`` child (tiled), a
+    ``TM######`` child (timelapse), the ``<raw>.fused/`` root (picks
+    the preferred method via :func:`_first_method_dir`), or a
+    ``.corrected/`` root whose ``.fused/`` sibling exists. Returns
+    ``None`` when no method dir is reachable.
     """
     if p.is_file():
         p = p.parent
-    if _METHOD_PATTERN.match(p.name):
+    if _is_method_dir(p):
         return p
     parents = list(p.parents)
-    if (
-        _SPM_PATTERN.match(p.name)
-        and parents
-        and _METHOD_PATTERN.match(parents[0].name)
+    if parents and _is_method_dir(parents[0]) and (
+        _SPM_PATTERN.match(p.name) or _has_tm_pattern(p.name)
     ):
         return parents[0]
-    if (
-        _has_tm_pattern(p.name)
-        and len(parents) >= 2
-        and _SPM_PATTERN.match(parents[0].name)
-        and _METHOD_PATTERN.match(parents[1].name)
-    ):
-        return parents[1]
-    if p.name == "Results" and p.is_dir():
+    if _is_fused_root(p) and p.is_dir():
         return _first_method_dir(p)
-    if p.name.endswith(".corrected") and (p / "Results").is_dir():
-        return _first_method_dir(p / "Results")
+    m = _CORRECTED_TAIL_RE.search(p.name)
+    if m:
+        stem = p.name[: m.start()]
+        # Prefer the literal ``.fused`` sibling; fall back to any
+        # ``<stem>.fused*`` variant created with a custom suffix.
+        literal = p.parent / f"{stem}{_FUSED_SUFFIX}"
+        if literal.is_dir():
+            return _first_method_dir(literal)
+        for sibling in sorted(p.parent.iterdir()) if p.parent.is_dir() else []:
+            if sibling.is_dir() and sibling.name.startswith(f"{stem}.fused"):
+                if _is_fused_root(sibling):
+                    return _first_method_dir(sibling)
     for ancestor in parents:
-        if ancestor.name == "Results" and ancestor.is_dir():
+        if _is_fused_root(ancestor) and ancestor.is_dir():
             return _first_method_dir(ancestor)
     return None
 
 
-def _first_method_dir(results_dir: Path) -> Path | None:
-    if not results_dir.is_dir():
+def _first_method_dir(fused_root: Path) -> Path | None:
+    """Pick a method dir under a ``<raw>.fused/`` root.
+
+    Prefers ``geometric`` when present; otherwise the alphabetically
+    first subdirectory. Returns ``None`` when the root has no method
+    dirs yet.
+    """
+    if not fused_root.is_dir():
         return None
-    candidates = sorted(
-        d for d in results_dir.iterdir()
-        if d.is_dir() and _METHOD_PATTERN.match(d.name)
-    )
+    candidates = sorted(d for d in fused_root.iterdir() if d.is_dir())
     if not candidates:
         return None
     for c in candidates:
-        if c.name == "MultiFused_geometric":
+        if c.name == "geometric":
             return c
     return candidates[0]
 
@@ -733,44 +755,59 @@ def _scan_flat_projections(proj_dir: Path) -> dict | None:
     return _finalize_projections(axes, views, files)
 
 
-def _scan_fused_projections(method_dir: Path) -> dict | None:
-    """Scan a ``MultiFused_*`` tree for projection TIFFs.
+def _iter_fused_leaf_dirs(method_dir: Path):
+    """Yield (timepoint, leaf_dir) for both timelapse and tiled fused layouts.
 
-    Walks ``SPM##/TM######/*.{xy,xz,yz}Projection.tif`` — both the
-    ``CM##_CM##_VW##`` and the ``VW##``-only naming variants. View is
-    labeled by the fused VW number (``VW00``, ``VW90``).
+    Timelapse: ``method_dir/TM######/`` — one entry per TM, t comes
+    from the TM number.
+    Tiled: ``method_dir/SPM##/`` — files share a single TM (extracted
+    from filenames at scan time). Yields ``(None, spm_dir)`` so callers
+    derive t from each file's name.
+    """
+    if not method_dir.is_dir():
+        return
+    for sub in sorted(method_dir.iterdir()):
+        if not sub.is_dir():
+            continue
+        if _has_tm_pattern(sub.name):
+            yield _extract_timepoint(sub.name), sub
+        elif _SPM_PATTERN.match(sub.name):
+            yield None, sub
+
+
+def _scan_fused_projections(method_dir: Path) -> dict | None:
+    """Scan a fused method tree for projection TIFFs.
+
+    Walks ``method_dir/{SPM##|TM######}/*.{xy,xz,yz}Projection.tif`` —
+    both the ``CM##_CM##_VW##`` and the ``VW##``-only naming variants.
+    View is labeled by the fused VW number (``VW00``, ``VW90``).
     """
     if not method_dir.is_dir():
         return None
     axes: set[str] = set()
     views: set[str] = set()
     files: dict[tuple[str, str, int], Path] = {}
-    for spm_dir in method_dir.iterdir():
-        if not (spm_dir.is_dir() and _SPM_PATTERN.match(spm_dir.name)):
-            continue
-        for tm_dir in spm_dir.iterdir():
-            if not (tm_dir.is_dir() and _has_tm_pattern(tm_dir.name)):
+    for tm_from_dir, leaf in _iter_fused_leaf_dirs(method_dir):
+        for f in leaf.iterdir():
+            if not f.is_file() or "Projection" not in f.name:
                 continue
-            t = _extract_timepoint(tm_dir.name)
-            for f in tm_dir.iterdir():
-                if not f.is_file() or "Projection" not in f.name:
-                    continue
-                m = _PROJ_FUSED_RE.match(f.name)
-                vw_only = False
-                if not m:
-                    m = _PROJ_VW_ONLY_RE.match(f.name)
-                    vw_only = m is not None
-                if not m:
-                    continue
-                if vw_only:
-                    _, _, vw, axis = m.groups()
-                else:
-                    _, _, _cm0, _cm1, vw, axis = m.groups()
-                axis = axis.lower()
-                view = f"VW{int(vw):02d}"
-                axes.add(axis)
-                views.add(view)
-                files[(axis, view, t)] = f
+            m = _PROJ_FUSED_RE.match(f.name)
+            vw_only = False
+            if not m:
+                m = _PROJ_VW_ONLY_RE.match(f.name)
+                vw_only = m is not None
+            if not m:
+                continue
+            if vw_only:
+                _, tm_str, vw, axis = m.groups()
+            else:
+                _, tm_str, _cm0, _cm1, vw, axis = m.groups()
+            axis = axis.lower()
+            view = f"VW{int(vw):02d}"
+            t = tm_from_dir if tm_from_dir is not None else int(tm_str)
+            axes.add(axis)
+            views.add(view)
+            files[(axis, view, t)] = f
     return _finalize_projections(axes, views, files)
 
 
@@ -816,33 +853,27 @@ def _scan_corrected(spm_dir: Path):
 
 
 def _scan_fused(method_dir: Path):
-    """Discover fused-view volumes under one MultiFused_* tree.
+    """Discover fused-view volumes under one ``<raw>.fused/<method>/`` tree.
 
-    Layout::
+    Layouts::
 
-        <method>/SPM##/TM######/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
+        timelapse: <method>/TM######/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
+        tiled:     <method>/SPM##/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
 
     Returns ``(tp_paths, view_keys, channel_names)`` where ``view_keys``
     are ``(cam0, cam1, vw)`` tuples and channel names are
-    ``["VW00_fused", ...]``.
+    ``["VW00_fused", ...]``. For tiled mode each file's TM number drives
+    the timepoint index; for timelapse mode the enclosing TM dir does.
     """
-    spm_dirs = sorted(
-        d for d in method_dir.iterdir()
-        if d.is_dir() and _SPM_PATTERN.match(d.name)
-    )
-    if not spm_dirs:
-        return {}, [], []
-    spm_dir = spm_dirs[0]
-
-    tm_dirs = _find_tm_folders(spm_dir)
-    if not tm_dirs:
+    leaves = list(_iter_fused_leaf_dirs(method_dir))
+    if not leaves:
         return {}, [], []
 
-    tp_paths: dict[int, dict[tuple, Path]] = {}
+    by_tm: dict[int, dict[tuple, Path]] = {}
     views: set[tuple[int, int, int]] = set()
 
-    for ti, tm in enumerate(tm_dirs):
-        for f in sorted(tm.iterdir()):
+    for tm_from_dir, leaf in leaves:
+        for f in sorted(leaf.iterdir()):
             if not (f.is_file() or f.suffix.lower() == ".zarr"):
                 continue
             if _is_aux(f):
@@ -850,10 +881,15 @@ def _scan_fused(method_dir: Path):
             m = _FUSED_RE.match(f.name)
             if not m:
                 continue
+            tm = tm_from_dir if tm_from_dir is not None else int(m.group(2))
             key = (int(m.group(3)), int(m.group(4)), int(m.group(5)))
-            tp_paths.setdefault(ti, {})[key] = f
+            by_tm.setdefault(tm, {})[key] = f
             views.add(key)
 
+    if not by_tm:
+        return {}, [], []
+
+    tp_paths = {ti: by_tm[tm] for ti, tm in enumerate(sorted(by_tm))}
     view_keys = sorted(views)
     channel_names = [f"VW{vw:02d}_fused" for _, _, vw in view_keys]
     return tp_paths, view_keys, channel_names
@@ -928,18 +964,20 @@ _PIPELINE_INFOS = (
         name="isoview-corrected",
         description="IsoView corrected per-camera output",
         input_patterns=[
-            "**/*.corrected/SPM??/TM??????/SPM??_TM??????_CM??.zarr",
-            "**/*.corrected/SPM??/TM??????/SPM??_TM??????_CM??.tif",
+            "**/*.corrected*/SPM??/TM??????/SPM??_TM??????_CM??.zarr",
+            "**/*.corrected*/SPM??/TM??????/SPM??_TM??????_CM??.tif",
         ],
         output_patterns=[], input_extensions=["zarr", "tif"],
         output_extensions=[], marker_files=[], category="reader",
     ),
     PipelineInfo(
         name="isoview-fused",
-        description="IsoView MultiFused output",
+        description="IsoView fused output",
         input_patterns=[
-            "**/Results/MultiFused_*/SPM??/TM??????/*.fusedStack.*",
-            "**/Results/MultiFused_*/SPM??/TM??????/SPM??_TM??????_CM??_CM??_VW??.*",
+            "**/*.fused*/*/TM??????/*.fusedStack.*",
+            "**/*.fused*/*/TM??????/SPM??_TM??????_CM??_CM??_VW??.*",
+            "**/*.fused*/*/SPM??/*.fusedStack.*",
+            "**/*.fused*/*/SPM??/SPM??_TM??????_CM??_CM??_VW??.*",
         ],
         output_patterns=[], input_extensions=["klb", "tif", "zarr"],
         output_extensions=[], marker_files=[], category="reader",
@@ -965,21 +1003,31 @@ for _info in _PIPELINE_INFOS:
 
 
 def _sibling_raw_root(arr: "IsoviewArray") -> Path | None:
-    """Locate the raw acquisition root next to a ``.corrected/`` tree.
+    """Locate the raw acquisition root next to a ``.corrected/`` or ``.fused/`` tree.
 
     For arr.scan_root = ``<dataset>.corrected/SPM##`` (corrected) or
-    ``<dataset>.corrected/Results/MultiFused_*/`` (fused), the sibling
-    raw root is ``<dataset>/`` — the directory holding the original
-    ``ch*_spec##.xml`` and ``SPC##_TM*.stack`` files.
+    ``<dataset>.fused/<method>/`` (fused), the sibling raw root is
+    ``<dataset>/`` — the directory holding the original ``ch*_spec##.xml``
+    and ``SPC##_TM*.stack`` files.
 
-    Returns ``None`` when the path is not under a ``.corrected/`` tree.
+    Returns ``None`` when the path is not under a ``.corrected/`` or
+    ``.fused/`` tree.
     """
-    for ancestor in arr.scan_root.parents:
-        if ancestor.name.endswith(".corrected"):
-            sibling = ancestor.parent / ancestor.name[: -len(".corrected")]
-            return sibling if sibling.is_dir() else None
-    if arr.scan_root.name.endswith(".corrected"):
-        sibling = arr.scan_root.parent / arr.scan_root.name[: -len(".corrected")]
+    def _strip(name: str) -> str | None:
+        m = _CORRECTED_TAIL_RE.search(name)
+        if m:
+            return name[: m.start()]
+        m = _FUSED_TAIL_RE.search(name)
+        if m:
+            return name[: m.start()]
+        return None
+
+    candidates = [arr.scan_root, *arr.scan_root.parents]
+    for d in candidates:
+        stem = _strip(d.name)
+        if stem is None:
+            continue
+        sibling = d.parent / stem
         return sibling if sibling.is_dir() else None
     return None
 
@@ -1000,11 +1048,11 @@ def _fused_xml_dirs(arr: "IsoviewArray") -> list[Path]:
     dirs: list[Path] = []
     if raw is not None:
         dirs.append(raw)
-    # fused tree: SPM##/TM######/ holds per-channel XMLs alongside volumes
-    for spm in sorted(arr.scan_root.iterdir()):
-        if spm.is_dir() and _SPM_PATTERN.match(spm.name):
-            dirs.append(spm)
-            break
+    # fused tree: method_dir/{SPM##|TM######}/ holds per-channel XMLs
+    # alongside volumes. Take the first leaf dir under the method dir.
+    for _t, leaf in _iter_fused_leaf_dirs(arr.scan_root):
+        dirs.append(leaf)
+        break
     return dirs
 
 
@@ -1023,7 +1071,7 @@ def _klb_xml_dirs(arr: "IsoviewArray") -> list[Path]:
 
 def _corrected_projections(arr: "IsoviewArray") -> dict | None:
     corrected_root = arr.scan_root.parent
-    if not corrected_root.name.endswith(".corrected"):
+    if not _CORRECTED_TAIL_RE.search(corrected_root.name):
         return None
     return _scan_flat_projections(
         corrected_root.parent / f"{corrected_root.name}.projections"
@@ -1080,8 +1128,8 @@ def detect_isoview_kind(path: str | Path) -> str | None:
     """Pick the kind string for a directory, or ``None`` when nothing matches.
 
     Resolution order (most specific first):
-      1. anywhere inside a ``Results/MultiFused_*/`` tree → ``"fused"``
-      2. inside a ``.corrected/SPM##`` tree (not under Results) → ``"corrected"``
+      1. inside (or at) a ``<raw>.fused/`` tree → ``"fused"``
+      2. inside a ``.corrected/SPM##`` tree → ``"corrected"``
       3. ``.stack`` files at the top level → ``"raw"``
       4. TM######/*.klb tree → ``"clusterpt"``
     """
@@ -1091,20 +1139,9 @@ def detect_isoview_kind(path: str | Path) -> str | None:
     if p.is_file():
         p = p.parent
 
-    if _resolve_fused_method_dir(p) is not None and (
-        p.name.startswith("MultiFused_")
-        or p.name == "Results"
-        or any(
-            a.name.startswith("MultiFused_") or a.name == "Results"
-            for a in p.parents
-        )
-        or (
-            p.name.endswith(".corrected")
-            and (p / "Results").is_dir()
-            and not (p / "SPM00").is_dir()
-        )
-    ):
-        return "fused"
+    if _is_fused_root(p) or any(_is_fused_root(a) for a in p.parents):
+        if _resolve_fused_method_dir(p) is not None:
+            return "fused"
 
     if _resolve_corrected_spm_dir(p) is not None:
         return "corrected"
@@ -1131,6 +1168,14 @@ class IsoviewArray(Shape5DMixin):
     projections dir, channel naming) lives in the :data:`_KINDS` table —
     everything else is shared.
     """
+
+    # Pre-cache the display range so the histogram opens at a sensible
+    # default for IsoView 16-bit fluorescence data instead of probing
+    # the first frame (which can be slow for large fused volumes and
+    # often yields a range biased by registration zero-fill).
+    # _compute_frame_vminmax short-circuits when these are non-None.
+    _cached_vmin = 0.0
+    _cached_vmax = 1000.0
 
     def __init__(self, path: str | Path, kind: str | None = None):
         self.base_path = Path(path)
@@ -1179,6 +1224,25 @@ class IsoviewArray(Shape5DMixin):
         first_view = self._view_keys[0]
         first_path = self._tp_paths[first_tp][first_view]
         self._probe_shape(first_path)
+
+        # When per-view crops are applied at fusion time, sibling views
+        # in the same fused tree can have different (Z, Y, X) shapes.
+        # Probe each view once and store per-view shape; the global
+        # ``.shape`` then reports the per-axis maximum, and short slabs
+        # get zero-padded into the result slot in __getitem__.
+        self._view_shapes: dict = {first_view: (self._nz, self._ny, self._nx)}
+        for vk in self._view_keys[1:]:
+            p = self._tp_paths[first_tp].get(vk)
+            if p is None:
+                continue
+            try:
+                with LazyVolume(p, dimensions=self._stack_dimensions()) as v:
+                    self._view_shapes[vk] = tuple(int(d) for d in v.shape)
+            except Exception:
+                continue
+        self._nz = max(s[0] for s in self._view_shapes.values())
+        self._ny = max(s[1] for s in self._view_shapes.values())
+        self._nx = max(s[2] for s in self._view_shapes.values())
 
         # XML metadata sweep — common fields merge into self._metadata,
         # per-camera fields land in self._camera_metadata. Raw kind has
@@ -1422,7 +1486,17 @@ class IsoviewArray(Shape5DMixin):
                     slab = slab[:, np.newaxis, :]
                 if isinstance(x_key, int):
                     slab = slab[:, :, np.newaxis]
-                result[ti, ci, ...] = slab
+                # Per-view crops can make sibling views smaller than the
+                # global max shape advertised in .shape — drop the slab
+                # into the top-left corner of the result slot and leave
+                # padding pixels at zero.
+                target = result[ti, ci]
+                if slab.shape == target.shape:
+                    target[...] = slab
+                else:
+                    sz, sy, sx = (min(slab.shape[i], target.shape[i]) for i in range(3))
+                    target[...] = 0
+                    target[:sz, :sy, :sx] = slab[:sz, :sy, :sx]
 
         int_indexed = [
             isinstance(t_key, int), isinstance(c_key, int),

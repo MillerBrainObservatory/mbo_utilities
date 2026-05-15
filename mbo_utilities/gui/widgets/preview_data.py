@@ -62,6 +62,7 @@ from mbo_utilities.gui._dialogs import check_file_dialogs
 from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
 from mbo_utilities.gui._help_viewer import draw_help_popup
 from mbo_utilities.gui._metadata_editor import draw_metadata_popup
+from mbo_utilities.gui._options_popup import draw_options_popup
 
 
 import fastplotlib as fpl
@@ -485,8 +486,7 @@ class PreviewDataWidget(EdgeWindow):
 
         Per-array slots are dicts keyed by channel int; compute_zstats
         populates one key per channel for multi-channel arrays, just
-        ``{0: ...}`` for single-channel. ``_zstats_channel_selection``
-        is the user's UI choice (-1 = follow C slider).
+        ``{0: ...}`` for single-channel.
         """
         self._zstats = [{} for _ in range(self.num_graphics)]
         self._zstats_means = [{} for _ in range(self.num_graphics)]
@@ -495,7 +495,6 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_running = [False] * self.num_graphics
         self._zstats_progress = [0.0] * self.num_graphics
         self._zstats_current_z = [0] * self.num_graphics
-        self._zstats_channel_selection = -1
 
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
@@ -967,7 +966,8 @@ class PreviewDataWidget(EdgeWindow):
             slot = self._zstats_means[i] if i < len(self._zstats_means) else None
             if not isinstance(slot, dict) or not slot:
                 return None
-            return slot.get(c_for_mean) or slot.get(0)
+            # `or` truthiness raises on numpy arrays; use dict.get fallback.
+            return slot.get(c_for_mean, slot.get(0))
 
         any_mean_sub = self._mean_subtraction and any(
             self._zstats_done[i] and _means_for(i) is not None
@@ -1095,6 +1095,24 @@ class PreviewDataWidget(EdgeWindow):
         draw_process_console_popup(self)
         draw_keybinds_popup(self)
         draw_help_popup(self)
+        draw_options_popup(self)
+        try:
+            from mbo_utilities.gui.widgets.isoview_crop import draw_window as _draw_iso_crop_window
+            _draw_iso_crop_window(self)
+        except Exception:
+            # Optional widget — skip silently when its deps aren't loaded
+            # (e.g. immvision unavailable in the running imgui_bundle).
+            pass
+        try:
+            from mbo_utilities.gui.widgets.isoview_segment import draw_window as _draw_iso_seg_window
+            _draw_iso_seg_window(self)
+        except Exception:
+            pass
+        try:
+            from mbo_utilities.gui.widgets.isoview_deadpixel import draw_window as _draw_iso_dp_window
+            _draw_iso_dp_window(self)
+        except Exception:
+            pass
 
         super().draw_window()
 

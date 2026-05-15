@@ -262,6 +262,14 @@ def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -
     is_flag=True,
     help="Clear environment cache and exit.",
 )
+@click.option(
+    "--gpu",
+    "gpu_index_arg",
+    type=int,
+    default=None,
+    help="Set and persist GPU adapter index. `mbo --gpu N` saves + exits; "
+         "`mbo --gpu N <path>` saves then opens. See `mbo view --list-gpus`.",
+)
 @click.pass_context
 def main(
     ctx,
@@ -272,6 +280,7 @@ def main(
     check_install=False,
     no_cache=False,
     clear_cache=False,
+    gpu_index_arg=None,
 ):
     r"""
     MBO Utilities CLI - data preview and processing tools.
@@ -321,6 +330,28 @@ def main(
         from mbo_utilities.gui.run_gui import _check_installation
         _check_installation()
         return
+
+    if gpu_index_arg is not None:
+        import fastplotlib as fpl
+        adapters = fpl.enumerate_adapters()
+        if not 0 <= gpu_index_arg < len(adapters):
+            raise click.BadParameter(
+                f"--gpu {gpu_index_arg} out of range; found {len(adapters)} "
+                f"adapter(s). Run `mbo view --list-gpus` to see them.",
+                param_hint="--gpu",
+            )
+        from mbo_utilities.preferences import set_gpu_index
+        set_gpu_index(gpu_index_arg)
+        info = getattr(adapters[gpu_index_arg], "info", {}) or {}
+        click.echo(
+            f"Saved GPU {gpu_index_arg}: "
+            f"{info.get('device', info.get('description', '?'))} "
+            f"(persisted to ~/.mbo/settings/preferences.json)"
+        )
+        # run_gui.py reads the persisted index on launch, so a path that
+        # routes to `view` will pick this up automatically.
+        if ctx.invoked_subcommand is None:
+            return
 
     # If a subcommand is invoked, skip main logic
     if ctx.invoked_subcommand is not None:
@@ -374,7 +405,19 @@ def main(
     is_flag=True,
     help="Show only metadata (no image viewer).",
 )
-def view(data_in=None, roi=None, widget=True, metadata=False):
+@click.option(
+    "--gpu",
+    "gpu_index",
+    type=int,
+    default=None,
+    help="0-based GPU adapter index (see --list-gpus). Default: wgpu auto-pick.",
+)
+@click.option(
+    "--list-gpus",
+    is_flag=True,
+    help="List available GPU adapters and exit.",
+)
+def view(data_in=None, roi=None, widget=True, metadata=False, gpu_index=None, list_gpus=False):
     r"""
     Open imaging data in the GUI viewer.
 
@@ -384,7 +427,36 @@ def view(data_in=None, roi=None, widget=True, metadata=False):
       mbo view /data/raw.tiff        Open specific file
       mbo view /data/raw --metadata  Show only metadata
       mbo view /data --roi 0 --roi 2 View specific ROIs
+      mbo view --list-gpus           Show available GPU adapters
+      mbo view /data/raw --gpu 0     Force GPU index 0
     """
+    if list_gpus:
+        import fastplotlib as fpl
+        adapters = fpl.enumerate_adapters()
+        click.echo(f"{'idx':<4} {'type':<14} {'vendor':<10} {'name'}")
+        for i, a in enumerate(adapters):
+            info = getattr(a, "info", {}) or {}
+            type_ = info.get("adapter_type", info.get("device_type", "?"))
+            vendor = info.get("vendor", "?")
+            name = info.get("device", info.get("description", "?"))
+            click.echo(f"{i:<4} {str(type_):<14} {str(vendor):<10} {name}")
+        return
+
+    if gpu_index is not None:
+        import fastplotlib as fpl
+        adapters = fpl.enumerate_adapters()
+        if not 0 <= gpu_index < len(adapters):
+            raise click.BadParameter(
+                f"--gpu {gpu_index} out of range; found {len(adapters)} adapter(s). "
+                f"Run `mbo view --list-gpus` to see them.",
+                param_hint="--gpu",
+            )
+        fpl.select_adapter(adapters[gpu_index])
+        from mbo_utilities.preferences import set_gpu_index
+        set_gpu_index(gpu_index)
+        info = getattr(adapters[gpu_index], "info", {}) or {}
+        click.echo(f"Using GPU {gpu_index}: {info.get('device', info.get('description', '?'))}")
+
     # show first-run warning
     first_run = _is_first_run()
     if first_run:

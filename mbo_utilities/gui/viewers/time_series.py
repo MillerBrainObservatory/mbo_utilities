@@ -78,8 +78,21 @@ class TimeSeriesViewer(BaseViewer):
             if not self._has_pipeline:
                 imgui.end_disabled()
                 if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-                    imgui.set_tooltip(
-                        "Suite2p not installed.\n"
-                        "Install with: uv pip install mbo_utilities"
+                    # Show each registered pipeline's install command so the
+                    # user can pick whichever applies to their workflow,
+                    # instead of hard-coding Suite2p in the tooltip.
+                    from mbo_utilities.gui.widgets.pipelines import (
+                        get_available_pipelines,
                     )
+                    pipelines = get_available_pipelines()
+                    if pipelines:
+                        lines = ["No pipeline is installed.\nInstall one of:"]
+                        for cls in pipelines:
+                            lines.append(f"  {cls.name}: {cls.install_command}")
+                        imgui.set_tooltip("\n".join(lines))
+                    else:
+                        imgui.set_tooltip(
+                            "No pipelines registered.\n"
+                            "Install with: uv pip install mbo_utilities"
+                        )
             imgui.end_tab_bar()

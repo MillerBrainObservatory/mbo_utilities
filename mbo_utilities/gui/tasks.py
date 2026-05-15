@@ -4,7 +4,7 @@ Task registry for background worker processes.
 This module contains the actual logic for background tasks:
 - TaskMonitor: Helper for reporting progress to a JSON sidecar file.
 - task_save_as: Generic array conversion/saving.
-- task_suite2p: Suite2p pipeline with safe serial extraction + parallel processing.
+- task_suite2p: Suite2p pipeline.
 - TASKS: Registry mapping task names to functions.
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import os
 import traceback
@@ -178,7 +179,7 @@ def task_save_as(args: dict, logger: logging.Logger) -> None:
     Generic save/convert task.
     Supports saving any readable array to .zarr, .h5, .tiff, .bin, etc.
     """
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.0, "Initializing save task...")
 
     input_path = args["input_path"]
@@ -368,7 +369,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     """
     from lbm_suite2p_python import pipeline
 
-    monitor = TaskMonitor(args.get("output_dir", "."), uuid=args.get("_uuid"))
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing Suite2p pipeline...")
 
     input_path = args["input_path"]
@@ -399,6 +400,13 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         flattened.update(ops)
         ops = flattened
     s2p_settings = args.get("s2p_settings", {})
+    logger.info(
+        f"task_suite2p: parallel knobs from GUI -> "
+        f"workers={s2p_settings.get('workers')!r}, "
+        f"threads_per_worker={s2p_settings.get('threads_per_worker')!r}, "
+        f"skip_volumetric={s2p_settings.get('skip_volumetric')!r}; "
+        f"s2p_settings has workers key: {'workers' in s2p_settings}"
+    )
 
     # Merge GUI-set custom metadata (e.g. dz from the metadata editor)
     # into ops. The user explicitly set these in the editor, so they win
@@ -687,6 +695,9 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             rastermap_kwargs=s2p_settings.get("rastermap_kwargs"),
             writer_kwargs=writer_kwargs,
             progress_callback=_progress,
+            workers=s2p_settings.get("workers", 1),
+            skip_volumetric=s2p_settings.get("skip_volumetric", False),
+            threads_per_worker=s2p_settings.get("threads_per_worker"),
         )
 
         monitor.finish("Suite2p pipeline completed.")
@@ -697,8 +708,688 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         logger.exception(f"Suite2p failed: {e}")
         raise
 
+
+def _bridge_consolidate_logging(worker_logger: logging.Logger) -> None:
+    """Attach the worker's handlers to the consolidator's mbo logger.
+
+    Every ``mbo.*`` logger has ``propagate=False`` (see ``mbo_utilities.log``),
+    and the worker's per-task file handler is bound to ``mbo.worker``
+    only. Without this bridge the consolidator's INFO messages
+    (``consolidate corrected: src=... out=... ...``, ``consolidate: wrote ...``)
+    go nowhere in the subprocess. Idempotent — same handler is never
+    added twice.
+    """
+    cons_logger = logging.getLogger("mbo.arrays.isoview.consolidate")
+    cons_logger.setLevel(logging.INFO)
+    sources: list[logging.Handler] = list(worker_logger.handlers)
+    for h in logging.getLogger("mbo").handlers:
+        if h not in sources:
+            sources.append(h)
+    for h in sources:
+        if h not in cons_logger.handlers:
+            cons_logger.addHandler(h)
+
+
+def task_isoview(args: dict, logger: logging.Logger) -> None:
+    """Isoview consolidator pipeline task.
+
+    Calls ``consolidate_isoview`` and forwards its per-stage progress
+    to ``TaskMonitor`` via a stage-weighted mapping. The consolidator's
+    progress callback fires with ``(stage, current, total)`` per
+    ``(t, c)`` slab written; we bucket the stage into one of four
+    weight slots so the bar moves smoothly across the whole run
+    instead of resetting at every level/subgroup transition.
+    """
+    from mbo_utilities.arrays.isoview import consolidate_isoview
+
+    _bridge_consolidate_logging(logger)
+
+    monitor = TaskMonitor(
+        args.get("output_path", "."), uuid=args.get("_uuid")
+    )
+    monitor.update(0.01, "Initializing isoview consolidator...")
+
+    input_path = args["input_path"]
+    output_path = args["output_path"]
+    kind = args.get("kind")
+    overwrite = bool(args.get("overwrite", False))
+    pyramid = bool(args.get("pyramid", True))
+    pyramid_max_layers = int(args.get("pyramid_max_layers", 4))
+    compressor = args.get("compressor", "zstd")
+    compression_level = int(args.get("compression_level", 3))
+
+    logger.info(f"consolidate: input={input_path}")
+    logger.info(f"consolidate: output={output_path}")
+    logger.info(
+        f"consolidate: kind={kind or 'auto'} overwrite={overwrite} "
+        f"pyramid={pyramid} max_levels={pyramid_max_layers} "
+        f"codec={compressor}@{compression_level}"
+    )
+
+    # Stage-weight budget. Numbers reflect empirical timing on the
+    # 61-timepoint corrected demo (image: ~90s × 4 levels = 360s,
+    # seg: ~60s × 4 levels = 240s, projections: ~30s × 3 axes × 4
+    # levels = 360s, aux + misc: ~30s). Normalized to sum to 1.0.
+    stage_weights = {
+        "image": 0.40,
+        "seg": 0.15,
+        "proj": 0.30,
+        "aux": 0.10,
+    }
+    stage_weights["misc"] = 1.0 - sum(stage_weights.values())
+
+    def _classify(stage: str) -> str:
+        stem = stage.split("_", 1)[0]
+        if stem == "image":
+            return "image"
+        if stem == "seg":
+            return "seg"
+        if stem in ("max", "raw"):
+            return "proj"
+        if stem == "aux":
+            return "aux"
+        return "misc"
+
+    # Track cumulative budget consumed by completed stages so the bar
+    # never goes backward when a new stage starts.
+    consumed: dict[str, float] = {k: 0.0 for k in stage_weights}
+    bucket_done: dict[str, set[str]] = {k: set() for k in stage_weights}
+    seen_stages: set[str] = set()
+
+    def cb(stage: str, current: int, total: int) -> None:
+        if total <= 0:
+            return
+        # First sighting of this sub-stage → one INFO line so the user
+        # sees the pipeline moving. Per-(t,c) progress within a stage
+        # would spam the log; the TaskMonitor still gets every update.
+        if stage not in seen_stages:
+            seen_stages.add(stage)
+            logger.info(f"consolidate: stage '{stage}' starting (total={total})")
+        bucket = _classify(stage)
+        weight = stage_weights[bucket]
+        # consolidator fires many sub-stages per bucket (e.g. image_l0,
+        # image_l1, image_l2, image_l3 all map to "image"). Split the
+        # bucket's weight evenly across the sub-stages we've seen so far.
+        bucket_done[bucket].add(stage)
+        n_substages = max(1, len(bucket_done[bucket]))
+        substage_weight = weight / n_substages
+        substage_frac = current / total
+        # consumed for this bucket: every prior sub-stage in this bucket
+        # is treated as fully done (1.0); current sub-stage at substage_frac.
+        bucket_consumed = (
+            (len(bucket_done[bucket]) - 1) * substage_weight
+            + substage_frac * substage_weight
+        )
+        consumed[bucket] = max(consumed[bucket], bucket_consumed)
+        total_frac = sum(consumed.values())
+        # cap at 0.99 — actual finalize() pushes to 1.0 on success.
+        monitor.update(min(total_frac, 0.99), f"{stage}: {current}/{total}")
+
+    try:
+        out = consolidate_isoview(
+            input_path,
+            output_path,
+            kind=kind,
+            overwrite=overwrite,
+            pyramid=pyramid,
+            pyramid_max_layers=pyramid_max_layers,
+            compressor=compressor,
+            compression_level=compression_level,
+            progress_callback=cb,
+        )
+        monitor.finish(f"Wrote {out}")
+        logger.info(f"isoview consolidator wrote {out}")
+    except Exception as e:
+        monitor.fail(str(e), details={"traceback": traceback.format_exc()})
+        logger.exception(f"isoview consolidator failed: {e}")
+        raise
+
+
+def _build_isoview_processing_config(args: dict):
+    """Assemble an :class:`isoview.ProcessingConfig` from a task args dict.
+
+    Only forwards keys the user explicitly set — everything else falls
+    through to ProcessingConfig's own defaults (which themselves get
+    further refined by ``update_from_metadata`` once the XML is read
+    inside the pipeline). Path-typed fields are coerced to ``Path``.
+    """
+    from isoview import ProcessingConfig
+
+    config_kwargs: dict = {}
+
+    # required: input_dir always provided by the widget
+    config_kwargs["input_dir"] = Path(args["input_path"])
+    if args.get("output_dir"):
+        config_kwargs["output_dir"] = Path(args["output_dir"])
+
+    # plain pass-throughs — keep keys only when the widget supplied them
+    for key in (
+        "corrected_suffix",
+        "fused_suffix",
+        "stitcher_suffix",
+        "output_format",
+        "compression",
+        "compression_level",
+        "overwrite",
+        "workers",
+        "log",
+        "pyramid",
+        "pyramid_max_layers",
+        "timepoints",
+        "segment_mode",
+        "gauss_kernel",
+        "gauss_sigma",
+        "segment_threshold",
+        "splitting",
+        "apply_segmentation_mask",
+        "background_percentile",
+        "mask_percentile",
+        "subsample_factor",
+        "do_tenengrad",
+        "blending_method",
+        "blending_range",
+        "transition_plane",
+        "flip_z",
+        "flip_horizontal",
+        "flip_vertical",
+        "rotation",
+        "front_flag",
+        "pixel_spacing_z",
+        "detection_objective_mag",
+        "pixel_spacing_camera",
+        "crop_left",
+        "crop_top",
+        "crop_front",
+        "crop_width",
+        "crop_height",
+        "crop_depth",
+    ):
+        val = args.get(key)
+        if val is not None:
+            config_kwargs[key] = val
+
+    # tuple-typed: median_kernel
+    if args.get("median_kernel") is not None:
+        config_kwargs["median_kernel"] = tuple(args["median_kernel"])
+    if args.get("search_offsets_x") is not None:
+        config_kwargs["search_offsets_x"] = tuple(args["search_offsets_x"])
+    if args.get("search_offsets_y") is not None:
+        config_kwargs["search_offsets_y"] = tuple(args["search_offsets_y"])
+
+    return ProcessingConfig(**config_kwargs)
+
+
+class _ForwardingHandler(logging.Handler):
+    """Mirror records to a fixed list of target handlers at our own level.
+
+    Used to bridge the upstream ``isoview`` logger into the worker's
+    log stream without inheriting the upstream's level config. isoview
+    calls ``setup_logging()`` partway through ``multi_fuse`` which
+    flips its logger to DEBUG — without this wrapper, our bridge would
+    silently start emitting every DEBUG record. We forward by calling
+    each target's ``handle`` (not ``emit``) so target-level filters,
+    formatters, and filters apply.
+    """
+
+    def __init__(self, targets: list[logging.Handler], level=logging.INFO):
+        super().__init__(level=level)
+        self._targets = list(targets)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        for h in self._targets:
+            h.handle(record)
+
+
+# Sentinel attribute marking the bridge we install. Per-process; reset
+# implicitly because each worker is a fresh subprocess.
+_ISOVIEW_BRIDGE_ATTR = "_mbo_isoview_bridge"
+
+
+def _bridge_isoview_logging(worker_logger: logging.Logger) -> None:
+    """Forward isoview pipeline logs to the worker's stream + file.
+
+    isoview uses its own top-level ``isoview`` logger; by default only
+    WARNING+ flows to stderr and INFO/DEBUG lands in
+    ``<fused_dir>/<method>/fusion.log`` — which the GUI user can't see
+    in real time. This helper attaches a forwarding
+    handler that mirrors INFO+ records to whatever handlers are on
+    the worker logger (stdout + per-task file), sets ``isoview``'s
+    propagation to ``False`` so nothing double-prints, and is idempotent
+    — only one bridge is installed per process even if both isoview
+    tasks fire (the second call refreshes its target list to pick up
+    any handlers added since).
+    """
+    iso_logger = logging.getLogger("isoview")
+    iso_logger.setLevel(logging.INFO)
+    iso_logger.propagate = False
+
+    # The worker's file handler lives on `mbo.worker`; the stdout sink
+    # lives on the package root `mbo`. Walk both, plus any direct
+    # handlers on the worker logger itself.
+    targets: list[logging.Handler] = []
+    for src in (worker_logger, logging.getLogger("mbo")):
+        for h in src.handlers:
+            if h not in targets:
+                targets.append(h)
+
+    existing = getattr(iso_logger, _ISOVIEW_BRIDGE_ATTR, None)
+    if isinstance(existing, _ForwardingHandler):
+        existing._targets = targets  # refresh target list
+        return
+
+    bridge = _ForwardingHandler(targets, level=logging.INFO)
+    iso_logger.addHandler(bridge)
+    setattr(iso_logger, _ISOVIEW_BRIDGE_ATTR, bridge)
+
+
+def task_correct_stack(args: dict, logger: logging.Logger) -> None:
+    """IsoView ``correct_stack`` pipeline task.
+
+    Runs the pixel-correction + segmentation + per-camera output stage
+    against raw ``.stack`` data. Mirrors the ``~/repos/isoview/pipeline/
+    correct_stack.py`` example script: assemble a ProcessingConfig from
+    the args dict, call ``isoview.correct_stack(config)``.
+
+    Progress: coarse — the upstream ``correct_stack`` has no progress
+    callback hook, so the TaskMonitor only flips
+    ``initializing`` → ``running`` → ``completed/failed``. The per-camera
+    detail lands in the per-process log file (``~/.mbo/logs/...``).
+    """
+    from isoview import correct_stack
+
+    _bridge_isoview_logging(logger)
+
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
+    monitor.update(0.01, "Initializing correct_stack...")
+
+    try:
+        config = _build_isoview_processing_config(args)
+        logger.info(
+            f"correct_stack: input={config.input_dir}, "
+            f"output={config.output_dir}, format={config.output_format}, "
+            f"workers={config.workers}, segment_mode={config.segment_mode}"
+        )
+        logger.info(
+            f"isoview per-run log: {config.output_dir}/correct.log "
+            "(fine-grained DEBUG records)"
+        )
+        monitor.update(0.05, "Running correct_stack (see log file for details)...")
+        correct_stack(config)
+        monitor.finish("correct_stack pipeline complete.")
+        logger.info("correct_stack completed successfully")
+    except Exception as e:
+        monitor.fail(str(e), details={"traceback": traceback.format_exc()})
+        logger.exception(f"correct_stack failed: {e}")
+        raise
+
+
+def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
+    """IsoView ``multi_fuse`` pipeline task.
+
+    Runs the camera-pair fusion stage on a corrected output tree.
+    Assembles a ProcessingConfig (same kwargs format as
+    :func:`task_correct_stack`) and calls ``isoview.multi_fuse(config)``.
+    Progress is coarse — same caveat as ``task_correct_stack``: the
+    per-pair detail lives in the log file.
+    """
+    from isoview import multi_fuse
+
+    _bridge_isoview_logging(logger)
+
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
+    monitor.update(0.01, "Initializing multi_fuse...")
+
+    try:
+        config = _build_isoview_processing_config(args)
+        fused_dir = Path(config.fused_dir)
+        fusion_log_path = fused_dir / config.blending_method / "fusion.log"
+        logger.info(
+            f"multi_fuse: input={config.input_dir}, "
+            f"fused_dir={fused_dir}, blending={config.blending_method}, "
+            f"workers={config.workers}"
+        )
+        logger.info(f"isoview per-run log: {fusion_log_path} (DEBUG records)")
+        monitor.update(0.05, "Running multi_fuse (see log file for details)...")
+        multi_fuse(config)
+
+        # Optional folder-suffix rename: the pipeline always writes to
+        # <fused_dir>/<method>/. If the user supplied output_suffix
+        # (e.g. "param-set-1"), move that folder to
+        # <fused_dir>/<method>_<suffix>/ so multiple parameter sweeps
+        # can coexist. Skipped silently when suffix is None/blank or
+        # the source folder is missing (e.g. all tiles were skipped).
+        suffix = args.get("output_suffix")
+        if suffix:
+            src = fused_dir / config.blending_method
+            dst = fused_dir / f"{config.blending_method}_{suffix}"
+            if src.is_dir():
+                if dst.exists():
+                    logger.warning(
+                        f"output_suffix rename: destination already exists, "
+                        f"leaving source in place: {dst}"
+                    )
+                else:
+                    src.rename(dst)
+                    logger.info(f"renamed fused output: {src.name} -> {dst.name}")
+
+        monitor.finish("multi_fuse pipeline complete.")
+        logger.info("multi_fuse completed successfully")
+    except Exception as e:
+        monitor.fail(str(e), details={"traceback": traceback.format_exc()})
+        logger.exception(f"multi_fuse failed: {e}")
+        raise
+
+
+def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
+    """IsoView ``generate_bigstitcher_xml`` export task.
+
+    Walks ``config.fused_dir`` for VW00/VW90 pairs and writes one BDV
+    SpimData dataset per fusion method under ``config.stitcher_dir``.
+    No resampling — the VW90 pre-rotation is baked into the calibration
+    affine that BigStitcher applies at display time.
+
+    Reuses the shared isoview ProcessingConfig builder + log bridge so
+    the same path resolution and per-run log routing as correct_stack /
+    multi_fuse apply.
+    """
+    from isoview import generate_bigstitcher_xml
+
+    _bridge_isoview_logging(logger)
+
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
+    monitor.update(0.01, "Initializing generate_bigstitcher_xml...")
+
+    try:
+        config = _build_isoview_processing_config(args)
+        logger.info(
+            f"generate_bigstitcher_xml: input={config.input_dir}, "
+            f"fused_dir={config.fused_dir}, "
+            f"stitcher_dir={config.stitcher_dir}"
+        )
+        monitor.update(0.05, "Writing BDV zarr + dataset.xml...")
+        xml_path = generate_bigstitcher_xml(
+            config,
+            method=args.get("method"),
+            coarse_align=args.get("coarse_align", False),
+        )
+        logger.info(f"  wrote: {xml_path}")
+        monitor.finish(f"generate_bigstitcher_xml complete: {xml_path}")
+        logger.info("generate_bigstitcher_xml completed successfully")
+    except Exception as e:
+        monitor.fail(str(e), details={"traceback": traceback.format_exc()})
+        logger.exception(f"generate_bigstitcher_xml failed: {e}")
+        raise
+
+
+# bigstitcher-spark command → main class for `java -cp <jar> <class>` invocation.
+# The fat JAR built by `mvn -P fatjar` has no Main-Class in its manifest, so
+# we dispatch by classname instead.
+_SPARK_COMMAND_CLASSES = {
+    "detect-interestpoints": "net.preibisch.bigstitcher.spark.SparkInterestPointDetection",
+    "match-interestpoints": "net.preibisch.bigstitcher.spark.SparkGeometricDescriptorMatching",
+    "solver": "net.preibisch.bigstitcher.spark.Solver",
+    "resave": "net.preibisch.bigstitcher.spark.SparkResaveN5",
+    "stitching": "net.preibisch.bigstitcher.spark.SparkPairwiseStitching",
+    "affine-fusion": "net.preibisch.bigstitcher.spark.SparkAffineFusion",
+    "nonrigid-fusion": "net.preibisch.bigstitcher.spark.SparkNonRigidFusion",
+    "create-fusion-container": "net.preibisch.bigstitcher.spark.CreateFusionContainer",
+    "downsample": "net.preibisch.bigstitcher.spark.SparkDownsample",
+}
+
+
+def _resolve_spark_executable(
+    spark_root: Path,
+    command: str,
+    java_home: str | None = None,
+) -> list[str]:
+    """Resolve a bigstitcher-spark CLI command into a runnable argv prefix.
+
+    ``spark_root`` may point at either:
+    - A directory containing the executable wrapper scripts produced by
+      bigstitcher-spark's ``./install`` step.
+    - A fat JAR built with ``mvn -P fatjar``. The JAR is invoked via
+      ``java -cp <jar> <main-class>`` because the shaded manifest has
+      no Main-Class entry.
+
+    ``java_home`` overrides which JDK is used in fat-JAR mode. Required
+    when the system default Java is incompatible (Spark 3.3.x needs
+    Java 8–17; Java 21+ fails at runtime).
+    """
+    candidates = [
+        spark_root / command,
+        spark_root / f"{command}.bat",
+        spark_root / f"{command}.cmd",
+        spark_root / f"{command}.sh",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return [str(p)]
+
+    if spark_root.is_file() and spark_root.suffix.lower() == ".jar":
+        main_class = _SPARK_COMMAND_CLASSES.get(command)
+        if main_class is None:
+            raise ValueError(
+                f"unknown bigstitcher-spark command: {command!r}. "
+                f"Known: {sorted(_SPARK_COMMAND_CLASSES)}"
+            )
+        if java_home:
+            java_exe = Path(java_home) / "bin" / "java.exe"
+            if not java_exe.is_file():
+                java_exe = Path(java_home) / "bin" / "java"
+            java = str(java_exe)
+        else:
+            import shutil as _shutil
+            java = _shutil.which("java") or "java"
+        return [java, "-cp", str(spark_root), main_class]
+
+    raise FileNotFoundError(
+        f"could not resolve bigstitcher-spark command {command!r} under {spark_root}. "
+        f"Expected an executable script (e.g. {command}, {command}.bat) "
+        f"or a fat JAR file."
+    )
+
+
+def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
+    """Run bigstitcher-spark's detect → match → solver pipeline.
+
+    Mutates the dataset.xml in place, adding interest-point detections,
+    pairwise matches, and the solved per-view ViewTransforms.
+
+    Required args:
+      - xml_path: path to dataset.xml
+      - spark_root: path to bigstitcher-spark executables dir OR fat JAR
+
+    Optional args (with sensible defaults for beads/precise descriptor):
+      - label: interest point label (default "beads")
+      - sigma: DoG sigma (default 1.8)
+      - threshold: DoG threshold (default 0.008)
+      - downsample_xy: -dsxy (default 2)
+      - downsample_z: -dsz (default 1)
+      - min_intensity / max_intensity: normalization range (default 0/65535)
+      - match_algorithm: -m (default PRECISE_TRANSLATION)
+      - transformation_model: -tm (default AFFINE)
+      - regularization_model: -rm (default RIGID)
+      - lambda_reg: --lambda (default 0.1)
+      - view_registration_scope: -vr (default ALL_AGAINST_ALL)
+      - ransac_min_inliers: -rmni (default 4; bigstitcher default 12 is too
+        strict for sparse-overlap bead datasets like orthogonal isoview)
+      - ransac_max_error: -rme (default 5.0 px)
+      - clear_correspondences: bool (default True)
+    """
+    import subprocess
+
+    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
+    monitor.update(0.01, "Initializing bigstitcher-spark...")
+
+    xml_path = Path(args["xml_path"]).resolve()
+    if not xml_path.is_file():
+        raise FileNotFoundError(f"dataset.xml not found: {xml_path}")
+    # BigStitcher-Spark's URITools rejects "D:/..." as ambiguous with a
+    # URI scheme. Pass an explicit file URI so Windows drive paths parse
+    # cleanly regardless of slash direction.
+    xml_arg = xml_path.as_uri()
+
+    spark_root = Path(args["spark_root"]).resolve()
+    if not spark_root.exists():
+        raise FileNotFoundError(f"spark_root does not exist: {spark_root}")
+
+    label = str(args.get("label", "beads"))
+    sigma = float(args.get("sigma", 1.8))
+    threshold = float(args.get("threshold", 0.008))
+    dsxy = int(args.get("downsample_xy", 2))
+    dsz = int(args.get("downsample_z", 1))
+    min_intensity = float(args.get("min_intensity", 0))
+    max_intensity = float(args.get("max_intensity", 65535))
+    match_algorithm = str(args.get("match_algorithm", "PRECISE_TRANSLATION"))
+    transformation_model = str(args.get("transformation_model", "AFFINE"))
+    regularization_model = str(args.get("regularization_model", "RIGID"))
+    lambda_reg = float(args.get("lambda_reg", 0.1))
+    view_registration_scope = str(
+        args.get("view_registration_scope", "ALL_AGAINST_ALL")
+    )
+    ransac_min_inliers = int(args.get("ransac_min_inliers", 4))
+    ransac_max_error = float(args.get("ransac_max_error", 5.0))
+    clear_correspondences = bool(args.get("clear_correspondences", True))
+    verbose = bool(args.get("verbose", False))
+    java_home = args.get("java_home") or None
+    # JVM/Spark flags for standalone (non-spark-submit) execution.
+    # Mirrors what BigStitcher-Spark's install script bakes into its
+    # wrapper executables: `-Xmx<N>g -Dspark.master=local[N]`.
+    spark_threads = int(args.get("spark_threads", max(2, (os.cpu_count() or 4) // 2)))
+    spark_memory_gb = int(args.get("spark_memory_gb", 8))
+
+    def _inject_jvm_args(argv: list[str]) -> list[str]:
+        # Only inject when invoking via `java -cp …`; leave script-mode
+        # invocations alone (their wrappers set these themselves).
+        if len(argv) >= 3 and argv[1] == "-cp" and argv[0].lower().endswith(
+            ("java", "java.exe")
+        ):
+            return [
+                argv[0],
+                f"-Xmx{spark_memory_gb}g",
+                f"-Dspark.master=local[{spark_threads}]",
+                *argv[1:],
+            ]
+        return argv
+
+    # Lines worth keeping from spark stdout: summary counts, per-pair match
+    # outcomes, solved transforms, and error/exception traces. Everything else
+    # (per-job DoG progress, spark log4j chatter, JVM illegal-access warnings,
+    # progress bars, etc) is dropped unless verbose=True.
+    _keep_stdout = re.compile(
+        r"Saved xml"
+        r"|^Done\b"
+        r"|Total number of"
+        r"|Transformation Models:"
+        r"|^tpId=\d+ setupId=\d+: (\d+$|\()"
+        r"|Computed all interest points, statistics:"
+        r"|Defined pairs"
+        r"|Identified \d+ subset"
+        r"|Pairwise model"
+        r"|In total[: ]"
+        r"|NO Model found"
+        r"|No corresponding points"
+        r"|: Model found"
+        r"|(Avg|Min|Max) Error:"
+        r"|prealigned all tiles"
+        r"|Global optimization"
+        r"|Total number of jobs for"
+        r"|Removed \d+ pairs because"
+        r"|Exception|Caused by|\bERROR\b|\bError\b"
+    )
+    _stderr_noise = (
+        "Compression 'org.janelia.saalfeldlab.n5.blosc.BloscCompression'",
+        "Using Spark's default log4j",
+        "WARNING: An illegal reflective access",
+        "WARNING: Illegal reflective access",
+        "WARNING: Please consider reporting",
+        "WARNING: Use --illegal-access",
+        "WARNING: All illegal access",
+        "WARNING: sun.reflect.Reflection",
+    )
+
+    def _run(label_step: str, prog: float, argv: list[str]) -> None:
+        logger.info(f"{label_step}:")
+        if verbose:
+            logger.info("  " + " ".join(argv))
+        monitor.update(prog, f"BigStitcher-Spark: {label_step}")
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, check=False,
+        )
+        failed = proc.returncode != 0
+        if proc.stdout:
+            for line in proc.stdout.splitlines():
+                if verbose or failed or _keep_stdout.search(line):
+                    logger.info(f"  [stdout] {line}")
+        if proc.stderr:
+            for line in proc.stderr.splitlines():
+                if verbose or failed or not any(
+                    n in line for n in _stderr_noise
+                ):
+                    logger.info(f"  [stderr] {line}")
+        if failed:
+            raise RuntimeError(
+                f"{label_step} failed with exit code {proc.returncode}; "
+                f"see worker log for stdout/stderr"
+            )
+
+    # 1. detect-interestpoints
+    detect_argv = _inject_jvm_args(
+        _resolve_spark_executable(spark_root, "detect-interestpoints", java_home)
+    ) + [
+        "-x", xml_arg,
+        "-l", label,
+        "-s", str(sigma),
+        "-t", str(threshold),
+        "-dsxy", str(dsxy),
+        "-dsz", str(dsz),
+        "--minIntensity", str(min_intensity),
+        "--maxIntensity", str(max_intensity),
+    ]
+    _run("detect-interestpoints", 0.1, detect_argv)
+
+    # 2. match-interestpoints
+    match_argv = _inject_jvm_args(
+        _resolve_spark_executable(spark_root, "match-interestpoints", java_home)
+    ) + [
+        "-x", xml_arg,
+        "-l", label,
+        "-m", match_algorithm,
+        "-tm", transformation_model,
+        "-rm", regularization_model,
+        "--lambda", str(lambda_reg),
+        "-vr", view_registration_scope,
+        "-rmni", str(ransac_min_inliers),
+        "-rme", str(ransac_max_error),
+    ]
+    if clear_correspondences:
+        match_argv.append("--clearCorrespondences")
+    _run("match-interestpoints", 0.5, match_argv)
+
+    # 3. solver
+    solver_argv = _inject_jvm_args(
+        _resolve_spark_executable(spark_root, "solver", java_home)
+    ) + [
+        "-x", xml_arg,
+        "-s", "IP",
+        "-l", label,
+        "-tm", transformation_model,
+        "-rm", regularization_model,
+        "--lambda", str(lambda_reg),
+    ]
+    _run("solver", 0.85, solver_argv)
+
+    monitor.finish(f"BigStitcher registration complete: {xml_path}")
+    logger.info(f"BigStitcher registration completed; XML updated: {xml_path}")
+
+
 # Registry
 TASKS = {
     "save_as": task_save_as,
-    "suite2p": task_suite2p
+    "suite2p": task_suite2p,
+    "isoview": task_isoview,
+    "isoview_correct": task_correct_stack,
+    "isoview_fuse": task_multi_fuse,
+    "isoview_bigstitcher": task_generate_bigstitcher,
+    "isoview_bigstitcher_register": task_bigstitcher_register,
 }

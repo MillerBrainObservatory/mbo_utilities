@@ -12,6 +12,10 @@ from mbo_utilities.preferences import (
     get_default_open_dir,
     set_last_dir,
     add_recent_file,
+    get_gpu_index,
+    set_gpu_index,
+    get_debug_logging,
+    set_debug_logging,
 )
 from mbo_utilities.install import check_installation, cupy_install_hint, Status
 
@@ -108,6 +112,33 @@ def pop_button_style():
     imgui.pop_style_color(4)
 
 
+# Tooltips and copy in this dialog must respect the dialog's 340 px width.
+# wrapped_tooltip() does NOT auto-wrap, so anything longer than a few
+# words runs off the side of the screen on this layout. The helpers below
+# always wrap to ~30 em (roughly the dialog width minus margins).
+_TOOLTIP_WRAP_EM = 24.0
+
+
+def wrapped_tooltip(text: str, wrap_em: float = _TOOLTIP_WRAP_EM) -> None:
+    """Tooltip whose text wraps to ``wrap_em`` em units wide."""
+    imgui.begin_tooltip()
+    try:
+        imgui.push_text_wrap_pos(hello_imgui.em_size(wrap_em))
+        imgui.text_unformatted(text)
+        imgui.pop_text_wrap_pos()
+    finally:
+        imgui.end_tooltip()
+
+
+def text_wrapped_colored(color: imgui.ImVec4, text: str) -> None:
+    """Colored equivalent of imgui.text_wrapped()."""
+    imgui.push_style_color(imgui.Col_.text, color)
+    try:
+        imgui.text_wrapped(text)
+    finally:
+        imgui.pop_style_color()
+
+
 def icon_button(icon: str, label: str, size: imgui.ImVec2, tooltip: str = "") -> bool:
     """
     Draw a styled icon button with MBO theme.
@@ -143,9 +174,9 @@ def icon_button(icon: str, label: str, size: imgui.ImVec2, tooltip: str = "") ->
     button_text = f"{icon}  {label}"
     clicked = imgui.button(button_text, size)
 
-    # Show tooltip on hover
+    # Show tooltip on hover (wrapped so it fits the dialog width)
     if tooltip and imgui.is_item_hovered():
-        imgui.set_tooltip(tooltip)
+        wrapped_tooltip(tooltip)
 
     imgui.pop_style_var(2)
     imgui.pop_style_color(5)
@@ -172,8 +203,105 @@ class FileDialog:
         self.gui_modes = ["Fastplotlib viewer (default)", "Napari viewer"]
         self.selected_mode_index = 0
 
+        # GPU adapter selection. -1 == wgpu auto-pick; otherwise an index
+        # into self._gpu_adapter_labels. Lazily populated on first render
+        # so importing FileDialog doesn't force fastplotlib import.
+        self._gpu_adapters = None  # list[wgpu adapter]
+        self._gpu_adapter_labels: list[str] = []
+        # Seed from persisted preferences so re-opens remember the user's choice.
+        self.selected_gpu_index: int = get_gpu_index()
+        self.debug_logging: bool = get_debug_logging()
+        self._show_options_popup: bool = False
+
         # start dependency check immediately in background
         self._start_dependency_check()
+
+    def _ensure_gpu_list(self) -> None:
+        """Read the pre-warmed adapter cache. NEVER call
+        ``fpl.enumerate_adapters()`` from here — it initializes wgpu,
+        which clobbers GLFW's WGL current-context (Glfw Error 65544)
+        and makes the host window flicker. The cache is primed in
+        ``_run_gui_impl`` before ``immapp.run`` takes over the GL
+        context.
+        """
+        if self._gpu_adapters is not None:
+            return
+        from mbo_utilities.gui._gpu_cache import get_adapters
+        self._gpu_adapters = list(get_adapters())
+        labels = ["auto (default)"]
+        for i, a in enumerate(self._gpu_adapters):
+            info = getattr(a, "info", {}) or {}
+            name = info.get("device", info.get("description", f"adapter {i}"))
+            type_ = info.get("adapter_type", info.get("device_type", "?"))
+            labels.append(f"{i}: {name} [{type_}]")
+        self._gpu_adapter_labels = labels
+
+    def _draw_options_popup(self) -> None:
+        """Modal popup: GPU adapter selector + debug logging flag.
+
+        Both settings are persisted to ~/.mbo/settings/preferences.json on
+        change so the choice survives restarts.
+        """
+        if self._show_options_popup:
+            imgui.open_popup("##options_popup")
+            self._show_options_popup = False
+
+        popup_flags = imgui.WindowFlags_.always_auto_resize
+        if not imgui.begin_popup("##options_popup", popup_flags):
+            return
+
+        try:
+            imgui.text_colored(COL_ACCENT, f"{fa.ICON_FA_GEARS}  Options")
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            self._ensure_gpu_list()
+
+            imgui.text_colored(COL_TEXT_DIM, "GPU adapter")
+            if imgui.is_item_hovered():
+                wrapped_tooltip(
+                    "Pick which GPU to render with. 'auto' lets wgpu "
+                    "choose (usually the DiscreteGPU). Takes effect on "
+                    "the next dataset you open."
+                )
+            imgui.set_next_item_width(hello_imgui.em_size(20))
+            ui_idx = self.selected_gpu_index + 1  # 0 == "auto"
+            changed, new_ui_idx = imgui.combo(
+                "##gpu_adapter", ui_idx, self._gpu_adapter_labels
+            )
+            if changed:
+                self.selected_gpu_index = new_ui_idx - 1
+                set_gpu_index(self.selected_gpu_index)
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            imgui.separator()
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
+
+            changed, new_debug = imgui.checkbox("Debug logging", self.debug_logging)
+            if imgui.is_item_hovered():
+                wrapped_tooltip(
+                    "Verbose console logs (per-read timings, zarr chunk "
+                    "shapes, etc.). Same effect as launching with "
+                    "MBO_DEBUG=1."
+                )
+            if changed:
+                self.debug_logging = new_debug
+                set_debug_logging(self.debug_logging)
+                # Apply immediately so the dialog itself sees the new level.
+                try:
+                    import logging
+                    from mbo_utilities import log as _mbo_log
+                    _mbo_log.set_global_level(
+                        logging.DEBUG if self.debug_logging else logging.INFO
+                    )
+                except Exception:
+                    pass
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+            if imgui.button("Close", imgui.ImVec2(hello_imgui.em_size(6), 0)):
+                imgui.close_current_popup()
+        finally:
+            imgui.end_popup()
 
     @property
     def widget_enabled(self):
@@ -242,7 +370,7 @@ class FileDialog:
 
         # not installed
         if pipeline is None or pipeline.status == Status.MISSING:
-            imgui.text_colored(COL_NA, f"{name} - not installed")
+            text_wrapped_colored(COL_NA, f"{name} - not installed")
             return
 
         # build the line: "Suite2p - PyTorch v2.1.0 (GPU)"
@@ -270,13 +398,13 @@ class FileDialog:
 
         line = " ".join(parts)
 
-        # color based on status
+        # color based on status (wrapped so long dep chains stay in-bounds)
         if pipeline.status == Status.OK:
-            imgui.text_colored(COL_OK, line)
+            text_wrapped_colored(COL_OK, line)
         elif pipeline.status == Status.WARN:
-            imgui.text_colored(COL_WARN, line)
+            text_wrapped_colored(COL_WARN, line)
         else:
-            imgui.text_colored(COL_ERR, line)
+            text_wrapped_colored(COL_ERR, line)
 
         # tooltip with detailed info
         if imgui.is_item_hovered():
@@ -288,7 +416,7 @@ class FileDialog:
                 if feat and feat.message:
                     tooltip_parts.append(f"{req_name}: {feat.message}")
             if tooltip_parts:
-                imgui.set_tooltip("\n".join(tooltip_parts))
+                wrapped_tooltip("\n".join(tooltip_parts))
 
     def _draw_formats_card_content(self):
         """Draw supported formats - always shown immediately."""
@@ -306,7 +434,7 @@ class FileDialog:
             webbrowser.open("https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html")
         pop_button_style()
         if imgui.is_item_hovered():
-            imgui.set_tooltip("Open documentation in browser")
+            wrapped_tooltip("Open documentation in browser")
 
         imgui.dummy(hello_imgui.em_to_vec2(0, 0.1))
 
@@ -381,7 +509,7 @@ class FileDialog:
             pop_button_style()
 
             if imgui.is_item_hovered():
-                imgui.set_tooltip("Click for details")
+                wrapped_tooltip("Click for details")
 
         # popup with full dependency info
         if self._show_deps_popup:
@@ -416,29 +544,30 @@ class FileDialog:
                 hint = cupy_install_hint(driver_cuda)
                 imgui.indent(hello_imgui.em_size(0.6))
                 imgui.text_colored(COL_TEXT_DIM, "Common fix:")
-                imgui.same_line()
-                imgui.text_colored(COL_ACCENT, hint)
-                imgui.same_line()
+                # Hint is a `uv pip install cupy-cudaXXx` command that can
+                # easily exceed the dialog width; put it on its own line
+                # and let it wrap rather than running off the right edge.
+                text_wrapped_colored(COL_ACCENT, hint)
                 push_button_style(primary=False)
-                if imgui.small_button(f"{fa.ICON_FA_COPY}##cupy_hint"):
+                if imgui.small_button(f"{fa.ICON_FA_COPY}  Copy##cupy_hint"):
                     imgui.set_clipboard_text(hint)
                 pop_button_style()
                 if imgui.is_item_hovered():
-                    imgui.set_tooltip("Copy command to clipboard")
+                    wrapped_tooltip("Copy command to clipboard")
                 if cupy_feat is not None and cupy_feat.message:
-                    imgui.text_colored(COL_TEXT_DIM, cupy_feat.message)
+                    text_wrapped_colored(COL_TEXT_DIM, cupy_feat.message)
                 imgui.unindent(hello_imgui.em_size(0.6))
 
             # rastermap
             rastermap = self._get_feature("Rastermap")
             if rastermap is None or rastermap.status == Status.MISSING:
-                imgui.text_colored(COL_NA, "Rastermap - not installed")
+                text_wrapped_colored(COL_NA, "Rastermap - not installed")
             else:
                 ver = f" v{rastermap.version}" if rastermap.version and rastermap.version != "installed" else ""
                 if rastermap.status == Status.OK:
-                    imgui.text_colored(COL_OK, f"Rastermap{ver}")
+                    text_wrapped_colored(COL_OK, f"Rastermap{ver}")
                 else:
-                    imgui.text_colored(COL_WARN, f"Rastermap{ver}")
+                    text_wrapped_colored(COL_WARN, f"Rastermap{ver}")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
             imgui.end_popup()
@@ -502,7 +631,7 @@ class FileDialog:
                 self.gui_modes
             )
             if imgui.is_item_hovered():
-                imgui.set_tooltip(f"Select Application: {self.gui_modes[self.selected_mode_index]}")
+                wrapped_tooltip(f"Select Application: {self.gui_modes[self.selected_mode_index]}")
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.2))
 
@@ -559,6 +688,10 @@ class FileDialog:
             imgui.pop_style_var(2)
             imgui.pop_style_color()
 
+            # Options popup is drawn here but only renders when opened
+            # via the button on the bottom row.
+            self._draw_options_popup()
+
             # file/folder completion
             if self._open_multi and self._open_multi.ready():
                 self.selected_path = self._open_multi.result()
@@ -578,13 +711,23 @@ class FileDialog:
                     hello_imgui.get_runner_params().app_shall_exit = True
                 self._select_folder = None
 
-            # quit button (centered)
+            # Options + Quit on a centered row so both remain visible
+            # regardless of how tall the formats card grew.
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
-            qsz = imgui.ImVec2(hello_imgui.em_size(6), hello_imgui.em_size(1.5))
-            self._center_widget(qsz.x)
-            # Quit uses secondary style (gray bg, no border)
+            opt_w = hello_imgui.em_size(7)
+            quit_w = hello_imgui.em_size(6)
+            spacing = imgui.get_style().item_spacing.x
+            row_w = opt_w + quit_w + spacing
+            self._center_widget(row_w)
+            btn_h = hello_imgui.em_size(1.5)
+            # Options uses secondary style for visual parity with Quit
             push_button_style(primary=False)
-            if imgui.button(f"{fa.ICON_FA_XMARK}  Quit", qsz) or imgui.is_key_pressed(imgui.Key.escape):
+            if imgui.button(f"{fa.ICON_FA_GEARS}  Options", imgui.ImVec2(opt_w, btn_h)):
+                self._show_options_popup = True
+            if imgui.is_item_hovered():
+                wrapped_tooltip("GPU adapter, debug logging, and other settings")
+            imgui.same_line()
+            if imgui.button(f"{fa.ICON_FA_XMARK}  Quit", imgui.ImVec2(quit_w, btn_h)) or imgui.is_key_pressed(imgui.Key.escape):
                 self.selected_path = None
                 hello_imgui.get_runner_params().app_shall_exit = True
             pop_button_style()

@@ -89,6 +89,7 @@ if TYPE_CHECKING:
     from mbo_utilities.arrays.h5 import H5Array as H5Array
     from mbo_utilities.arrays.isoview import (
         IsoviewArray as IsoviewArray,
+        consolidate_isoview as consolidate_isoview,
         detect_isoview_kind as detect_isoview_kind,
         isoview_to_ome_zarr as isoview_to_ome_zarr,
     )
@@ -131,6 +132,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ZarrArray": (".zarr", "ZarrArray"),
     "BinArray": (".bin", "BinArray"),
     "IsoviewArray": (".isoview", "IsoviewArray"),
+    "consolidate_isoview": (".isoview", "consolidate_isoview"),
     "detect_isoview_kind": (".isoview", "detect_isoview_kind"),
     "isoview_to_ome_zarr": (".isoview", "isoview_to_ome_zarr"),
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
@@ -191,6 +193,7 @@ __all__ = [
     "H5Array",
     "ImageJHyperstackArray",
     "IsoviewArray",
+    "consolidate_isoview",
     "detect_isoview_kind",
     "LBMArray",
     "NWBArray",

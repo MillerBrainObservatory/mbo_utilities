@@ -1,10 +1,11 @@
 import json
+import os
 import pathlib
 import threading
 from pathlib import Path
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -17,6 +18,7 @@ from imgui_bundle import (
 )
 
 from mbo_utilities.gui._imgui_helpers import (
+    PopupAutoSize,
     draw_boxed_label,
     set_tooltip,
     settings_row_with_popup,
@@ -47,6 +49,52 @@ _S2P_TITLE_COLOR = imgui.ImVec4(1.0, 0.85, 0.4, 1.0)
 # Classification, Denoise Block, Channel 2). Distinct from
 # _S2P_TITLE_COLOR (main header) and _MBO_ONLY_COLOR (mbo-only group).
 _SUBSECTION_COLOR = imgui.ImVec4(0.55, 0.75, 1.0, 1.0)
+
+# parallel-processing load-status colors. safe = dimmed/default (no
+# explicit color); yellow = fits in logical but exceeds physical cores;
+# red = exceeds logical cores (~10x slowdown on SVD-heavy registration).
+_LOAD_WARN_COLOR = imgui.ImVec4(1.00, 0.85, 0.30, 1.0)
+_LOAD_BAD_COLOR = imgui.ImVec4(1.00, 0.40, 0.40, 1.0)
+
+
+def _detect_physical_cores() -> int:
+    """Best-effort physical-core count. Falls back to os.cpu_count() // 2
+    assuming HT/SMT is enabled (the common case on dev machines)."""
+    try:
+        import psutil  # type: ignore
+        n = psutil.cpu_count(logical=False)
+        if n:
+            return int(n)
+    except Exception:
+        pass
+    cpu = os.cpu_count() or 4
+    return max(1, cpu // 2)
+
+
+def _default_workers() -> int:
+    """Sensible default workers count. Aim for workers*2 (threads default)
+    <= physical_cores so a fresh-install user lands in the green zone."""
+    physical = _detect_physical_cores()
+    return max(1, min(4, physical // 2))
+
+
+def _parallel_load_status(workers: int, threads_per_worker: int) -> tuple:
+    """Return (color_or_None, tooltip) for current workers/threads_per_worker.
+
+    color is None when safe (caller renders the marker dimmed). Yellow when
+    load fits in logical but not physical cores; red when it exceeds logical.
+    """
+    physical = _detect_physical_cores()
+    logical = os.cpu_count() or physical
+    eff_workers = workers if workers > 0 else max(1, physical // 2)
+    eff_threads = threads_per_worker if threads_per_worker > 0 else 1
+    load = eff_workers * eff_threads
+
+    if load <= physical:
+        return None, f"{load} threads on {physical} cores"
+    if load <= logical:
+        return _LOAD_WARN_COLOR, f"{load} threads > {physical} physical (borderline)"
+    return _LOAD_BAD_COLOR, f"{load} threads > {logical} logical (oversubscribed)"
 
 
 # "Look at these first" — fields whose label is rendered in a bold font
@@ -96,9 +144,8 @@ def _hi(field: str, value):
 
 @contextmanager
 def _mbo():
-    """Push _MBO_ONLY_COLOR (off-green) around a widget. Use for fields
-    that have no upstream suite2p equivalent so they're visually flagged
-    as mbo-only (cellpose_niter, accept_all_cells, dff_window_size, etc.).
+    """
+    Push _MBO_ONLY_COLOR around a widget.
     """
     imgui.push_style_color(imgui.Col_.text, _MBO_ONLY_COLOR)
     try:
@@ -109,10 +156,8 @@ def _mbo():
 
 @contextmanager
 def _ghost_button():
-    """Material-design-inspired ghost button: a faint white surface tint
-    at rest with a slightly stronger overlay on hover/active. Use for
-    secondary affordances (copy buttons, etc.) so they stay legible
-    without dominating the panel like the default chunky button fill.
+    """
+    Ghost button: a faint white surface tint at rest with a slightly stronger overlay on hover/active.
     """
     imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(1, 1, 1, 0.05))
     imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(1, 1, 1, 0.10))
@@ -1113,6 +1158,19 @@ class MboSuite2pExtras:
     target_timepoints: int = -1
     frames_include: int = -1
 
+    # parallel processing — forwarded to lsp.pipeline(workers=...,
+    # threads_per_worker=..., skip_volumetric=...). workers=1 keeps the
+    # sequential path; 0 or negative means auto = min(num_planes,
+    # cpu_count//2, 8). threads_per_worker caps BLAS / OMP / numba /
+    # torch threads inside each worker so workers*threads doesn't
+    # oversubscribe the CPU (the SVD-heavy registration step balloons
+    # ~10x without this cap). 0 or negative = library defaults.
+    # skip_volumetric drops merge_mrois/volume_stats/volume plots after
+    # the per-plane loop — useful when farming planes across machines.
+    workers: int = field(default_factory=_default_workers)
+    threads_per_worker: int = 2
+    skip_volumetric: bool = False
+
     # gui-only display
     aspect: float = 1.0
 
@@ -1503,7 +1561,14 @@ def _format_size(size_bytes: int | None) -> str:
 def _dataset_size_bytes(self, filenames: list) -> int | None:
     """Sum file sizes for `filenames`, cached on `self` keyed by the
     file-list tuple. We don't poll for on-disk changes since input
-    files are read-only during a run."""
+    files are read-only during a run.
+
+    Handles directory-format containers (``.zarr``, ``.ome.zarr``,
+    suite2p ``ops/stat`` folders) by recursing through their contents.
+    ``Path.stat().st_size`` on a directory only reports the dir entry
+    size (a few KB), which is why a reloaded zarr-backed dataset
+    displayed as "0 B" before this recursion.
+    """
     if not filenames:
         return None
     key = tuple(str(f) for f in filenames)
@@ -1513,7 +1578,22 @@ def _dataset_size_bytes(self, filenames: list) -> int | None:
     total = 0
     for f in filenames:
         try:
-            total += Path(f).stat().st_size
+            p = Path(f)
+            st = p.stat()
+            from stat import S_ISDIR
+            if S_ISDIR(st.st_mode):
+                # rglob("*") doesn't include `p` itself; sum every file
+                # under it. Errors on individual entries (symlinks to
+                # missing targets, permission denied) are skipped.
+                for child in p.rglob("*"):
+                    try:
+                        cst = child.stat()
+                        if not S_ISDIR(cst.st_mode):
+                            total += cst.st_size
+                    except OSError:
+                        continue
+            else:
+                total += st.st_size
         except OSError:
             continue
     self._dataset_size_cache = (key, total)
@@ -1566,7 +1646,9 @@ def _draw_md_field(label: str, value, unit: str = "") -> None:
 
 
 def _draw_dataset_files_popup(
-    filenames: list, frames_per_file: list[int] | None = None
+    filenames: list,
+    frames_per_file: list[int] | None = None,
+    sizer: PopupAutoSize | None = None,
 ) -> None:
     """Modal popup listing each file in concatenation order.
 
@@ -1581,9 +1663,14 @@ def _draw_dataset_files_popup(
     imgui.set_next_window_size_constraints(
         imgui.ImVec2(420, 240), imgui.ImVec2(1600, 1200)
     )
+    _flags = (
+        sizer.flags(imgui.WindowFlags_.no_saved_settings)
+        if sizer is not None
+        else imgui.WindowFlags_.no_saved_settings
+    )
     opened = imgui.begin_popup_modal(
         "Dataset files##current_dataset_files_popup",
-        flags=imgui.WindowFlags_.no_saved_settings,
+        flags=_flags,
     )[0]
     if not opened:
         return
@@ -1744,7 +1831,18 @@ def _draw_current_dataset_section(self) -> None:
     # files button on its own line; size on disk on the next.
     # avoiding same_line() here so neither piece can spill past the right edge.
     n_files = len(filenames)
+    # lazy-init position-only sizer (auto_resize=False — body contains a
+    # negative-fill scrollable child that would collapse under
+    # always_auto_resize).
+    _files_sizer = getattr(self, "_files_popup_sizer", None)
+    if _files_sizer is None:
+        _files_sizer = PopupAutoSize(
+            "Dataset files##current_dataset_files_popup",
+            auto_resize=False,
+        )
+        self._files_popup_sizer = _files_sizer
     if imgui.button(f"Files ({n_files})##current_dataset_files"):
+        _files_sizer.before_open()
         imgui.open_popup("Dataset files##current_dataset_files_popup")
     imgui.text(f"Size on disk: {_format_size(size_bytes)}")
 
@@ -1753,7 +1851,7 @@ def _draw_current_dataset_section(self) -> None:
     fpf = md.get("frames_per_file")
     if not (isinstance(fpf, (list, tuple)) and len(fpf) == n_files):
         fpf = None
-    _draw_dataset_files_popup(filenames, fpf)
+    _draw_dataset_files_popup(filenames, fpf, sizer=_files_sizer)
 
     # shape with bracketed dim labels (e.g. "1024 × 4 × 256 × 256 [T,Z,Y,X]").
     # push wrap_pos so long shape strings wrap rather than clip on narrow panels.
@@ -1826,9 +1924,23 @@ def _draw_section_suite2p_content(self):
     def _hi_extras(name: str, value):
         """Like _hi but for MboSuite2pExtras fields — compares against the
         dataclass default. Tints the widget orange when modified.
+
+        Handles both `default=` and `default_factory=` field specs; the
+        latter is resolved by invoking the factory once.
         """
+        from dataclasses import MISSING
+
         try:
-            default = MboSuite2pExtras.__dataclass_fields__[name].default
+            f = MboSuite2pExtras.__dataclass_fields__[name]
+            if f.default is not MISSING:
+                default = f.default
+            elif f.default_factory is not MISSING:
+                try:
+                    default = f.default_factory()
+                except Exception:
+                    default = None
+            else:
+                default = None
         except KeyError:
             default = None
         push_color = default is not None and value != default
@@ -1971,23 +2083,17 @@ def _draw_section_suite2p_content(self):
     # the popups have been declared). The closures need `_hi`, `_BTN_W`,
     # and `self.s2p` to all be in scope, which they already are.
 
-    # --- Main settings (closure, drawn inside the unified pipeline-settings
-    # popup alongside Registration / ROI Detection / etc.) ---
+    # --- Main settings (closures, drawn inside the unified pipeline-settings
+    # popup as two separate row-1 columns) ---
     #
-    # Layout: two bordered child boxes stacked vertically.
-    #   1. LBM-Suite2p-Python Settings — knobs honored by the lbm pipeline
-    #      (forwarded to lbm_suite2p_python.pipeline / plot_zplane_figures).
-    #   2. Suite2p Main Settings — vanilla suite2p top-level params
-    #      (torch_device, tau, fs).
-    # Each box auto-resizes to its content height.
-    def draw_main_settings():
+    # LBM-Suite2p-Python Settings — knobs honored by the lbm pipeline
+    # (forwarded to lbm_suite2p_python.pipeline / plot_zplane_figures).
+    # Sits as the leftmost column in row 1 of the pipeline-settings popup.
+    def draw_lsp_settings():
         _box_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
 
-        # ============ Box 1: LBM-Suite2p-Python Settings ============
-        # knobs honored by the lbm pipeline (forwarded to
-        # lbm_suite2p_python.pipeline / plot_zplane_figures). title is
-        # green so individual widgets don't need _mbo() tinting; the title
-        # alone signals "this group is mbo/lsp-specific".
+        # title is green so individual widgets don't need _mbo() tinting;
+        # the title alone signals "this group is mbo/lsp-specific".
         imgui.begin_child("##lsp_box", imgui.ImVec2(-1, 0), _box_flags)
         imgui.text_colored(_MBO_ONLY_COLOR, "LBM-Suite2p-Python Settings")
         imgui.spacing()
@@ -2020,6 +2126,46 @@ def _draw_section_suite2p_content(self):
             "Keep every detected ROI regardless of classifier output. "
             "Forwarded to lbm_suite2p_python.pipeline(accept_all_cells=...)."
         )
+
+        imgui.spacing()
+        imgui.spacing()
+
+        # --- Parallel processing ---
+        # Forwarded to lsp.pipeline(workers=..., skip_volumetric=...).
+        # Each worker is a separate Python process; per-plane outputs go
+        # to disjoint subdirectories so no inter-worker contention on
+        # disk. Cellpose on GPU may OOM with workers > 1 — drop workers
+        # or switch cellpose to CPU when that happens.
+        imgui.text_colored(_SUBSECTION_COLOR, "Parallel processing")
+        # (?) load indicator: dimmed when safe, yellow when borderline,
+        # red when oversubscribed (load > logical cores).
+        imgui.same_line()
+        _load_color, _load_tooltip = _parallel_load_status(
+            self.s2p_extras.workers, self.s2p_extras.threads_per_worker
+        )
+        if _load_color is None:
+            imgui.text_disabled("(?)")
+        else:
+            imgui.text_colored(_load_color, "(?)")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(_load_tooltip)
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi_extras("workers", self.s2p_extras.workers):
+            _, self.s2p_extras.workers = imgui.input_int(
+                "Workers", self.s2p_extras.workers
+            )
+        set_tooltip("Zplane worker processes. 1 = sequential, 0 = auto.")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi_extras("threads_per_worker", self.s2p_extras.threads_per_worker):
+            _, self.s2p_extras.threads_per_worker = imgui.input_int(
+                "Threads/worker", self.s2p_extras.threads_per_worker
+            )
+        set_tooltip("BLAS / OMP / torch threads per worker. 0 = library default.")
+        with _hi_extras("skip_volumetric", self.s2p_extras.skip_volumetric):
+            _, self.s2p_extras.skip_volumetric = imgui.checkbox(
+                "Skip volumetric figures", self.s2p_extras.skip_volumetric
+            )
+        set_tooltip("Skip merge, volume_stats, and volume plots.")
 
         imgui.spacing()
         imgui.spacing()
@@ -2324,11 +2470,11 @@ def _draw_section_suite2p_content(self):
         imgui.end_disabled()
         imgui.end_child()  # close LBM box
 
-        imgui.spacing()
-        imgui.spacing()
-
-        # ============ Box 2: Suite2p Main Settings ============
-        # vanilla suite2p top-level params: torch_device, tau, fs.
+    # Suite2p Main Settings — vanilla suite2p top-level params
+    # (torch_device, tau, fs). Sits to the right of LBM-Suite2p-Python
+    # in row 1 of the pipeline-settings popup, above Registration.
+    def draw_main_settings():
+        _box_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
         imgui.begin_child("##s2p_main_box", imgui.ImVec2(-1, 0), _box_flags)
         imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p Main Settings")
         imgui.spacing()
@@ -3213,6 +3359,13 @@ def _draw_section_suite2p_content(self):
     imgui.spacing()
     if imgui.button("Open##data_options_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["data_options"] = True
+        _do_sizer = getattr(self, "_data_options_sizer", None)
+        if _do_sizer is None:
+            _do_sizer = PopupAutoSize(
+                "Data Options##data_options", auto_resize=False
+            )
+            self._data_options_sizer = _do_sizer
+        _do_sizer.before_open()
         imgui.open_popup("Data Options##data_options")
 
     imgui.spacing()
@@ -3257,6 +3410,12 @@ def _draw_section_suite2p_content(self):
     if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
         _popup_states["pipeline_settings"] = True
         self._pipe_settings_just_opened = True
+        # NOTE: before_open() is called in the popup body below, not
+        # here. The modified-params preview between this button and the
+        # popup body uses begin_child(), which internally calls Begin()
+        # and consumes the buffered next-window-pos — so calling
+        # before_open() here loses the top-anchor position. Calling it
+        # right before begin_popup_modal() guarantees consumption order.
         imgui.open_popup("Pipeline Settings##pipeline_settings_popup")
 
     imgui.spacing()
@@ -3423,10 +3582,44 @@ def _draw_section_suite2p_content(self):
     #   upstream's extract_traces (their bug, not ours).
     # - Deconvolution: bool — do_deconvolution gates the OASIS step
     #   cleanly (pipeline_s2p falls through to spks=zeros when False).
+    # Registration column stacks two self-titled bordered boxes:
+    #   Box 1: Suite2p Main Settings (torch device, tau, fs)
+    #   Box 2: Registration (with inline Skip/Run/Force radios on the
+    #          title row, mirroring the popup-level title controls used
+    #          by non-self-titled columns)
+    # The Registration body is wrapped in begin_disabled when do_registration
+    # is Skip (0), matching the disable-on-skip behavior of the popup loop.
+    def draw_main_above_registration():
+        draw_main_settings()
+
+        imgui.spacing()
+        imgui.spacing()
+
+        _box_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.auto_resize_y
+        imgui.begin_child("##s2p_reg_box", imgui.ImVec2(-1, 0), _box_flags)
+        imgui.text_colored(_S2P_TITLE_COLOR, "Registration")
+        _cur_reg = self.s2p.do_registration
+        imgui.same_line()
+        if imgui.radio_button("Skip##do_registration_inner", _cur_reg == 0):
+            self.s2p.do_registration = 0
+        imgui.same_line()
+        if imgui.radio_button("Run##do_registration_inner", _cur_reg == 1):
+            self.s2p.do_registration = 1
+        imgui.same_line()
+        if imgui.radio_button("Force##do_registration_inner", _cur_reg == 2):
+            self.s2p.do_registration = 2
+        imgui.separator()
+        imgui.spacing()
+        _reg_skip = self.s2p.do_registration == 0
+        imgui.begin_disabled(_reg_skip)
+        draw_registration_settings()
+        imgui.end_disabled()
+        imgui.end_child()
+
     rows = [
         [
-            ("Suite2p Main Settings", draw_main_settings, None, None),
-            ("Registration", draw_registration_settings, "tri", "do_registration"),
+            ("LBM-Suite2p-Python", draw_lsp_settings, None, None),
+            ("Registration", draw_main_above_registration, "tri", "do_registration"),
             ("ROI Detection", draw_roi_detection_settings, "tri", "do_detection"),
         ],
         [
@@ -3440,17 +3633,19 @@ def _draw_section_suite2p_content(self):
     # worst-case (longest) labels in each column — used to compute the
     # minimum width that fits the input/checkbox + label + a right-aligned
     # (?) marker without clipping. Add new long labels here if you add
-    # widgets that push past these.
+    # widgets that push past these. The Registration column now also
+    # holds the Suite2p Main box; its "Sampling Rate (Hz)" label is the
+    # widest input across the combined contents.
     _WORST_INPUT_LABEL = {
-        "Suite2p Main Settings": "Min F0 (frac of median)",
-        "Registration": "Smooth Sigma Time",
+        "LBM-Suite2p-Python": "Min F0 (frac of median)",
+        "Registration": "Sampling Rate (Hz)",
         "ROI Detection": "Chan2 Detection Threshold",
         "Classification": "Preclassify threshold",
         "Extraction": "Inner Neuropil Radius",
         "Deconvolution": "Neuropil coefficient",
     }
     _WORST_CHECKBOX_LABEL = {
-        "Suite2p Main Settings": "Parallel plane processing (experimental)",
+        "LBM-Suite2p-Python": "Skip volumetric figures",
         "Registration": "Export Registered TIFF",
         "ROI Detection": "Auto bin size (tau*fs)",
         "Classification": "Use built-in classifier",
@@ -3465,10 +3660,11 @@ def _draw_section_suite2p_content(self):
     }
     # columns whose draw_fn already renders its own title(s) — the popup
     # loop skips the column header + separator for these so the label
-    # doesn't appear twice (e.g. Suite2p Main column draws an inner
-    # bordered "LBM-Suite2p-Python Settings" box and an inner bordered
-    # "Suite2p Main Settings" box, each self-labeled).
-    _SELF_TITLED_COLUMNS = {"Suite2p Main Settings"}
+    # doesn't appear twice, and also skips the inline Skip/Run/Force
+    # radios + disabled-on-skip body wrap (the function manages both).
+    # LBM-Suite2p-Python renders the green-titled lsp box; Registration
+    # stacks Suite2p Main + Registration as two inner bordered boxes.
+    _SELF_TITLED_COLUMNS = {"LBM-Suite2p-Python", "Registration"}
 
     viewport = imgui.get_main_viewport()
     style = imgui.get_style()
@@ -3491,22 +3687,35 @@ def _draw_section_suite2p_content(self):
         title_w = imgui.calc_text_size(title).x
         radios = _TITLE_RADIO_LABELS[mode_kind]
         if radios:
-            # radio button = circle + spacing + label; approx 3 radios
-            n_radios = len(radios.split())
-            radio_label_w = sum(
-                imgui.calc_text_size(lbl).x for lbl in radios.split()
+            # radio button = circle + item_inner_spacing + label, per radio,
+            # then item_spacing between radios.
+            radio_labels = radios.split()
+            n_radios = len(radio_labels)
+            inner_sp = imgui.get_style().item_inner_spacing.x
+            radio_widgets_w = sum(
+                cb_w + inner_sp + imgui.calc_text_size(lbl).x
+                for lbl in radio_labels
             )
             title_row_w = (
                 title_w
                 + spacing_x
-                + radio_label_w
-                + n_radios * (cb_w + spacing_x)  # circle + gap per radio
+                + radio_widgets_w
+                + spacing_x * max(0, n_radios - 1)  # gaps between radios
             )
         else:
             title_row_w = title_w
         # account for child window's inner padding (borders + frame_padding)
         inner_pad = 2 * frame_pad_x
-        return max(body, title_row_w) + inner_pad + 8  # safety margin
+        natural = max(body, title_row_w) + inner_pad + 8  # safety margin
+        # Self-titled columns wrap their content in a SECOND nested
+        # bordered child (LBM -> ##lsp_box; Registration -> ##s2p_main_box
+        # and ##s2p_reg_box). That extra box layer eats another round of
+        # border + frame_padding from the inner usable width, so without
+        # this bump the "Force" radio and right-aligned (?) markers clip
+        # against the inner box's right edge.
+        if title in _SELF_TITLED_COLUMNS:
+            natural += inner_pad + 8
+        return natural
 
     # natural column widths per row — used both for the static popup
     # width below and for the per-column flex-share inside the row loop.
@@ -3526,34 +3735,34 @@ def _draw_section_suite2p_content(self):
     _content_w_static = min(_content_w_static, viewport.size.x * 0.98)
 
     _just_opened = getattr(self, "_pipe_settings_just_opened", False)
-
-    # center on the viewport's true center; pivot (0.5, 0.5) puts the
-    # popup's center at that point. work_center sits below viewport.center
-    # whenever there's chrome at the top, which visibly pushes the popup
-    # downward — use the full viewport center for a true visual center.
-    _vp_center = viewport.get_center()
     _vp_size = viewport.size
 
-    if _just_opened:
-        # open at a generous default — tall enough that expanding row 2's
-        # collapsing headers doesn't immediately produce a scrollbar, and
-        # consistent across opens (no snap-to-fit, no cached small size).
-        _open_h = _vp_size.y * 0.85
-        _open_w = min(_content_w_static, _vp_size.x * 0.98)
-        imgui.set_next_window_size(
-            imgui.ImVec2(_open_w, _open_h),
-            imgui.Cond_.always,
+    # Sizing policy: always_auto_resize lets imgui resize the popup
+    # every frame to fit its content — expanding a row-2 collapsing
+    # header grows the popup, collapsing shrinks it back, no scrollbar.
+    # Lazy-init so reopening across sessions still works if the user
+    # closed the popup via the close button (sizer instance survives).
+    _pipe_sizer: PopupAutoSize = getattr(self, "_pipe_settings_sizer", None)
+    if _pipe_sizer is None:
+        _pipe_sizer = PopupAutoSize(
+            "Pipeline Settings##pipeline_settings_popup"
         )
-        imgui.set_next_window_pos(
-            _vp_center, imgui.Cond_.always, pivot=imgui.ImVec2(0.5, 0.5)
-        )
+        self._pipe_settings_sizer = _pipe_sizer
+    # Position is buffered every frame; Cond_.appearing means only the
+    # frame the popup transitions hidden→visible actually applies it.
+    # Must be called RIGHT before begin_popup_modal so no intervening
+    # Begin/BeginChild consumes the buffered next-window-pos.
+    _pipe_sizer.before_open()
 
+    # Cap the popup at the viewport so a fully-expanded popup on a
+    # small screen still fits. Min width keeps narrow columns readable;
+    # auto-resize will respect both bounds.
     imgui.set_next_window_size_constraints(
         imgui.ImVec2(min(_content_w_static, _vp_size.x * 0.98), 200.0),
         imgui.ImVec2(_vp_size.x * 0.98, _vp_size.y * 0.98),
     )
 
-    _popup_flags = imgui.WindowFlags_.no_saved_settings
+    _popup_flags = _pipe_sizer.flags(imgui.WindowFlags_.no_saved_settings)
 
     opened, visible = imgui.begin_popup_modal(
         "Pipeline Settings##pipeline_settings_popup",
@@ -3630,7 +3839,11 @@ def _draw_section_suite2p_content(self):
                                 )
                                 expanded = True
                             skip_active = False
-                            if mode_kind == "tri":
+                            # self-titled columns render their own radios
+                            # and manage their own disabled state inside
+                            # the draw_fn; skip the popup-level radios so
+                            # the controls don't appear twice.
+                            if mode_kind == "tri" and not self_titled:
                                 cur = getattr(self.s2p, mode_attr)
                                 imgui.same_line()
                                 if imgui.radio_button(
@@ -3650,7 +3863,7 @@ def _draw_section_suite2p_content(self):
                                 skip_active = (
                                     getattr(self.s2p, mode_attr) == 0
                                 )
-                            elif mode_kind == "bool":
+                            elif mode_kind == "bool" and not self_titled:
                                 cur = bool(getattr(self.s2p, mode_attr))
                                 imgui.same_line()
                                 if imgui.radio_button(
@@ -3944,6 +4157,8 @@ def run_process(self):
             # always pass channel for multi-channel source data (5D needs _ChannelView)
             has_channels = getattr(self, "_s2p_last_num_channels", 1) > 1
 
+            plane_list = sorted(selected_planes)
+
             for channel in selected_channels:
                 # per-channel output subdir when multiple channels selected
                 if multi_channel:
@@ -3954,47 +4169,27 @@ def run_process(self):
                 worker_args = {
                     "input_path": input_path,
                     "output_dir": output_dir,
-                    "planes": sorted(selected_planes),
+                    "planes": plane_list,
                     "roi": roi,
                     "num_timepoints": self.s2p_extras.target_timepoints,
-                    # upstream-shaped pair; the subprocess entry point flattens
-                    # these into ops via lbm_suite2p_python.db_settings. `ops`
-                    # is intentionally omitted — settings+db is the canonical
-                    # config path going forward.
                     "settings": self.s2p.to_dict(),
                     "db": self.s2p_db.to_dict(),
                     "fix_phase": self._s2p_fix_phase,
                     "use_fft": self._s2p_use_fft,
                     "channel": channel if (multi_channel or has_channels) else None,
-                    # User-set metadata from the GUI metadata editor
-                    # (lives on parent._custom_metadata, NOT on the source
-                    # file). The worker merges this into ops before
-                    # invoking lbm_suite2p_python.pipeline so the user's
-                    # z_step / dx / dy / fs reach ops.npy.
                     "custom_metadata": dict(getattr(self, "_custom_metadata", {})),
-                    # User's timepoint selection (0-based, full list).
-                    # The subprocess uses this with OutputMetadata to
-                    # reactively scale fs based on the timepoint stride.
                     "tp_indices": (
                         list(self._s2p_tp_parsed.final_indices)
                         if getattr(self, "_s2p_tp_parsed", None) is not None
                         else None
                     ),
-                    # FULL list of selected planes (0-based) — for
-                    # reactive dz scaling via OutputMetadata.
-                    "selected_planes_0based": [p - 1 for p in sorted(selected_planes)],
-                    # axial registration
+                    "selected_planes_0based": [p - 1 for p in plane_list],
                     "register_z": getattr(self, "_register_z", False),
                     "max_frames": getattr(self, "_axial_max_frames", 200),
                     "max_reg_xy": getattr(self, "_axial_max_reg_xy", 30),
                     "s2p_settings": {
-                        # keep_raw / keep_reg are derived from the upstream
-                        # fields (db.keep_movie_raw / io.delete_bin) rather
-                        # than stored as duplicates on MboSuite2pExtras.
                         "keep_raw": self.s2p_db.keep_movie_raw,
                         "keep_reg": (not self.s2p.delete_bin),
-                        # force_reg / force_detect are derived from the
-                        # Skip/Run/Force radios — Force == 2.
                         "force_reg": (self.s2p.do_registration == 2),
                         "force_detect": (self.s2p.do_detection == 2),
                         "accept_all_cells": self.s2p_extras.accept_all_cells,
@@ -4016,21 +4211,20 @@ def run_process(self):
                             baseline_min_F0_rel=self.s2p_extras.baseline_min_F0_rel,
                             correct_neuropil=self.s2p_extras.correct_neuropil,
                         ),
-                        # unified-api dict for pipeline(). may include
-                        # "planar" and/or "volumetric" sub-keys, or be
-                        # None for off.
                         "rastermap_kwargs": build_rastermap_kwargs(
                             self.s2p_extras
                         ),
-                        # rastermap Skip/Run/Force radio. Force == 2 means
-                        # delete cached model.npy in each plane dir before
-                        # the pipeline runs so lsp recomputes from scratch
-                        # (Run reuses the cached model when shape matches).
                         "force_rastermap": (self.s2p_extras.rastermap_mode == 2),
+                        "workers": self.s2p_extras.workers,
+                        "threads_per_worker": self.s2p_extras.threads_per_worker,
+                        "skip_volumetric": self.s2p_extras.skip_volumetric,
                     },
                 }
 
-                description = f"Suite2p: {len(selected_planes)} plane(s)"
+                if len(plane_list) == 1:
+                    description = f"Suite2p plane{plane_list[0]:02d}"
+                else:
+                    description = f"Suite2p: {len(plane_list)} plane(s)"
                 if multi_channel or has_channels:
                     description += f" ch{channel}"
                 if roi:
@@ -4113,10 +4307,6 @@ def run_process(self):
 
             fpath_str = str(self.fpath) if self.fpath else ""
 
-            # Check if parallel processing is enabled
-            use_parallel = getattr(self, "_parallel_processing", False)
-            max_jobs = getattr(self, "_max_parallel_jobs", 2)
-
             # Snapshot the user's selections so the worker can rebuild
             # the OutputMetadata reactive layer (fs/dz reactively scaled
             # by the timepoint and z-plane stride). Without these, the
@@ -4198,75 +4388,25 @@ def run_process(self):
                             "logger": self.logger
                         }
 
-                        # Fix Issue 2: restrict Suite2p to single internal process if using ThreadPoolExecutor
-                        if use_parallel:
-                            # num_workers isn't part of upstream's schema but the
-                            # fork reads it off the flat ops dict; inject into
-                            # settings via an extra key that survives the
-                            # flatten (db_settings_to_ops preserves unknown
-                            # top-level keys).
-                            config["num_workers_override"] = 0
-
                         jobs.append(config)
 
-            if use_parallel and len(jobs) > 1:
-                # Parallel processing with limited concurrency
-                from concurrent.futures import ThreadPoolExecutor
-
-                def run_parallel():
+            def run_all_planes_sequential():
+                for job_idx, config in enumerate(jobs):
+                    desc = f"plane {config['plane']}"
+                    if config['channel'] is not None:
+                        desc += f" ch{config['channel']}"
                     self.logger.info(
-                        f"Starting parallel processing with max {max_jobs} concurrent jobs..."
+                        f"Processing {desc} ({job_idx + 1}/{len(jobs)})..."
                     )
-                    # Fix Issue 3: track executor via 'self' which can handle gracefully closing out tasks on GUI shutdown
-                    executor = ThreadPoolExecutor(max_workers=max_jobs)
-                    self._active_executor = executor
                     try:
-                        futures = {}
-                        for job_idx, config in enumerate(jobs):
-                            future = executor.submit(_run_plane_worker_thread, config)
-                            futures[future] = (config, job_idx)
-
-                        from concurrent.futures import as_completed
-                        for future in as_completed(futures):
-                            config, job_idx = futures[future]
-                            try:
-                                future.result()
-                                desc = f"Plane {config['plane']}"
-                                if config['channel'] is not None:
-                                    desc += f" ch{config['channel']}"
-                                self.logger.info(
-                                    f"{desc} completed ({job_idx + 1}/{len(jobs)})"
-                                )
-                            except Exception as e:
-                                self.logger.exception(
-                                    f"Error processing plane {config['plane']}: {e}"
-                                )
-                    finally:
-                        executor.shutdown(wait=False)
-                        if getattr(self, "_active_executor", None) is executor:
-                            self._active_executor = None
-                    self.logger.info("Suite2p parallel processing complete.")
-
-                threading.Thread(target=run_parallel, daemon=True).start()
-            else:
-                # Sequential processing in a single background thread
-                def run_all_planes_sequential():
-                    for job_idx, config in enumerate(jobs):
-                        desc = f"plane {config['plane']}"
-                        if config['channel'] is not None:
-                            desc += f" ch{config['channel']}"
-                        self.logger.info(
-                            f"Processing {desc} ({job_idx + 1}/{len(jobs)})..."
+                        _run_plane_worker_thread(config)
+                    except Exception as e:
+                        self.logger.exception(
+                            f"Error processing {desc}: {e}"
                         )
-                        try:
-                            _run_plane_worker_thread(config)
-                        except Exception as e:
-                            self.logger.exception(
-                                f"Error processing {desc}: {e}"
-                            )
-                    self.logger.info("Suite2p processing complete.")
+                self.logger.info("Suite2p processing complete.")
 
-                threading.Thread(target=run_all_planes_sequential, daemon=True).start()
+            threading.Thread(target=run_all_planes_sequential, daemon=True).start()
 
 
 def _run_plane_worker_thread(config):
@@ -4415,11 +4555,6 @@ def _run_plane_worker_thread(config):
         db_dict["functional_chan"] = 1
         # align_by_chan2 False (we're aligning by channel 1)
         settings_dict.setdefault("registration", {})["align_by_chan2"] = False
-
-    # num_workers override (set when parallel plane processing is on) —
-    # upstream doesn't have this key, but the fork reads it off ops.
-    if "num_workers_override" in config:
-        extra_ops["num_workers"] = config["num_workers_override"]
 
     from mbo_utilities.writer import imwrite
 

@@ -32,6 +32,21 @@ class PipelineWidget(ABC):
         """Draw the configuration/processing ui."""
         ...
 
+    @classmethod
+    def applies_to(cls, arr: Any) -> bool:
+        """True iff this pipeline can be run against ``arr``.
+
+        Called by the Run-tab selector BEFORE instantiation, so it
+        must be safe to call without spinning up the widget. Override
+        for pipelines tied to a specific array type (e.g. Isoview
+        consolidator only applies to ``IsoviewArray`` instances).
+
+        ``arr`` may be ``None`` when no data is loaded.
+
+        Default: returns ``True`` (pipeline works on any data).
+        """
+        return True
+
     def cleanup(self) -> None:
         """Clean up resources when widget is destroyed.
 

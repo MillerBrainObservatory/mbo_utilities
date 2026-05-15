@@ -346,11 +346,15 @@ class ProjectionsViewer(Widget):
         self._sync_cmap_with_fpl()
         draw_section_header("Projections")
 
-        if imgui.button("Open viewer##projections_open"):
-            self._popup_open = True
-            self._reset_view()
+        imgui.indent(8)
+        try:
+            if imgui.button("Open viewer##projections_open"):
+                self._popup_open = True
+                self._reset_view()
 
-        self._draw_overview()
+            self._draw_overview()
+        finally:
+            imgui.unindent(8)
 
         self._poll_save_dialog()
 

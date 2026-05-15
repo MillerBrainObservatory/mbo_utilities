@@ -14,6 +14,7 @@ from imgui_bundle import imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.gui._availability import HAS_SUITE2P
+from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 
 
@@ -54,6 +55,26 @@ class Suite2pPipelineWidget(PipelineWidget):
         """Check availability lazily to avoid slow imports at module load."""
         return HAS_SUITE2P and _check_lsp_available()
 
+    @classmethod
+    def applies_to(cls, arr: Any) -> bool:
+        if arr is None:
+            return True
+        underlying = arr
+        seen: set[int] = set()
+        while True:
+            if id(underlying) in seen:
+                break
+            seen.add(id(underlying))
+            inner = getattr(underlying, "_arr", None)
+            if inner is None or inner is underlying:
+                break
+            underlying = inner
+        try:
+            from mbo_utilities.arrays.isoview import IsoviewArray
+        except Exception:
+            return True
+        return not isinstance(underlying, IsoviewArray)
+
     def __init__(self, parent: Any):
         super().__init__(parent)
 
@@ -75,8 +96,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._last_max_frames = 1000
         self._selected_planes = set()
         self._show_plane_popup = False
-        self._parallel_processing = False
-        self._max_parallel_jobs = 2
 
         # scan-phase correction for suite2p run (separate from display, default True)
         self._s2p_fix_phase = True
@@ -157,8 +176,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         self.parent._last_max_frames = self._last_max_frames
         self.parent._selected_planes = self._selected_planes
         self.parent._show_plane_popup = self._show_plane_popup
-        self.parent._parallel_processing = self._parallel_processing
-        self.parent._max_parallel_jobs = self._max_parallel_jobs
         self.parent._s2p_savepath_flash_start = self._savepath_flash_start
         self.parent._s2p_show_savepath_popup = self._show_savepath_popup
         self.parent._current_pipeline = "suite2p"
@@ -180,8 +197,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         self._last_max_frames = getattr(self.parent, "_last_max_frames", 1000)
         self._selected_planes = getattr(self.parent, "_selected_planes", set())
         self._show_plane_popup = getattr(self.parent, "_show_plane_popup", False)
-        self._parallel_processing = getattr(self.parent, "_parallel_processing", False)
-        self._max_parallel_jobs = getattr(self.parent, "_max_parallel_jobs", 2)
         self._savepath_flash_start = getattr(self.parent, "_s2p_savepath_flash_start", None)
         self._show_savepath_popup = getattr(self.parent, "_s2p_show_savepath_popup", False)
         self._s2p_fix_phase = getattr(self.parent, "_s2p_fix_phase", True)
@@ -342,12 +357,18 @@ class Suite2pPipelineWidget(PipelineWidget):
                     pass
             self._file_dialog = None
 
+        if not hasattr(self, "_diagnostics_sizer"):
+            self._diagnostics_sizer = PopupAutoSize(
+                "Trace Quality Statistics", auto_resize=False
+            )
+
         if self._show_diagnostics_popup:
             self._diagnostics_popup_open = True
+            self._diagnostics_sizer.before_open()
             imgui.open_popup("Trace Quality Statistics")
             self._show_diagnostics_popup = False
 
-        # Set popup size
+        # Set popup size; top anchor comes from _diagnostics_sizer.
         viewport = imgui.get_main_viewport()
         popup_width = min(1200, viewport.size.x * 0.9)
         popup_height = min(800, viewport.size.y * 0.85)
@@ -572,12 +593,18 @@ class Suite2pPipelineWidget(PipelineWidget):
                     pass
             self._grid_search_dialog = None
 
+        if not hasattr(self, "_grid_search_sizer"):
+            self._grid_search_sizer = PopupAutoSize(
+                "Grid Search Results", auto_resize=False
+            )
+
         if self._show_grid_search_popup:
             self._grid_search_popup_open = True
+            self._grid_search_sizer.before_open()
             imgui.open_popup("Grid Search Results")
             self._show_grid_search_popup = False
 
-        # Set popup size
+        # Set popup size; top anchor comes from _grid_search_sizer.
         viewport = imgui.get_main_viewport()
         popup_width = min(1200, viewport.size.x * 0.9)
         popup_height = min(800, viewport.size.y * 0.85)

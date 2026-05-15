@@ -599,14 +599,32 @@ def _create_image_widget(data_array, widget: bool = True):
     except (ImportError, RuntimeError): # RuntimeError if qt is already selected
         RenderCanvas = None
 
+    # Clamp the default figure size to the screen's available work area
+    # so launches on shorter monitors (laptops, 1080p with taskbar) don't
+    # spawn a window that runs past the bottom of the screen. Falls back
+    # to (1000, 1000) when Qt isn't available or the query fails.
+    fig_w, fig_h = 1000, 1000
+    try:
+        from PyQt6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            # leave headroom for window chrome, side widget, and OS bars.
+            # PreviewDataWidget is ~300 px wide, added by add_gui — so the
+            # canvas itself wants the remaining width.
+            fig_w = max(400, min(fig_w, avail.width() - 360))
+            fig_h = max(400, min(fig_h, avail.height() - 120))
+    except Exception:
+        pass
+
     if RenderCanvas is not None:
         figure_kwargs = {
             "canvas": "pyqt6",
             "canvas_kwargs": {"present_method": "bitmap"},
-            "size": (1000, 1000)
+            "size": (fig_w, fig_h),
         }
     else:
-        figure_kwargs = {"size": (1000, 1000)}
+        figure_kwargs = {"size": (fig_w, fig_h)}
 
     # Determine slider dimension names from array's dims property if available
     from mbo_utilities.arrays.features import get_slider_dims
@@ -622,6 +640,17 @@ def _create_image_widget(data_array, widget: bool = True):
     else:
         window_funcs = None
         window_sizes = None
+
+    def _is_isoview(arr) -> bool:
+        """IsoviewArray has a `kind` attribute set to raw/corrected/fused."""
+        return getattr(arr, "kind", None) in {"raw", "corrected", "fused", "clusterpt"}
+
+    # Isoview fluorescence sits in the 0..few-hundred-counts range; the
+    # generic (-100, 4000) default washes it out completely.
+    if _is_isoview(data_array):
+        graphic_kwargs = {"vmin": 0, "vmax": 1000}
+    else:
+        graphic_kwargs = {"vmin": -100, "vmax": 4000}
 
     def _squeeze_for_viewer(arr):
         """drop every singleton non-spatial dim so fastplotlib's ndim-2
@@ -669,7 +698,7 @@ def _create_image_widget(data_array, widget: bool = True):
             cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            graphic_kwargs=graphic_kwargs,
         )
     else:
         iw = fpl.ImageWidget(
@@ -680,7 +709,7 @@ def _create_image_widget(data_array, widget: bool = True):
             cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
-            graphic_kwargs={"vmin": -100, "vmax": 4000},
+            graphic_kwargs=graphic_kwargs,
         )
 
     iw.show()
@@ -728,6 +757,28 @@ def _run_gui_impl(
     mode: str = "Fastplotlib viewer (default)",
 ):
     """Internal implementation of run_gui with all heavy imports."""
+    # Apply persisted Options (GPU adapter, debug logging) before any
+    # fastplotlib Figure is created or the launch dialog renders. Also
+    # prime the adapter cache so the file_dialog's Options popup doesn't
+    # call enumerate_adapters() from inside the imgui frame (that
+    # initializes wgpu, which on Windows clears the current WGL context
+    # and makes the host window flicker — Glfw Error 65544).
+    try:
+        from mbo_utilities.preferences import get_gpu_index, get_debug_logging
+        from mbo_utilities.gui import _gpu_cache
+        _gpu_cache.prime()
+        _gpu_idx = get_gpu_index()
+        _adapters = _gpu_cache.get_adapters()
+        if _gpu_idx >= 0 and 0 <= _gpu_idx < len(_adapters):
+            import fastplotlib as fpl
+            fpl.select_adapter(_adapters[_gpu_idx])
+        if get_debug_logging():
+            import logging
+            from mbo_utilities import log as _mbo_log
+            _mbo_log.set_global_level(logging.DEBUG)
+    except Exception:
+        pass
+
     # show splash screen while loading (only for desktop shortcut launches)
     splash = None
     if show_splash and not _is_jupyter():
