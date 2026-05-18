@@ -21,7 +21,7 @@ from mbo_utilities.arrays import open_scanimage
 from mbo_utilities.metadata import get_param
 from mbo_utilities.metadata.scanimage import (
     is_lbm_stack,
-    get_lbm_ai_sources,
+    get_saved_channel_ports,
     get_z_step_size,
 )
 
@@ -110,7 +110,7 @@ def get_cavity_indices(metadata: dict, nc: int) -> dict:
     result["is_lbm"] = True
 
     # Get AI sources from virtualChannelSettings
-    ai_sources = get_lbm_ai_sources(metadata)
+    ai_sources = get_saved_channel_ports(metadata)
 
     if not ai_sources:
         # No AI source info available - fall back to half/half
