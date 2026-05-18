@@ -904,26 +904,41 @@ def _scan_raw(base_path: Path):
 
     Requires a sibling XML metadata file (``ch00_spec00.xml`` etc.) so
     we can compute the per-volume (Z, Y, X) shape from the binary size.
+
+    Timelapse data (multiple TM, single SPC) uses TM as the T axis.
+    Tiled data (single TM, multiple SPC) uses SPC as the T axis so each
+    spatial tile shows up as its own slot.
     """
-    tm_to_files: dict[int, dict[tuple[int, int], Path]] = {}
+    by_key: dict[int, dict[tuple[int, int], Path]] = {}
     views: set[tuple[int, int]] = set()
+    spc_set: set[int] = set()
+    tm_set: set[int] = set()
+    parsed: list[tuple[int, int, int, int, Path]] = []
     for f in sorted(base_path.iterdir()):
         if not f.is_file():
             continue
         m = _RAW_STACK_RE.match(f.name)
         if not m:
             continue
+        spc = int(m.group(1))
         tm = int(m.group(2))
         cam = int(m.group(3))
         chn = int(m.group(4))
-        tm_to_files.setdefault(tm, {})[(cam, chn)] = f
+        spc_set.add(spc)
+        tm_set.add(tm)
         views.add((cam, chn))
+        parsed.append((spc, tm, cam, chn, f))
 
-    if not tm_to_files:
+    if not parsed:
         return {}, [], []
 
-    sorted_tms = sorted(tm_to_files)
-    tp_paths = {ti: tm_to_files[tm] for ti, tm in enumerate(sorted_tms)}
+    use_spc = len(tm_set) == 1 and len(spc_set) > 1
+    for spc, tm, cam, chn, f in parsed:
+        key = spc if use_spc else tm
+        by_key.setdefault(key, {})[(cam, chn)] = f
+
+    sorted_keys = sorted(by_key)
+    tp_paths = {ti: by_key[k] for ti, k in enumerate(sorted_keys)}
     view_keys = sorted(views)
     channel_names = [f"CM{cm}_CHN{ch:02d}" for cm, ch in view_keys]
     return tp_paths, view_keys, channel_names
@@ -1478,7 +1493,10 @@ class IsoviewArray(Shape5DMixin):
                     slab = self._read_slab(path, t_idx, c_idx, z_key, y_key, x_key)
                 else:
                     vol = self._read_volume(path, t_idx, c_idx)
-                    slab = vol[z_key, y_key, x_key]
+                    if _int_out_of_bounds((z_key, y_key, x_key), vol.shape):
+                        slab = self._empty_slab(z_key, y_key, x_key, vol.shape)
+                    else:
+                        slab = vol[z_key, y_key, x_key]
 
                 if isinstance(z_key, int):
                     slab = slab[np.newaxis, ...]
@@ -1508,6 +1526,22 @@ class IsoviewArray(Shape5DMixin):
                 result = np.squeeze(result, axis=ax)
         return result
 
+    def _empty_slab(self, z_key, y_key, x_key, vol_shape) -> np.ndarray:
+        def dim(k, n):
+            if isinstance(k, (int, np.integer)):
+                return None
+            if isinstance(k, slice):
+                return len(range(*k.indices(n)))
+            if isinstance(k, (list, np.ndarray)):
+                return len(k)
+            return n
+
+        nz, ny, nx = vol_shape
+        out_dims = [d for d in (dim(z_key, nz), dim(y_key, ny), dim(x_key, nx)) if d is not None]
+        if not out_dims:
+            out_dims = [1]
+        return np.zeros(tuple(out_dims), dtype=self._dtype)
+
     def _read_volume(self, path: Path, t_idx: int, c_idx: int) -> np.ndarray:
         cache_key = (t_idx, c_idx)
         cached = self._cache.get(cache_key)
@@ -1525,8 +1559,13 @@ class IsoviewArray(Shape5DMixin):
     ) -> np.ndarray:
         cached = self._cache.get((t_idx, c_idx))
         if cached is not None:
+            shape = cached.shape
+            if _int_out_of_bounds((z_key, y_key, x_key), shape):
+                return self._empty_slab(z_key, y_key, x_key, shape)
             return cached[z_key, y_key, x_key]
         with LazyVolume(path, dimensions=self._stack_dimensions()) as v:
+            if _int_out_of_bounds((z_key, y_key, x_key), v.shape):
+                return self._empty_slab(z_key, y_key, x_key, v.shape)
             slab = np.asarray(v[z_key, y_key, x_key])
             if logger.isEnabledFor(logging.DEBUG) and v.chunks is not None:
                 touched = _chunks_touched(
@@ -1593,6 +1632,17 @@ class IsoviewArray(Shape5DMixin):
             f"IsoviewArray(kind={self.kind!r}, shape={self.shape}, "
             f"dtype={self.dtype}, channels={self._channel_names})"
         )
+
+
+def _int_out_of_bounds(keys, shape) -> bool:
+    for k, n in zip(keys, shape):
+        if isinstance(k, (int, np.integer)):
+            i = int(k)
+            if i < 0:
+                i += n
+            if i < 0 or i >= n:
+                return True
+    return False
 
 
 def _to_indices(k, max_val: int) -> list[int]:
