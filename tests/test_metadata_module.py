@@ -21,7 +21,7 @@ from mbo_utilities.metadata import (
     detect_stack_type,
     is_lbm_stack,
     is_piezo_stack,
-    get_lbm_ai_sources,
+    get_saved_channel_ports,
     get_num_color_channels,
     get_num_zplanes,
     get_frames_per_slice,
@@ -355,7 +355,7 @@ class TestLbmColorChannels:
                 }
             }
         }
-        sources = get_lbm_ai_sources(meta)
+        sources = get_saved_channel_ports(meta)
         assert "AI0" in sources
         assert len(sources) == 1
         assert get_num_color_channels(meta) == 1
@@ -373,7 +373,7 @@ class TestLbmColorChannels:
                 }
             }
         }
-        sources = get_lbm_ai_sources(meta)
+        sources = get_saved_channel_ports(meta)
         assert "AI0" in sources
         assert "AI1" in sources
         assert get_num_color_channels(meta) == 2
@@ -634,7 +634,7 @@ class TestColorChannelsUnified:
 
         meta = {
             "si": {
-                "hChannels": {"channelSave": 1},
+                "hChannels": {"channelSave": [1, 2]},
                 "hStackManager": {"enable": True},
                 "hScan2D": {
                     "virtualChannelSettings__1": {"source": "AI0"},
@@ -642,7 +642,7 @@ class TestColorChannelsUnified:
                 }
             }
         }
-        # should detect 2 color channels from AI sources
+        # both channels saved, two distinct AI ports
         assert get_num_color_channels(meta) == 2
 
 
