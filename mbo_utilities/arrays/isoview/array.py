@@ -691,11 +691,11 @@ def _first_method_dir(fused_root: Path) -> Path | None:
 
 
 _CORRECTED_RE = re.compile(
-    r"SPM(\d+)_TM(\d+)_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|zarr|klb)$"
+    r"SPM(\d+)_TM(\d+)_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _FUSED_RE = re.compile(
     r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)"
-    r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|zarr|klb)$"
+    r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _RAW_STACK_RE = re.compile(
     r"SPC(\d+)_TM(\d+)_ANG\d+_CM(\d+)_CHN(\d+)_PH\d+\.stack$"
@@ -979,6 +979,7 @@ _PIPELINE_INFOS = (
         name="isoview-corrected",
         description="IsoView corrected per-camera output",
         input_patterns=[
+            "**/*.corrected*/SPM??/TM??????/SPM??_TM??????_CM??.ome.zarr",
             "**/*.corrected*/SPM??/TM??????/SPM??_TM??????_CM??.zarr",
             "**/*.corrected*/SPM??/TM??????/SPM??_TM??????_CM??.tif",
         ],
