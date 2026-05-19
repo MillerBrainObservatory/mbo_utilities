@@ -307,10 +307,10 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._stitcher_spark_regularization_model: str = "RIGID"
         self._stitcher_spark_dialog: Any = None
 
-        # Fused-tree top-level suffix. Distinct from
-        # `_fuse_output_suffix` which is a per-method tag inside the
-        # `<raw>.fused/<method>[_<output_suffix>]/` layout.
-        self._fuse_fused_suffix: str = ".fused"
+        # Per-step output suffix shared by correct/fuse/stitcher dirs.
+        # Empty string yields the canonical names (.corrected, .fused,
+        # .stitcher); a non-empty value is appended as `_<suffix>`.
+        self._fuse_output_suffix: str = ""
 
         # Consolidate-mode filename suffix (relative to scan_root.name).
         # Re-derived per dataset in :meth:`_ensure_defaults` so it
@@ -318,7 +318,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._consolidate_suffix: str = "_isoview-corrected.zarr"
 
         # Correct-mode state
-        self._correct_corrected_suffix: str = ".corrected"
+        self._correct_output_suffix: str = ""
         self._correct_segment_mode: int = 1
         self._correct_apply_seg_mask: bool = False
         self._correct_do_tenengrad: bool = False
@@ -423,11 +423,11 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         # Correct / Fuse output_dir defaults:
         #   raw       → leave EMPTY so isoview's ProcessingConfig derives
-        #               output_dir from input_dir + corrected_suffix.
+        #               output_dir from input_dir + .corrected[_<suffix>].
         #               Pre-filling here freezes a stale ".corrected"
         #               path that overrides the user's suffix at submit
         #               time (isoview honors output_dir when set and
-        #               ignores corrected_suffix).
+        #               ignores output_suffix).
         #   corrected → .corrected/ root (parent of scan_root). The
         #               fuse task reads from here; it doesn't write a
         #               new corrected tree, so no suffix conflict.
@@ -460,14 +460,15 @@ class IsoviewPipelineWidget(PipelineWidget):
             return explicit
         # CORRECT mode against raw data intentionally leaves _output_dir
         # empty so isoview's ProcessingConfig derives the output from
-        # input_dir + corrected_suffix. Mirror that derivation here so
-        # the Run-tab gate doesn't block on the empty string.
+        # input_dir + .corrected[_<output_suffix>]. Mirror that derivation
+        # here so the Run-tab gate doesn't block on the empty string.
         if self._selected_mode == _MODE_CORRECT:
             arr = self._get_array()
             sr = getattr(arr, "scan_root", None) if arr is not None else None
             if sr is not None:
-                suffix = self._correct_corrected_suffix or ""
-                return f"{Path(sr).resolve()}{suffix}"
+                s = (self._correct_output_suffix or "").lstrip("_")
+                tail = f".corrected_{s}" if s else ".corrected"
+                return f"{Path(sr).resolve()}{tail}"
         return ""
 
     def _spawn(self, task_type: str, args: dict, description: str,
@@ -1067,7 +1068,7 @@ class IsoviewPipelineWidget(PipelineWidget):
 
     def _draw_correct_io_box(self) -> None:
         """Correct-mode I/O options for the Parameters popup. The
-        ``corrected_suffix`` lives in the Run-tab Output section now;
+        ``output_suffix`` lives in the Run-tab Output section now;
         only the codec / worker / pyramid / overwrite knobs stay here.
         """
         with tooltip_marks_right():
@@ -1237,8 +1238,8 @@ class IsoviewPipelineWidget(PipelineWidget):
 
     def _draw_fuse_io_box(self) -> None:
         """Fuse-mode I/O options for the Parameters popup. The
-        top-level ``fused_suffix`` lives in the Run-tab Output section
-        now (per-method ``output_suffix`` stays under Fusion).
+        top-level ``output_suffix`` lives in the Run-tab Output section
+        now (per-method blending suffix stays under Fusion).
         """
         with tooltip_marks_right():
             formats = ["zarr", "tif", "klb"]
@@ -1552,8 +1553,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             return
         args = {
             "input_path": str(raw_root),
-            "corrected_suffix": self._correct_corrected_suffix,
-            "fused_suffix": self._fuse_fused_suffix,
+            "output_suffix": self._fuse_output_suffix or self._correct_output_suffix,
             "stitcher_suffix": self._stitcher_suffix,
             "coarse_align": self._stitcher_coarse_align,
         }
@@ -1630,7 +1630,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         args = {
             "input_path": str(arr.scan_root),
             "output_dir": resolved_out or None,
-            "corrected_suffix": self._correct_corrected_suffix,
+            "output_suffix": self._correct_output_suffix,
             "output_format": self._output_format,
             "compression": (
                 None if self._compression == "none" else self._compression
@@ -1699,7 +1699,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         args = {
             "input_path": str(raw_root),
             "output_dir": self._output_dir or None,
-            "fused_suffix": self._fuse_fused_suffix,
+            "output_suffix": self._fuse_output_suffix,
             "output_format": self._output_format,
             "compression": (
                 None if self._compression == "none" else self._compression
@@ -1954,8 +1954,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         for any mode the widget currently supports).
         """
         return {
-            _MODE_CORRECT: "_correct_corrected_suffix",
-            _MODE_FUSE: "_fuse_fused_suffix",
+            _MODE_CORRECT: "_correct_output_suffix",
+            _MODE_FUSE: "_fuse_output_suffix",
             _MODE_STITCHER: "_stitcher_suffix",
             _MODE_CONSOLIDATE: "_consolidate_suffix",
         }.get(self._selected_mode)
