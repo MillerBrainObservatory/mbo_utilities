@@ -74,9 +74,13 @@ def is_pollen_stack(metadata: dict) -> bool:
     return detect_stack_type(metadata) == "pollen"
 
 
-def get_lbm_ai_sources(metadata: dict) -> dict[str, list[int]]:
+def get_saved_channel_ports(metadata: dict) -> dict[str, list[int]]:
     """
-    Extract unique AI sources from LBM virtualChannelSettings.
+    Map AI port -> sorted list of saved channel indices on that port.
+
+    Restricted to channels present in si.hChannels.channelSave; channels that
+    are configured in virtualChannelSettings but not saved to the TIFF are
+    excluded. If channelSave is empty/missing, no filtering is applied.
 
     Parameters
     ----------
@@ -86,63 +90,65 @@ def get_lbm_ai_sources(metadata: dict) -> dict[str, list[int]]:
     Returns
     -------
     dict[str, list[int]]
-        Mapping of AI source name to list of channel indices.
-        e.g., {"AI0": [1,2,3...14], "AI1": [15,16,17]}
-
-    Notes
-    -----
-    AI0 only = single color channel
-    AI0 + AI1 = dual color channel
+        Mapping of AI port (e.g. "AI0") to its saved channel indices.
+        Dual-color single-plane: {"AI0": [1], "AI1": [2]}
+        Dual-color 30-bead LBM:  {"AI0": [1..15], "AI1": [16..30]}
+        Single-color LBM:        {"AI0": [1..30]}
     """
     si = metadata.get("si", {})
     scan2d = si.get("hScan2D", {})
+
+    cs = si.get("hChannels", {}).get("channelSave", None)
+    if isinstance(cs, list):
+        saved: set[int] | None = {int(x) for x in cs}
+    elif isinstance(cs, (int, float)):
+        saved = {int(cs)}
+    else:
+        saved = None
+
     sources: dict[str, list[int]] = {}
-
     for key, val in scan2d.items():
-        if key.startswith("virtualChannelSettings__") and isinstance(val, dict):
-            src = val.get("source")
-            if src:
-                if src not in sources:
-                    sources[src] = []
-                try:
-                    ch_idx = int(key.split("__")[1])
-                    sources[src].append(ch_idx)
-                except (ValueError, IndexError):
-                    pass
+        if not (key.startswith("virtualChannelSettings__") and isinstance(val, dict)):
+            continue
+        src = val.get("source")
+        if not src:
+            continue
+        try:
+            ch_idx = int(key.split("__")[1])
+        except (ValueError, IndexError):
+            continue
+        if saved is not None and ch_idx not in saved:
+            continue
+        sources.setdefault(src, []).append(ch_idx)
 
+    for port in sources:
+        sources[port].sort()
     return sources
+
+
+def get_color_channel_ports(metadata: dict) -> list[str]:
+    """Sorted list of AI ports represented in the saved TIFF (e.g. ['AI0', 'AI1'])."""
+    return sorted(get_saved_channel_ports(metadata))
+
+
+def get_beamlets_per_port(metadata: dict) -> dict[str, int]:
+    """Count of saved channels per AI port."""
+    return {p: len(ch) for p, ch in get_saved_channel_ports(metadata).items()}
 
 
 def get_num_color_channels(metadata: dict) -> int:
     """
-    Detect number of color channels.
+    Number of color channels (unique AI ports) in the saved TIFF.
 
-    Parameters
-    ----------
-    metadata : dict
-        Metadata dict containing 'si' key.
-
-    Returns
-    -------
-    int
-        Number of color channels (1 or 2).
-
-    Notes
-    -----
-    Uses virtualChannelSettings__N.source for both LBM and non-LBM.
-    AI0 only = 1 color channel, AI0 + AI1 = 2 color channels.
-    Falls back to channelSave if virtualChannelSettings not available.
+    Counts unique virtualChannelSettings sources restricted to
+    si.hChannels.channelSave. Falls back to channelSave length when
+    virtualChannelSettings is not present.
     """
-    # try virtualChannelSettings first (works for both LBM and non-LBM)
-    sources = get_lbm_ai_sources(metadata)
-    if sources:
-        return len(sources)
+    ports = get_color_channel_ports(metadata)
+    if ports:
+        return len(ports)
 
-    # fallback: check channelSave
-    si = metadata.get("si", {})
-    hch = si.get("hChannels", {})
-    channel_save = hch.get("channelSave", 1)
-
+    channel_save = metadata.get("si", {}).get("hChannels", {}).get("channelSave", 1)
     if isinstance(channel_save, list) and len(channel_save) == 2:
         return 2
     return 1
@@ -152,37 +158,27 @@ def get_num_zplanes(metadata: dict) -> int:
     """
     Get number of z-planes.
 
-    Parameters
-    ----------
-    metadata : dict
-        Metadata dict containing 'si' key.
-
-    Returns
-    -------
-    int
-        Number of z-planes.
-
-    Notes
-    -----
-    For LBM/pollen: len(si.hChannels.channelSave) - beamlets are the z-planes
-    For piezo: si.hStackManager.numSlices
-    For single plane: 1
+    For LBM/pollen: number of saved beamlets per AI port.
+    For piezo: si.hStackManager.numSlices.
+    For single plane: 1.
     """
     stack_type = detect_stack_type(metadata)
     si = metadata.get("si", {})
 
     if stack_type in ("lbm", "pollen"):
-        # beamlets = z-planes; for dual-channel, divide by color channels
-        hch = si.get("hChannels", {})
-        channel_save = hch.get("channelSave", [])
-        if isinstance(channel_save, list):
-            num_color = get_num_color_channels(metadata)
-            return len(channel_save) // max(num_color, 1)
+        cs = si.get("hChannels", {}).get("channelSave", [])
+        cs_len = len(cs) if isinstance(cs, list) else (1 if isinstance(cs, (int, float)) else 0)
+        per = get_beamlets_per_port(metadata)
+        # use VCS only if it covers all saved channels; otherwise fall back
+        # to len(channelSave) // num_color_channels for sparse/missing VCS.
+        if per and sum(per.values()) >= cs_len > 0:
+            return max(per.values())
+        if cs_len:
+            return max(cs_len // max(get_num_color_channels(metadata), 1), 1)
         return 1
 
     if stack_type == "piezo":
-        stack_mgr = si.get("hStackManager", {})
-        return stack_mgr.get("numSlices", 1)
+        return si.get("hStackManager", {}).get("numSlices", 1)
 
     return 1
 
