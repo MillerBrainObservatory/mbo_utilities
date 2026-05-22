@@ -29,85 +29,29 @@ from mbo_utilities.metadata import get_param
 logger = log.get("worker.tasks")
 
 
-class _ChannelView:
-    """4D TZYX view of a single channel from 5D TCZYX data.
+from mbo_utilities.arrays._channel_view import _ChannelView
 
-    Wraps a lazy array and presents it as 4D by fixing the channel index.
-    Used to feed single-channel data to pipelines that expect TZYX input.
+
+def _auto_workers(num_planes: int, *, use_gpu: bool = False) -> int:
+    """Pick a worker count from hardware capacity and dataset size.
+
+    Bounded by ``num_planes`` (no point spawning more workers than tasks),
+    leaves CPU headroom for the OS + GUI, and budgets ~8 GB of available
+    RAM per worker (one suite2p plane fits comfortably in that).
+
+    GPU consumers (cellpose on GPU, etc.) are capped at 2 workers since
+    they contend for one device — set ``use_gpu=True`` to enable that.
     """
-
-    def __init__(self, arr, channel_0idx: int):
-        self._arr = arr
-        self._ch = channel_0idx
-        self._metadata_override = None
-
-    @property
-    def shape(self):
-        s = self._arr.shape
-        return (s[0], s[2], s[3], s[4])
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        s = self._arr.shape5d if hasattr(self._arr, "shape5d") else self._arr.shape
-        return (s[0], 1, s[2], s[3], s[4])
-
-    @property
-    def shape5d(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
-
-    @property
-    def ndim(self):
-        return 4
-
-    @property
-    def dtype(self):
-        return self._arr.dtype
-
-    @property
-    def metadata(self):
-        if self._metadata_override is not None:
-            return self._metadata_override
-        md = dict(getattr(self._arr, "metadata", {}))
-        md["num_color_channels"] = 1
-        return md
-
-    @metadata.setter
-    def metadata(self, value):
-        self._metadata_override = value
-
-    @property
-    def filenames(self):
-        return getattr(self._arr, "filenames", [])
-
-    @property
-    def num_planes(self):
-        return self._arr.shape[2]
-
-    @property
-    def num_color_channels(self):
-        return 1
-
-    @property
-    def num_channels(self):
-        return self._arr.shape[2]
-
-    @property
-    def dims(self):
-        return ("T", "Z", "Y", "X")
-
-    def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
-        if len(key) == 5:
-            return self._arr[(key[0], self._ch, key[2], key[3], key[4])]
-        key = key + (slice(None),) * (4 - len(key))
-        return self._arr[(key[0], self._ch, key[1], key[2], key[3])]
-
-    def _imwrite(self, outpath, planes=None, ext=".tiff", **kwargs):
-        from mbo_utilities.arrays._base import _imwrite_base
-
-        return _imwrite_base(
-            self, outpath, planes=planes, ext=ext, **kwargs
-        )
+    cpu = os.cpu_count() or 4
+    cpu_workers = max(1, cpu - 2)
+    try:
+        import psutil
+        avail_gb = psutil.virtual_memory().available / (1024 ** 3)
+        mem_workers = max(1, int(avail_gb // 8))
+    except Exception:
+        mem_workers = cpu_workers
+    cap = 2 if use_gpu else 12
+    return max(1, min(num_planes, cpu_workers, mem_workers, cap))
 
 
 class TaskMonitor:
@@ -602,23 +546,42 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     elif src_shape is not None:
         ops["nframes"] = int(src_shape[0])
 
-    # per-channel extraction: wrap data as 4D TZYX so pipeline sees single channel
+    # per-channel extraction: pass channel through reader_kwargs so each
+    # parallel worker re-creates the same 4D TZYX wrap after its own
+    # imread (the wrap can't survive pickling — workers re-open from
+    # paths). Path-based pipeline_input survives unchanged.
     channel = args.get("channel")
     pipeline_input = input_path
+    reader_kwargs: dict = {}
     if channel is not None:
         ops["functional_chan"] = 1
         ops["align_by_chan"] = 1
-        logger.info(f"Single-channel extraction: channel {channel}")
+        reader_kwargs["channel"] = int(channel) - 1
+        logger.info(f"Single-channel extraction: channel {channel} (zero-based: {channel - 1})")
 
-        # register _ChannelView as recognized lazy array type
+        # register _ChannelView as a recognized lazy array type in lsp's
+        # subprocess workers (they'll re-import on imread).
         import lbm_suite2p_python.utils as _lsp_utils
         if "_ChannelView" not in _lsp_utils._LAZY_ARRAY_TYPES:
             _lsp_utils._LAZY_ARRAY_TYPES = _lsp_utils._LAZY_ARRAY_TYPES + ("_ChannelView",)
 
-        # load data and wrap with channel view (presents 5D as 4D TZYX)
-        arr = imread(input_path)
-        pipeline_input = _ChannelView(arr, channel - 1)
-        logger.info(f"Wrapped as 4D view: shape={pipeline_input.shape}")
+    # Resolve workers: pass-through user choice, but honour 0/None as
+    # "auto" using hardware capacity. lsp also has its own auto path,
+    # but ours additionally bounds by available RAM and respects a GPU
+    # cap. Passing the resolved number through means logs say a real
+    # count instead of "auto/0".
+    raw_workers = s2p_settings.get("workers")
+    if raw_workers in (None, 0):
+        n_planes = len(planes) if planes else 1
+        use_gpu = bool(s2p_settings.get("rastermap_kwargs"))  # rough proxy for GPU work
+        resolved = _auto_workers(n_planes, use_gpu=use_gpu)
+        if resolved != raw_workers:
+            logger.info(
+                f"task_suite2p: workers=auto resolved to {resolved} "
+                f"(num_planes={n_planes}, cpu={os.cpu_count()})"
+            )
+            s2p_settings = dict(s2p_settings)
+            s2p_settings["workers"] = resolved
 
     # build writer_kwargs for phase correction settings
     writer_kwargs = {
@@ -694,6 +657,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             # built gui-side by build_rastermap_kwargs() in settings.py.
             rastermap_kwargs=s2p_settings.get("rastermap_kwargs"),
             writer_kwargs=writer_kwargs,
+            reader_kwargs=reader_kwargs or None,
             progress_callback=_progress,
             workers=s2p_settings.get("workers", 1),
             skip_volumetric=s2p_settings.get("skip_volumetric", False),

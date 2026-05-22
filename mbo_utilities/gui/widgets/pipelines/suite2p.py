@@ -55,26 +55,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         """Check availability lazily to avoid slow imports at module load."""
         return HAS_SUITE2P and _check_lsp_available()
 
-    @classmethod
-    def applies_to(cls, arr: Any) -> bool:
-        if arr is None:
-            return True
-        underlying = arr
-        seen: set[int] = set()
-        while True:
-            if id(underlying) in seen:
-                break
-            seen.add(id(underlying))
-            inner = getattr(underlying, "_arr", None)
-            if inner is None or inner is underlying:
-                break
-            underlying = inner
-        try:
-            from mbo_utilities.arrays.isoview import IsoviewArray
-        except Exception:
-            return True
-        return not isinstance(underlying, IsoviewArray)
-
     def __init__(self, parent: Any):
         super().__init__(parent)
 
