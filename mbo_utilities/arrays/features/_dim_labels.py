@@ -146,6 +146,36 @@ def get_slider_dims(arr_or_dims) -> tuple[str, ...] | None:
     return tuple(slider_dims) if slider_dims else None
 
 
+# aliases used when resolving a slider name back to a canonical T/C/Z key.
+# Isoview arrays expose descriptive labels like "Tile", "Cam", "Zplane";
+# LBM/ScanImage arrays use lowercase "t"/"c"/"z". Consumers that need to
+# locate a specific axis should go through `find_slider_name` so both
+# label styles resolve to the same slider.
+_SLIDER_NAME_ALIASES: dict[str, tuple[str, ...]] = {
+    "t": ("t", "tile", "timepoint", "timepoints", "tp"),
+    "c": ("c", "cam", "view", "channel", "channels", "cm"),
+    "z": ("z", "zplane", "zplanes", "plane", "planes", "depth"),
+}
+
+
+def find_slider_name(names, canonical: str) -> str | None:
+    """Return the slider name in ``names`` matching a canonical T/C/Z key.
+
+    Matches both single-letter forms (``"t"``, ``"c"``, ``"z"``) and the
+    descriptive labels Isoview arrays expose (``"Tile"``, ``"Timepoint"``,
+    ``"Cam"``, ``"View"``, ``"Zplane"``) — case-insensitive. Returns the
+    original-case name (which is what fastplotlib's ``Indices`` is keyed
+    by) or ``None`` when no axis matches.
+    """
+    if not names:
+        return None
+    aliases = _SLIDER_NAME_ALIASES.get(canonical.lower(), (canonical.lower(),))
+    for n in names:
+        if n.lower() in aliases:
+            return n
+    return None
+
+
 def get_dim_index(dims: tuple[str, ...], label: str) -> int | None:
     """
     Get the index of a dimension label.

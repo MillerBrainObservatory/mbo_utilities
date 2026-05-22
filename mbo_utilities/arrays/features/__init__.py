@@ -42,6 +42,7 @@ from mbo_utilities.arrays.features._dim_labels import (
     DIM_DESCRIPTIONS,
     DimLabels,
     KNOWN_ORDERINGS,
+    find_slider_name,
     get_dim_index,
     get_dims,
     get_num_planes,
@@ -182,6 +183,7 @@ __all__ = [
     # backwards compat aliases
     "ZStatsFeature",
     "estimate_chunk_memory",
+    "find_slider_name",
     "get_dim_index",
     "get_dims",
     "get_num_planes",

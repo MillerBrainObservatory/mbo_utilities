@@ -4111,9 +4111,11 @@ def run_process(self):
         selected_planes = getattr(self, "_selected_planes", None)
         if not selected_planes:
             # Fallback to current plane
+            from mbo_utilities.arrays.features import find_slider_name
             names = self.image_widget._slider_dim_names or ()
+            z_name = find_slider_name(names, "z")
             try:
-                current_z = self.image_widget.indices["z"] if "z" in names else 0
+                current_z = self.image_widget.indices[z_name] if z_name else 0
             except (IndexError, KeyError):
                 current_z = 0
             selected_planes = {current_z + 1}
