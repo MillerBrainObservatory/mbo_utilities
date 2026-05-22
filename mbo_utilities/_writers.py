@@ -38,7 +38,7 @@ def _filter_disabled_modules(metadata: dict, recursive: bool = True) -> dict:
         return metadata
     result = {}
     for k, v in metadata.items():
-        if k.startswith("h") and _is_disabled_si_module(v):
+        if isinstance(k, str) and k.startswith("h") and _is_disabled_si_module(v):
             continue
         if recursive and isinstance(v, dict):
             v = _filter_disabled_modules(v, recursive=True)
@@ -1176,10 +1176,12 @@ def _write_volumetric_h5(
             f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}"
         )
 
-    # h5 chunking — one frame per chunk so any (t, z, y, x) read pulls
-    # exactly its plane's worth of bytes off disk. matches the zarr
-    # `inner_chunk = (1, n_planes, Ly_out, Lx_out)` decision.
-    inner_chunk = (1, n_planes, Ly_out, Lx_out)
+    # h5 chunking — one Y×X plane per chunk so a fixed-(t, z) GUI scrub
+    # pulls exactly that plane off disk. The previous (1, n_planes, Y, X)
+    # spec packed every Z layer into one chunk, forcing the whole volume
+    # to decompress for any single-plane read — the same Z-bunching bug
+    # the zarr writers fixed.
+    inner_chunk = (1, 1, Ly_out, Lx_out)
 
     # h5 compression knobs
     h5_compression = None
@@ -2707,7 +2709,7 @@ def to_video(
         str(output_path),
         fps=output_fps,
         codec=codec,
-        macro_block_size=1,
+        macro_block_size=2,
         output_params=output_params,
     )
 
