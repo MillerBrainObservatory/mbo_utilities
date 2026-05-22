@@ -28,7 +28,7 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources --no-dev
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync
 
       - name: Install test dependencies
         run: uv pip install pytest
