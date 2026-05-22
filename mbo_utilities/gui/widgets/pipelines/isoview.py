@@ -286,25 +286,52 @@ class IsoviewPipelineWidget(PipelineWidget):
         # built JAR + JDK 11 in ~/repos/ if present.
         self._stitcher_spark_root: str = _auto_detect_spark_jar()
         self._stitcher_spark_java_home: str = _auto_detect_spark_jdk()
-        # Detection / match defaults are tuned for cellular fluorescence
-        # data (the common isoview case — GCaMP-labelled neurons,
-        # spheroids, etc.), not sub-resolution beads. sigma=4.0 matches
-        # ~6-pixel cell bodies, threshold=0.0004 keeps ~80-150 detections
-        # per view (we need >=12 correspondences after descriptor
-        # matching), and FAST_ROTATION tolerates the orthogonal
-        # VW00<->VW90 geometry where PRECISE_TRANSLATION's local
-        # descriptor fails. For bead datasets, dial sigma=1.8 /
-        # threshold=0.008 / PRECISE_TRANSLATION back in via the popup.
+        # Defaults mirror the Fiji BigStitcher bead workflow that drives
+        # the orthogonal-IsoView coarse→fine registration: DoG σ=1.8 /
+        # t=0.008, PRECISE_TRANSLATION descriptor match with AFFINE+RIGID
+        # regularization (λ=0.10), then ICP refinement, with the solver
+        # using the TWO_ROUND_ITERATIVE 5.0×/7.0px "RELAXED" preset.
+        # For cellular fluorescence (calcium imaging, spheroids), bump
+        # σ to 3-4 and threshold to ~0.0005-0.001 via the popup.
         self._stitcher_spark_label: str = "beads"
-        self._stitcher_spark_sigma: float = 4.0
-        self._stitcher_spark_threshold: float = 0.0004
+        self._stitcher_spark_sigma: float = 1.8
+        self._stitcher_spark_threshold: float = 0.008
         self._stitcher_spark_min_intensity: float = 0.0
         self._stitcher_spark_max_intensity: float = 65535.0
-        self._stitcher_spark_downsample_xy: int = 2
+        self._stitcher_spark_downsample_xy: int = 1
         self._stitcher_spark_downsample_z: int = 1
-        self._stitcher_spark_match_algorithm: str = "FAST_ROTATION"
+        self._stitcher_spark_max_spots: int = 5000
+        self._stitcher_spark_dog_type: str = "MAX"
+        self._stitcher_spark_localization: str = "QUADRATIC"
+
+        self._stitcher_spark_match_algorithm: str = "PRECISE_TRANSLATION"
         self._stitcher_spark_transformation_model: str = "AFFINE"
         self._stitcher_spark_regularization_model: str = "RIGID"
+        self._stitcher_spark_lambda: float = 0.10
+        self._stitcher_spark_view_scope: str = "ALL_AGAINST_ALL"
+        self._stitcher_spark_ip_scope: str = "OVERLAPPING_ONLY"
+        self._stitcher_spark_num_neighbors: int = 3
+        self._stitcher_spark_redundancy: int = 1
+        self._stitcher_spark_significance: float = 3.0
+        self._stitcher_spark_limit_search_radius: bool = False
+        self._stitcher_spark_search_radius: float = 100.0
+        self._stitcher_spark_coarse_ransac_max_error: float = 5.0
+        self._stitcher_spark_coarse_ransac_min_inliers: int = 12
+
+        # ICP refinement (second pass).
+        self._stitcher_spark_do_icp_refine: bool = True
+        self._stitcher_spark_icp_iterations: int = 100
+        self._stitcher_spark_icp_max_error: float = 5.0
+        self._stitcher_spark_icp_use_ransac: bool = True
+        self._stitcher_spark_icp_ransac_max_error: float = 3.0
+        self._stitcher_spark_icp_ransac_min_inliers: int = 12
+        self._stitcher_spark_icp_ransac_iterations: int = 200
+
+        # Global solver (run after each match round).
+        self._stitcher_spark_solver_method: str = "TWO_ROUND_ITERATIVE"
+        self._stitcher_spark_solver_relative_threshold: float = 5.0
+        self._stitcher_spark_solver_absolute_threshold: float = 7.0
+
         self._stitcher_spark_dialog: Any = None
 
         # Per-step output suffix shared by correct/fuse/stitcher dirs.
@@ -332,22 +359,16 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._correct_segment_threshold: float = 0.4
         self._correct_splitting: int = 10
 
-        # Fuse-mode state
-        self._fuse_blending_method: str = "geometric"
+        # Fuse-mode state. The fields below are per-view (one entry per
+        # camera-pair / view ID in ``arr.metadata.camera_view_map``).
+        # ``_fuse_view_params`` is a dict-of-dicts keyed by view ID;
+        # ``_fuse_active_view`` tracks which view the editor controls
+        # are currently bound to. Both initialized lazily in
+        # :meth:`_ensure_defaults` once the dataset's view list is known.
         self._fuse_output_suffix: str = ""  # appended to <method> folder name
-        self._fuse_blending_range: int = 20
-        self._fuse_flip_z: bool = False
-        self._fuse_flip_horizontal: bool = True
-        self._fuse_flip_vertical: bool = False
-        self._fuse_rotation: int = 0
-        self._fuse_transition_plane: int = -1  # -1 = None (center)
-        self._fuse_front_flag: int = 2
-        self._fuse_search_x_start: int = -50
-        self._fuse_search_x_stop: int = 50
-        self._fuse_search_x_step: int = 10
-        self._fuse_search_y_start: int = -50
-        self._fuse_search_y_stop: int = 50
-        self._fuse_search_y_step: int = 10
+        self._fuse_view_params: dict[int, dict] = {}
+        self._fuse_view_ids: list[int] = []
+        self._fuse_active_view: int | None = None
 
         # Microscope override (all modes). -1 = auto from XML.
         self._mic_overrides_enabled: bool = False
@@ -381,6 +402,47 @@ class IsoviewPipelineWidget(PipelineWidget):
             return None
         return _unwrap_array(iw.data[0])
 
+    @staticmethod
+    def _default_fuse_view_params() -> dict:
+        """Per-view defaults that seed the Fuse editor for a new dataset.
+
+        Mirrors the prior scalar defaults so behavior is unchanged when
+        a user never touches the View selector.
+        """
+        return {
+            "blending_method": "geometric",
+            "blending_range": 20,
+            "transition_plane": -1,  # -1 = None (center) in the UI
+            "front_flag": 2,
+            "flip_z": False,
+            "flip_horizontal": True,
+            "flip_vertical": False,
+            "rotation": 0,
+            "search_x_start": -50,
+            "search_x_stop": 50,
+            "search_x_step": 10,
+            "search_y_start": -50,
+            "search_y_stop": 50,
+            "search_y_step": 10,
+        }
+
+    def _fv(self, name: str):
+        """Read ``name`` from the active view's Fuse params dict."""
+        view = self._fuse_active_view
+        if view is None or view not in self._fuse_view_params:
+            return self._default_fuse_view_params()[name]
+        return self._fuse_view_params[view][name]
+
+    def _set_fv(self, name: str, value) -> None:
+        """Write ``name`` into the active view's Fuse params dict."""
+        view = self._fuse_active_view
+        if view is None:
+            return
+        params = self._fuse_view_params.setdefault(
+            view, self._default_fuse_view_params(),
+        )
+        params[name] = value
+
     def _ensure_defaults(self, arr: Any) -> None:
         """Compute per-dataset defaults once. Re-runs when the loaded
         IsoviewArray's scan_root changes (different dataset opened).
@@ -389,6 +451,21 @@ class IsoviewPipelineWidget(PipelineWidget):
         if self._initialized_for_scan_root == sr:
             return
         self._initialized_for_scan_root = sr
+
+        # Seed per-view Fuse params from the array's camera_view_map.
+        # Fallback view set {0, 90} matches isoview's default (VW00/VW90).
+        meta = getattr(arr, "metadata", None) or {}
+        cv = meta.get("camera_view_map") or {0: 0, 1: 0, 2: 90, 3: 90}
+        view_ids = sorted({int(v) for v in cv.values()}) or [0, 90]
+        self._fuse_view_ids = view_ids
+        self._fuse_view_params = {
+            vid: self._default_fuse_view_params() for vid in view_ids
+        }
+        if (
+            self._fuse_active_view is None
+            or self._fuse_active_view not in view_ids
+        ):
+            self._fuse_active_view = view_ids[0]
 
         # Default consolidate output: drop a .zarr sibling next to the
         # input scan_root. Suffix is kind-aware so the result for a
@@ -660,6 +737,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         ])
 
     def _draw_fuse_popup_rows(self) -> None:
+        self._draw_fuse_view_selector()
         self._draw_popup_columns([
             ("I/O options", self._draw_fuse_io_box),
             ("Fusion", self._draw_fuse_blending_box),
@@ -673,6 +751,64 @@ class IsoviewPipelineWidget(PipelineWidget):
              self._draw_microscope_overrides_box, True),
         ])
 
+    def _draw_fuse_view_selector(self) -> None:
+        """Per-view editor switcher.
+
+        Only the boxes tagged "editing VW##" follow this combo — Fusion,
+        View transforms, and Registration search. Crop bounds edits all
+        views in one stacked panel; I/O options and Microscope overrides
+        are dataset-wide.
+        """
+        if not self._fuse_view_ids:
+            return
+        labels = [f"VW{v:02d}" for v in self._fuse_view_ids]
+        try:
+            idx = self._fuse_view_ids.index(self._fuse_active_view)
+        except (ValueError, TypeError):
+            idx = 0
+            self._fuse_active_view = self._fuse_view_ids[0]
+        imgui.text_colored(_SUBSECTION_COLOR, "Per-view edits target:")
+        imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
+        imgui.set_next_item_width(_input_w())
+        with tooltip_marks_right():
+            changed, new_idx = imgui.combo("##fuse_view_selector", idx, labels)
+            if changed:
+                self._fuse_active_view = self._fuse_view_ids[new_idx]
+            set_tooltip(
+                "Each view (camera pair) carries its own blending, "
+                "transforms, and registration-search params.\n"
+                "Follows this combo:  Fusion · View transforms · "
+                "Registration search.\n"
+                "Crop bounds is per-view too but shows all views at "
+                "once. I/O options + Microscope are dataset-wide.\n"
+                "The active view's blending method names the fused "
+                "output sub-folder."
+            )
+        imgui.spacing()
+
+    def _draw_view_scope_badge(self, scope: str) -> None:
+        """One-line scope hint at the top of a Fuse-mode column box.
+
+        ``scope`` is ``"per_view"`` (binds to the View selector),
+        ``"all_views"`` (edits all views in one panel), or ``"shared"``
+        (dataset-wide, unaffected by the selector).
+        """
+        if scope == "per_view":
+            view = self._fuse_active_view
+            text = (
+                f"editing VW{view:02d}" if view is not None
+                else "per-view (no view loaded)"
+            )
+            color = _SUBSECTION_COLOR
+        elif scope == "all_views":
+            text = "edits all views"
+            color = imgui.ImVec4(0.7, 0.7, 0.7, 1.0)
+        else:
+            text = "shared across views"
+            color = imgui.ImVec4(0.7, 0.7, 0.7, 1.0)
+        imgui.text_colored(color, text)
+        imgui.spacing()
+
     def _draw_fuse_crop_box(self) -> None:
         """Crop-bounds editor inside the Fuse Parameters popup.
 
@@ -682,6 +818,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         straight into ``_isoview_crop_state`` so they're picked up by
         the floating window the next time Edit is pressed.
         """
+        self._draw_view_scope_badge("all_views")
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         from mbo_utilities.gui.widgets import isoview_crop as crop_window
 
@@ -793,7 +930,12 @@ class IsoviewPipelineWidget(PipelineWidget):
             ("Interest point detection",
              self._draw_stitcher_spark_detect_box),
             ("Spark runtime", self._draw_stitcher_spark_runtime_box),
-            ("Matching & solver", self._draw_stitcher_spark_match_box),
+            ("Coarse match (descriptor)",
+             self._draw_stitcher_spark_match_box),
+            ("Fine match (ICP)",
+             self._draw_stitcher_spark_icp_box),
+            ("Global solver",
+             self._draw_stitcher_spark_solver_box),
         ]
         for i, (title, draw_fn) in enumerate(subgroups):
             if i > 0:
@@ -949,6 +1091,44 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "anisotropic light-sheet data."
             )
 
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_max_spots = imgui.input_int(
+                "Limit detection", self._stitcher_spark_max_spots, 100, 1000,
+            )
+            set_tooltip(
+                "`--maxSpots`. Cap per-view detections to the N "
+                "brightest. 5000 matches the Fiji bead workflow; 0 "
+                "removes the limit."
+            )
+
+            types = ["MAX", "MIN", "BOTH"]
+            try:
+                idx = types.index(self._stitcher_spark_dog_type)
+            except ValueError:
+                idx = 0
+            imgui.set_next_item_width(_input_w())
+            changed, new_idx = imgui.combo("Peak type", idx, types)
+            if changed:
+                self._stitcher_spark_dog_type = types[new_idx]
+            set_tooltip(
+                "`--type`. MAX = bright peaks (beads, cells), MIN = "
+                "dark spots, BOTH = both."
+            )
+
+            locs = ["QUADRATIC", "NONE"]
+            try:
+                idx = locs.index(self._stitcher_spark_localization)
+            except ValueError:
+                idx = 0
+            imgui.set_next_item_width(_input_w())
+            changed, new_idx = imgui.combo("Localization", idx, locs)
+            if changed:
+                self._stitcher_spark_localization = locs[new_idx]
+            set_tooltip(
+                "`--localization`. Subpixel refinement of peak "
+                "centers. Use QUADRATIC unless detections look noisy."
+            )
+
     def _draw_stitcher_spark_match_box(self) -> None:
         """Pairwise matching algorithm + solver model. These change
         much less often than detection params — set once per dataset
@@ -1017,6 +1197,238 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "transformation toward a simpler one (lambda=0.1 by "
                 "default). RIGID keeps the affine close to a rigid "
                 "transform — good for two-view orthogonal stitching."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_lambda = imgui.input_float(
+                "Lambda", self._stitcher_spark_lambda, 0.01, 0.1, "%.2f",
+            )
+            set_tooltip(
+                "`--lambda`. Regularization strength. 0.10 = Fiji "
+                "default; higher pulls the affine closer to the "
+                "regularization model (Rigid)."
+            )
+
+            view_scopes = ["ALL_AGAINST_ALL", "OVERLAPPING_ONLY"]
+            try:
+                idx = view_scopes.index(self._stitcher_spark_view_scope)
+            except ValueError:
+                idx = 0
+            _text_disabled_wrapped("Compare views")
+            imgui.set_next_item_width(-1)
+            changed, new_idx = imgui.combo(
+                "##spark_view_scope", idx, view_scopes,
+            )
+            if changed:
+                self._stitcher_spark_view_scope = view_scopes[new_idx]
+            set_tooltip(
+                "`-vr`. ALL_AGAINST_ALL = every pair tested (Fiji's "
+                "default for orthogonal IsoView). OVERLAPPING_ONLY = "
+                "only pairs whose current bounds overlap."
+            )
+
+            ip_scopes = ["OVERLAPPING_ONLY", "ALL"]
+            try:
+                idx = ip_scopes.index(self._stitcher_spark_ip_scope)
+            except ValueError:
+                idx = 0
+            _text_disabled_wrapped("Compare IPs")
+            imgui.set_next_item_width(-1)
+            changed, new_idx = imgui.combo(
+                "##spark_ip_scope", idx, ip_scopes,
+            )
+            if changed:
+                self._stitcher_spark_ip_scope = ip_scopes[new_idx]
+            set_tooltip(
+                "`-ipfr`. Which IPs to test per pair. Fiji's \"all "
+                "interest points of overlapping views\" maps to "
+                "OVERLAPPING_ONLY."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_num_neighbors = imgui.input_int(
+                "Neighbors", self._stitcher_spark_num_neighbors, 1, 1,
+            )
+            set_tooltip(
+                "`-n`. Descriptor neighborhood size (PRECISE_TRANSLATION "
+                "only). 3 = Fiji default."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_redundancy = imgui.input_int(
+                "Redundancy", self._stitcher_spark_redundancy, 1, 1,
+            )
+            set_tooltip(
+                "`-r`. Descriptor redundancy. 1 = Fiji default."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_significance = imgui.input_float(
+                "Significance", self._stitcher_spark_significance,
+                0.1, 1.0, "%.2f",
+            )
+            set_tooltip(
+                "`-s`. How much better the best descriptor match must "
+                "be vs the second best. 3.0 = Fiji default."
+            )
+
+            _, self._stitcher_spark_limit_search_radius = imgui.checkbox(
+                "Limit search radius",
+                self._stitcher_spark_limit_search_radius,
+            )
+            set_tooltip(
+                "`-sr`. When off, descriptor search is unbounded. "
+                "Turn on for densely-packed beads to suppress far "
+                "false matches."
+            )
+            if self._stitcher_spark_limit_search_radius:
+                imgui.set_next_item_width(_input_w())
+                _, self._stitcher_spark_search_radius = imgui.input_float(
+                    "Search radius (px)",
+                    self._stitcher_spark_search_radius, 10.0, 50.0, "%.1f",
+                )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_coarse_ransac_max_error = imgui.input_float(
+                "RANSAC max error (px)",
+                self._stitcher_spark_coarse_ransac_max_error,
+                1.0, 5.0, "%.1f",
+            )
+            set_tooltip(
+                "`-rme`. RANSAC residual cutoff for the coarse "
+                "descriptor pass. 5 px = Fiji default; bump to 20 if "
+                "the first round produces too few correspondences."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_coarse_ransac_min_inliers = imgui.input_int(
+                "RANSAC min inliers",
+                self._stitcher_spark_coarse_ransac_min_inliers, 1, 4,
+            )
+            set_tooltip(
+                "`-rmni`. Minimum inlier count for a successful pair. "
+                "12 matches Fiji's affine min × inlier factor 3."
+            )
+
+    def _draw_stitcher_spark_icp_box(self) -> None:
+        """ICP refinement (the fine half of the coarse → fine workflow)."""
+        with tooltip_marks_right():
+            _, self._stitcher_spark_do_icp_refine = imgui.checkbox(
+                "Run ICP refinement",
+                self._stitcher_spark_do_icp_refine,
+            )
+            set_tooltip(
+                "Off = stop after the coarse descriptor pass + solve. "
+                "On = follow with `-m ICP` + a second solve. Fiji's "
+                "default beads workflow uses both."
+            )
+            if not self._stitcher_spark_do_icp_refine:
+                return
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_icp_iterations = imgui.input_int(
+                "ICP iterations",
+                self._stitcher_spark_icp_iterations, 10, 50,
+            )
+            set_tooltip(
+                "`-iit`. Max ICP iterations per pair. 100 = Fiji "
+                "default; spark CLI default is 200."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_icp_max_error = imgui.input_float(
+                "ICP max correspondence dist (px)",
+                self._stitcher_spark_icp_max_error,
+                1.0, 5.0, "%.1f",
+            )
+            set_tooltip(
+                "`-ime`. Maximum distance (in px) for ICP closest-"
+                "point pairing. 5.0 = Fiji default."
+            )
+
+            _, self._stitcher_spark_icp_use_ransac = imgui.checkbox(
+                "RANSAC every ICP iteration",
+                self._stitcher_spark_icp_use_ransac,
+            )
+            set_tooltip(
+                "`--icpUseRANSAC`. Re-filter correspondences with "
+                "RANSAC at every iteration. Fiji workflow: on."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_icp_ransac_max_error = imgui.input_float(
+                "ICP RANSAC max error (px)",
+                self._stitcher_spark_icp_ransac_max_error,
+                0.5, 2.0, "%.1f",
+            )
+            set_tooltip(
+                "`-rme` during ICP. 3.0 = Fiji default; spark CLI "
+                "default is 2.5."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_icp_ransac_min_inliers = imgui.input_int(
+                "ICP RANSAC min inliers",
+                self._stitcher_spark_icp_ransac_min_inliers, 1, 4,
+            )
+            set_tooltip(
+                "`-rmni` during ICP. 12 = Fiji workflow."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_icp_ransac_iterations = imgui.input_int(
+                "ICP RANSAC iterations",
+                self._stitcher_spark_icp_ransac_iterations, 50, 100,
+            )
+            set_tooltip(
+                "`-rit` during ICP. 200 = Fiji default."
+            )
+
+    def _draw_stitcher_spark_solver_box(self) -> None:
+        """Global optimization solver — runs once after each match round."""
+        with tooltip_marks_right():
+            methods = [
+                "TWO_ROUND_ITERATIVE", "TWO_ROUND_SIMPLE",
+                "ONE_ROUND_ITERATIVE", "ONE_ROUND_SIMPLE",
+            ]
+            try:
+                idx = methods.index(self._stitcher_spark_solver_method)
+            except ValueError:
+                idx = 0
+            _text_disabled_wrapped("Strategy")
+            imgui.set_next_item_width(-1)
+            changed, new_idx = imgui.combo(
+                "##spark_solver_method", idx, methods,
+            )
+            if changed:
+                self._stitcher_spark_solver_method = methods[new_idx]
+            set_tooltip(
+                "`--method`. TWO_ROUND_ITERATIVE = Fiji's \"Two-Round: "
+                "Handle unconnected tiles, remove wrong links RELAXED\" "
+                "preset; TWO_ROUND_SIMPLE = same without iterative "
+                "wrong-link removal; ONE_ROUND_* skip the second round."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_solver_relative_threshold = imgui.input_float(
+                "Relative threshold (×)",
+                self._stitcher_spark_solver_relative_threshold,
+                0.5, 1.0, "%.1f",
+            )
+            set_tooltip(
+                "`--relativeThreshold`. Drops a link when its error "
+                "exceeds this many × the average. 5.0× = Fiji RELAXED."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_spark_solver_absolute_threshold = imgui.input_float(
+                "Absolute threshold (px)",
+                self._stitcher_spark_solver_absolute_threshold,
+                0.5, 1.0, "%.1f",
+            )
+            set_tooltip(
+                "`--absoluteThreshold`. Drops a link with error above "
+                "this many px. 7.0 px = Fiji RELAXED."
             )
 
     def _draw_consolidate_io_box(self) -> None:
@@ -1237,11 +1649,25 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
     def _draw_fuse_io_box(self) -> None:
-        """Fuse-mode I/O options for the Parameters popup. The
-        top-level ``output_suffix`` lives in the Run-tab Output section
-        now (per-method blending suffix stays under Fusion).
+        """Fuse-mode I/O options for the Parameters popup.
+
+        Dataset-wide: format / codec / workers / pyramid + the
+        output-folder suffix (one fused tree per multi_fuse run).
         """
+        self._draw_view_scope_badge("shared")
         with tooltip_marks_right():
+            imgui.set_next_item_width(_input_w())
+            _, self._fuse_output_suffix = imgui.input_text(
+                "Output suffix", self._fuse_output_suffix or "",
+            )
+            set_tooltip(
+                "Appended to the fused output folder name so multiple "
+                "parameter sweeps coexist:\n"
+                "  <raw>.fused/<method>[_<suffix>]/\n"
+                "<method> = the active view's blending method.\n"
+                "Leave blank to use the bare <method>/ folder."
+            )
+
             formats = ["zarr", "tif", "klb"]
             try:
                 idx = formats.index(self._output_format)
@@ -1304,16 +1730,17 @@ class IsoviewPipelineWidget(PipelineWidget):
                 set_tooltip("Max pyramid levels beyond the full-res /0.")
 
     def _draw_fuse_blending_box(self) -> None:
+        self._draw_view_scope_badge("per_view")
         with tooltip_marks_right():
             methods = ["geometric", "adaptive", "auto", "average"]
             try:
-                idx = methods.index(self._fuse_blending_method)
+                idx = methods.index(self._fv("blending_method"))
             except ValueError:
                 idx = 0
             imgui.set_next_item_width(_input_w())
             changed, new_idx = imgui.combo("##blending_method", idx, methods)
             if changed:
-                self._fuse_blending_method = methods[new_idx]
+                self._set_fv("blending_method", methods[new_idx])
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("blending_method", "Blending method")
             set_tooltip(
@@ -1324,20 +1751,10 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             imgui.set_next_item_width(_input_w())
-            _, self._fuse_output_suffix = imgui.input_text(
-                "Output suffix", self._fuse_output_suffix or "",
+            _, new_br = imgui.input_int(
+                "##blending_range", int(self._fv("blending_range")), 1, 5,
             )
-            set_tooltip(
-                "Appended to the fused output folder name so multiple "
-                "parameter sweeps coexist:\n"
-                "  <raw>.fused/<method>[_<suffix>]/\n"
-                "Leave blank to use the bare <method>/ folder."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._fuse_blending_range = imgui.input_int(
-                "##blending_range", self._fuse_blending_range, 1, 5,
-            )
+            self._set_fv("blending_range", new_br)
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("blending_range", "Blending range")
             set_tooltip(
@@ -1345,9 +1762,10 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             imgui.set_next_item_width(_input_w())
-            _, self._fuse_transition_plane = imgui.input_int(
-                "##transition_plane", self._fuse_transition_plane, 1, 5,
+            _, new_tp = imgui.input_int(
+                "##transition_plane", int(self._fv("transition_plane")), 1, 5,
             )
+            self._set_fv("transition_plane", new_tp)
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("transition_plane", "Transition plane")
             set_tooltip(
@@ -1355,9 +1773,10 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             imgui.set_next_item_width(_input_w())
-            _, self._fuse_front_flag = imgui.input_int(
-                "##front_flag", self._fuse_front_flag, 1, 1,
+            _, new_ff = imgui.input_int(
+                "##front_flag", int(self._fv("front_flag")), 1, 1,
             )
+            self._set_fv("front_flag", new_ff)
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("front_flag", "Front camera")
             set_tooltip(
@@ -1367,46 +1786,51 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
     def _draw_fuse_transforms_box(self) -> None:
+        self._draw_view_scope_badge("per_view")
         with tooltip_marks_right():
-            _, self._fuse_flip_z = imgui.checkbox("Flip Z", self._fuse_flip_z)
+            _, new_fz = imgui.checkbox("Flip Z", bool(self._fv("flip_z")))
+            self._set_fv("flip_z", new_fz)
             set_tooltip(
                 "Flip the second camera along Z before fusion.\n"
                 "Use for opposing camera pairs."
             )
 
-            _, self._fuse_flip_horizontal = imgui.checkbox(
-                "Flip horizontal", self._fuse_flip_horizontal,
+            _, new_fh = imgui.checkbox(
+                "Flip horizontal", bool(self._fv("flip_horizontal")),
             )
+            self._set_fv("flip_horizontal", new_fh)
             set_tooltip("Flip the second camera horizontally before fusion.")
 
-            _, self._fuse_flip_vertical = imgui.checkbox(
-                "Flip vertical", self._fuse_flip_vertical,
+            _, new_fv = imgui.checkbox(
+                "Flip vertical", bool(self._fv("flip_vertical")),
             )
+            self._set_fv("flip_vertical", new_fv)
             set_tooltip("Flip the second camera vertically before fusion.")
 
             rotations = ["0", "+90 (cw)", "−90 (ccw)"]
-            idx = {0: 0, 1: 1, -1: 2}.get(self._fuse_rotation, 0)
+            idx = {0: 0, 1: 1, -1: 2}.get(int(self._fv("rotation")), 0)
             imgui.set_next_item_width(_input_w())
             r_changed, r_new = imgui.combo("Rotation", idx, rotations)
             if r_changed:
-                self._fuse_rotation = {0: 0, 1: 1, 2: -1}[r_new]
+                self._set_fv("rotation", {0: 0, 1: 1, 2: -1}[r_new])
             set_tooltip(
                 "Rotation applied to the second camera before fusion."
             )
 
     def _draw_fuse_search_box(self) -> None:
+        self._draw_view_scope_badge("per_view")
         with tooltip_marks_right():
             imgui.text_colored(_SUBSECTION_COLOR, "X offsets")
-            for label, attr in (
-                ("Start##sx", "_fuse_search_x_start"),
-                ("Stop##sx", "_fuse_search_x_stop"),
-                ("Step##sx", "_fuse_search_x_step"),
+            for label, key in (
+                ("Start##sx", "search_x_start"),
+                ("Stop##sx", "search_x_stop"),
+                ("Step##sx", "search_x_step"),
             ):
                 imgui.set_next_item_width(_input_w())
                 _, new_val = imgui.input_int(
-                    label, getattr(self, attr), 1, 10,
+                    label, int(self._fv(key)), 1, 10,
                 )
-                setattr(self, attr, new_val)
+                self._set_fv(key, new_val)
                 set_tooltip(
                     "Pixel offsets searched along X during camera-pair "
                     "registration\n(start, stop, step)."
@@ -1414,16 +1838,16 @@ class IsoviewPipelineWidget(PipelineWidget):
 
             imgui.spacing()
             imgui.text_colored(_SUBSECTION_COLOR, "Y offsets")
-            for label, attr in (
-                ("Start##sy", "_fuse_search_y_start"),
-                ("Stop##sy", "_fuse_search_y_stop"),
-                ("Step##sy", "_fuse_search_y_step"),
+            for label, key in (
+                ("Start##sy", "search_y_start"),
+                ("Stop##sy", "search_y_stop"),
+                ("Step##sy", "search_y_step"),
             ):
                 imgui.set_next_item_width(_input_w())
                 _, new_val = imgui.input_int(
-                    label, getattr(self, attr), 1, 10,
+                    label, int(self._fv(key)), 1, 10,
                 )
-                setattr(self, attr, new_val)
+                self._set_fv(key, new_val)
                 set_tooltip(
                     "Pixel offsets searched along Y during camera-pair "
                     "registration\n(start, stop, step)."
@@ -1528,40 +1952,62 @@ class IsoviewPipelineWidget(PipelineWidget):
         )
 
     def _submit_stitcher(self, arr: Any) -> None:
-        """Spawn ``generate_bigstitcher_xml`` against the raw root that
-        sits beside the loaded corrected / fused tree.
+        """Spawn ``generate_bigstitcher_xml`` against the loaded tree.
 
-        The function scans ``config.fused_dir`` itself, so we only need
-        to forward the raw root + corrected/fused/stitcher suffixes;
-        no fusion-stage args (workers, blending, …) apply.
+        Prefers the ``.corrected*`` or ``.fused*`` tree the array was
+        loaded from — upstream ProcessingConfig now accepts those
+        directly, so the raw acquisition root is no longer required.
+        Falls back to a sibling raw root only for legacy datasets that
+        predate the embedded ``ome.isoview`` metadata.
+
+        Forwards ``specimens`` and ``timepoints`` from the loaded array
+        so ProcessingConfig skips its auto-detect step entirely.
         """
         from mbo_utilities.arrays.isoview.array import _sibling_raw_root
+
         scan_root = Path(arr.scan_root)
-        raw_root = _sibling_raw_root(arr)
-        if raw_root is None:
-            anchor = scan_root.parent
+        # Walk up from scan_root looking for a .corrected* or .fused* dir.
+        # arr.scan_root for kind="fused" points at the method dir (e.g.
+        # geometric) under <root>.fused/; for "corrected" it's the SPM##.
+        input_dir: Path | None = None
+        for ancestor in (scan_root, *scan_root.parents):
+            n = ancestor.name
             for suf in (".corrected", ".fused"):
-                if anchor.name.endswith(suf):
-                    raw_root = anchor.parent / anchor.name[: -len(suf)]
+                idx = n.find(suf)
+                if idx < 0:
+                    continue
+                rest = n[idx + len(suf):]
+                if rest == "" or rest.startswith("_"):
+                    input_dir = ancestor
                     break
-        if raw_root is None or not raw_root.is_dir():
+            if input_dir is not None:
+                break
+
+        # legacy fallback: sibling raw root for pre-isoview-meta data
+        if input_dir is None:
+            input_dir = _sibling_raw_root(arr)
+        if input_dir is None or not input_dir.is_dir():
             self._last_status = (
-                "Cannot locate raw acquisition root next to the loaded "
-                "tree. Move or symlink the raw folder beside the "
-                ".corrected / .fused output before exporting."
+                "Cannot locate a corrected or fused tree to export from."
             )
             return
+
+        meta = arr.metadata if hasattr(arr, "metadata") else {}
+        specimen = meta.get("specimen", 0)
+
         args = {
-            "input_path": str(raw_root),
+            "input_path": str(input_dir),
             "output_suffix": self._fuse_output_suffix or self._correct_output_suffix,
             "stitcher_suffix": self._stitcher_suffix,
             "coarse_align": self._stitcher_coarse_align,
+            "specimens": [int(specimen)],
+            "timepoints": list(getattr(arr, "_timepoints", []) or []),
         }
         args.update(self._microscope_kwargs())
         self._spawn(
             "isoview_bigstitcher", args,
-            description=f"BigStitcher XML: {raw_root.name}",
-            output_path=self._stitcher_output_path or str(raw_root),
+            description=f"BigStitcher XML: {input_dir.name}",
+            output_path=self._stitcher_output_path or str(input_dir),
         )
 
     def _submit_spark_register(self, arr: Any) -> None:
@@ -1600,20 +2046,66 @@ class IsoviewPipelineWidget(PipelineWidget):
             return
         xml_path = xml_candidates[0]
 
+        max_spots = int(self._stitcher_spark_max_spots)
+        search_radius = (
+            float(self._stitcher_spark_search_radius)
+            if self._stitcher_spark_limit_search_radius
+            else None
+        )
         args = {
             "xml_path": str(xml_path),
             "spark_root": self._stitcher_spark_root,
             "java_home": self._stitcher_spark_java_home or None,
             "label": self._stitcher_spark_label,
+            # detection
             "sigma": float(self._stitcher_spark_sigma),
             "threshold": float(self._stitcher_spark_threshold),
             "min_intensity": float(self._stitcher_spark_min_intensity),
             "max_intensity": float(self._stitcher_spark_max_intensity),
             "downsample_xy": int(self._stitcher_spark_downsample_xy),
             "downsample_z": int(self._stitcher_spark_downsample_z),
-            "match_algorithm": self._stitcher_spark_match_algorithm,
+            "max_spots": max_spots if max_spots > 0 else None,
+            "dog_type": self._stitcher_spark_dog_type,
+            "localization": self._stitcher_spark_localization,
+            # coarse match
+            "coarse_method": self._stitcher_spark_match_algorithm,
             "transformation_model": self._stitcher_spark_transformation_model,
             "regularization_model": self._stitcher_spark_regularization_model,
+            "lambda_reg": float(self._stitcher_spark_lambda),
+            "view_registration_scope": self._stitcher_spark_view_scope,
+            "interestpoints_for_reg": self._stitcher_spark_ip_scope,
+            "num_neighbors": int(self._stitcher_spark_num_neighbors),
+            "redundancy": int(self._stitcher_spark_redundancy),
+            "significance": float(self._stitcher_spark_significance),
+            "search_radius": search_radius,
+            "coarse_ransac_max_error": float(
+                self._stitcher_spark_coarse_ransac_max_error
+            ),
+            "coarse_ransac_min_inliers": int(
+                self._stitcher_spark_coarse_ransac_min_inliers
+            ),
+            # ICP refine
+            "do_icp_refine": bool(self._stitcher_spark_do_icp_refine),
+            "icp_iterations": int(self._stitcher_spark_icp_iterations),
+            "icp_max_error": float(self._stitcher_spark_icp_max_error),
+            "icp_use_ransac": bool(self._stitcher_spark_icp_use_ransac),
+            "icp_ransac_max_error": float(
+                self._stitcher_spark_icp_ransac_max_error
+            ),
+            "icp_ransac_min_inliers": int(
+                self._stitcher_spark_icp_ransac_min_inliers
+            ),
+            "icp_ransac_iterations": int(
+                self._stitcher_spark_icp_ransac_iterations
+            ),
+            # solver
+            "solver_method": self._stitcher_spark_solver_method,
+            "solver_relative_threshold": float(
+                self._stitcher_spark_solver_relative_threshold
+            ),
+            "solver_absolute_threshold": float(
+                self._stitcher_spark_solver_absolute_threshold
+            ),
         }
         self._spawn(
             "isoview_bigstitcher_register", args,
@@ -1692,14 +2184,54 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "the .corrected/ tree before running multi_fuse."
             )
             return
-        transition_plane: int | None = (
-            None if self._fuse_transition_plane < 0
-            else int(self._fuse_transition_plane)
+        # Resolve the active view's params as the scalar defaults; the
+        # full per-view dicts go into the *_by_view kwargs so each pair
+        # picks up its own settings during multi_fuse.
+        active_view = self._fuse_active_view
+        if active_view is None or active_view not in self._fuse_view_params:
+            active_view = (self._fuse_view_ids or [0])[0]
+        active = self._fuse_view_params.get(
+            active_view, self._default_fuse_view_params(),
         )
+
+        def _tp(val: int) -> int | None:
+            return None if int(val) < 0 else int(val)
+
+        by_view: dict[str, dict[int, Any]] = {
+            "blending_method_by_view": {},
+            "blending_range_by_view": {},
+            "transition_plane_by_view": {},
+            "front_flag_by_view": {},
+            "flip_z_by_view": {},
+            "flip_horizontal_by_view": {},
+            "flip_vertical_by_view": {},
+            "rotation_by_view": {},
+            "search_offsets_x_by_view": {},
+            "search_offsets_y_by_view": {},
+        }
+        for vid, p in self._fuse_view_params.items():
+            by_view["blending_method_by_view"][vid] = p["blending_method"]
+            by_view["blending_range_by_view"][vid] = int(p["blending_range"])
+            by_view["transition_plane_by_view"][vid] = _tp(p["transition_plane"])
+            by_view["front_flag_by_view"][vid] = int(p["front_flag"])
+            by_view["flip_z_by_view"][vid] = bool(p["flip_z"])
+            by_view["flip_horizontal_by_view"][vid] = bool(p["flip_horizontal"])
+            by_view["flip_vertical_by_view"][vid] = bool(p["flip_vertical"])
+            by_view["rotation_by_view"][vid] = int(p["rotation"])
+            by_view["search_offsets_x_by_view"][vid] = [
+                int(p["search_x_start"]),
+                int(p["search_x_stop"]),
+                int(p["search_x_step"]),
+            ]
+            by_view["search_offsets_y_by_view"][vid] = [
+                int(p["search_y_start"]),
+                int(p["search_y_stop"]),
+                int(p["search_y_step"]),
+            ]
+
         args = {
             "input_path": str(raw_root),
             "output_dir": self._output_dir or None,
-            "output_suffix": self._fuse_output_suffix,
             "output_format": self._output_format,
             "compression": (
                 None if self._compression == "none" else self._compression
@@ -1709,25 +2241,29 @@ class IsoviewPipelineWidget(PipelineWidget):
             "workers": self._workers,
             "pyramid": self._pyramid,
             "pyramid_max_layers": self._pyramid_max_layers,
-            "blending_method": self._fuse_blending_method,
             "output_suffix": (self._fuse_output_suffix or "").strip() or None,
-            "blending_range": self._fuse_blending_range,
-            "transition_plane": transition_plane,
-            "front_flag": self._fuse_front_flag,
-            "flip_z": self._fuse_flip_z,
-            "flip_horizontal": self._fuse_flip_horizontal,
-            "flip_vertical": self._fuse_flip_vertical,
-            "rotation": self._fuse_rotation,
+            # Scalar defaults seeded from the active view — these name the
+            # output sub-folder and serve as fall-throughs for any view
+            # not present in the per-view dicts.
+            "blending_method": active["blending_method"],
+            "blending_range": int(active["blending_range"]),
+            "transition_plane": _tp(active["transition_plane"]),
+            "front_flag": int(active["front_flag"]),
+            "flip_z": bool(active["flip_z"]),
+            "flip_horizontal": bool(active["flip_horizontal"]),
+            "flip_vertical": bool(active["flip_vertical"]),
+            "rotation": int(active["rotation"]),
             "search_offsets_x": [
-                self._fuse_search_x_start,
-                self._fuse_search_x_stop,
-                self._fuse_search_x_step,
+                int(active["search_x_start"]),
+                int(active["search_x_stop"]),
+                int(active["search_x_step"]),
             ],
             "search_offsets_y": [
-                self._fuse_search_y_start,
-                self._fuse_search_y_stop,
-                self._fuse_search_y_step,
+                int(active["search_y_start"]),
+                int(active["search_y_stop"]),
+                int(active["search_y_step"]),
             ],
+            **by_view,
         }
         # Always pass an explicit timepoints list for fuse: isoview's
         # ProcessingConfig.__post_init__ auto-detects timepoints from
@@ -1768,7 +2304,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         args.update(crop_state.to_config_args(arr))
         self._spawn(
             "isoview_fuse", args,
-            description=f"multi_fuse ({self._fuse_blending_method}): "
+            description=f"multi_fuse ({active['blending_method']}): "
                         f"{raw_root.name}",
             output_path=self._output_dir or str(raw_root),
         )

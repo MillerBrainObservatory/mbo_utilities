@@ -839,6 +839,7 @@ def _build_isoview_processing_config(args: dict):
         "pyramid",
         "pyramid_max_layers",
         "timepoints",
+        "specimens",
         "segment_mode",
         "gauss_kernel",
         "gauss_sigma",
@@ -857,6 +858,19 @@ def _build_isoview_processing_config(args: dict):
         "flip_vertical",
         "rotation",
         "front_flag",
+        # Per-view overrides — dict[int, T] keyed by view ID. Resolved
+        # by isoview's ProcessingConfig.get_blend(view); views absent
+        # from a dict fall back to the scalar above.
+        "blending_method_by_view",
+        "blending_range_by_view",
+        "transition_plane_by_view",
+        "front_flag_by_view",
+        "flip_z_by_view",
+        "flip_horizontal_by_view",
+        "flip_vertical_by_view",
+        "rotation_by_view",
+        "search_offsets_x_by_view",
+        "search_offsets_y_by_view",
         "pixel_spacing_z",
         "detection_objective_mag",
         "pixel_spacing_camera",
@@ -878,6 +892,10 @@ def _build_isoview_processing_config(args: dict):
         config_kwargs["search_offsets_x"] = tuple(args["search_offsets_x"])
     if args.get("search_offsets_y") is not None:
         config_kwargs["search_offsets_y"] = tuple(args["search_offsets_y"])
+    for key in ("search_offsets_x_by_view", "search_offsets_y_by_view"):
+        d = args.get(key)
+        if d is not None:
+            config_kwargs[key] = {int(v): tuple(off) for v, off in d.items()}
 
     return ProcessingConfig(**config_kwargs)
 
@@ -1085,16 +1103,23 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
 
 
 def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
-    """Run bigstitcher-spark's detect → match → solver pipeline.
+    """Run bigstitcher-spark's coarse → fine registration pipeline.
 
-    Mutates the dataset.xml in place, adding interest-point detections,
-    pairwise matches, and the solved per-view ViewTransforms.
+    Mutates ``dataset.xml`` in place. Five spark stages run sequentially:
+
+      1. ``detect-interestpoints`` (DoG)
+      2. ``match-interestpoints`` (descriptor pass, e.g. PRECISE_TRANSLATION)
+      3. ``solver`` (global optimization)
+      4. ``match-interestpoints`` (ICP refinement, when ``do_icp_refine``)
+      5. ``solver`` again
 
     Required args:
       - xml_path: path to dataset.xml
       - spark_root: path to bigstitcher-spark executables dir OR fat JAR
 
-    Optional args: see ``isoview.bigstitcher.register``.
+    Optional args: see :func:`isoview.bigstitcher.register`. Both the
+    new keys (``coarse_method``, ``solver_method``, …) and the legacy
+    ``match_algorithm`` alias are accepted.
     """
     from isoview import bigstitcher
 
@@ -1108,51 +1133,120 @@ def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
     if not spark_root.exists():
         raise FileNotFoundError(f"spark_root does not exist: {spark_root}")
 
-    kwargs = {
-        k: args[k]
-        for k in (
-            "label", "sigma", "threshold",
-            "downsample_xy", "downsample_z",
-            "min_intensity", "max_intensity",
-            "match_algorithm", "transformation_model", "regularization_model",
-            "lambda_reg", "view_registration_scope",
-            "ransac_min_inliers", "ransac_max_error",
-            "clear_correspondences",
-            "java_home", "spark_memory_gb", "spark_threads",
-        )
-        if k in args and args[k] is not None
-    }
+    # Legacy alias: GUI used to send `match_algorithm`; rename to the
+    # new `coarse_method` keyword if the caller hasn't already.
+    if "coarse_method" not in args and "match_algorithm" in args:
+        args = dict(args)
+        args["coarse_method"] = args.pop("match_algorithm")
 
-    monitor.update(0.1, "BigStitcher-Spark: detect-interestpoints")
-    bigstitcher.detect_interestpoints(xml_path, spark_root, log=logger, **{
-        k: v for k, v in kwargs.items() if k in (
-            "label", "sigma", "threshold",
-            "downsample_xy", "downsample_z",
-            "min_intensity", "max_intensity",
-            "java_home", "spark_memory_gb", "spark_threads",
-        )
-    })
+    runtime_keys = ("java_home", "spark_memory_gb", "spark_threads")
 
-    monitor.update(0.5, "BigStitcher-Spark: match-interestpoints")
-    bigstitcher.match_interestpoints(xml_path, spark_root, log=logger, **{
-        k: v for k, v in kwargs.items() if k in (
-            "label",
-            "match_algorithm", "transformation_model", "regularization_model",
-            "lambda_reg", "view_registration_scope",
-            "ransac_min_inliers", "ransac_max_error",
-            "clear_correspondences",
-            "java_home", "spark_memory_gb", "spark_threads",
-        )
-    })
+    def _pick(keys):
+        return {
+            k: args[k] for k in keys
+            if k in args and args[k] is not None
+        }
 
-    monitor.update(0.85, "BigStitcher-Spark: solver")
-    bigstitcher.solver(xml_path, spark_root, log=logger, **{
-        k: v for k, v in kwargs.items() if k in (
-            "label",
-            "transformation_model", "regularization_model", "lambda_reg",
-            "java_home", "spark_memory_gb", "spark_threads",
+    detect_kwargs = _pick((
+        "label", "sigma", "threshold",
+        "downsample_xy", "downsample_z",
+        "min_intensity", "max_intensity",
+        "max_spots", "dog_type", "localization",
+        "overlapping_only_detect",
+        *runtime_keys,
+    ))
+    # bigstitcher.detect_interestpoints expects ``overlapping_only``, not the
+    # prefixed name the register() facade uses.
+    if "overlapping_only_detect" in detect_kwargs:
+        detect_kwargs["overlapping_only"] = detect_kwargs.pop(
+            "overlapping_only_detect"
         )
-    })
+
+    common_match_keys = (
+        "label",
+        "transformation_model", "regularization_model", "lambda_reg",
+        "view_registration_scope", "interestpoints_for_reg",
+        *runtime_keys,
+    )
+    coarse_kwargs = _pick((
+        *common_match_keys,
+        "coarse_method",
+        "num_neighbors", "redundancy", "significance", "search_radius",
+        "coarse_ransac_max_error", "coarse_ransac_min_inliers",
+    ))
+    # rename register()-style names to match_interestpoints()-style.
+    if "coarse_method" in coarse_kwargs:
+        coarse_kwargs["method"] = coarse_kwargs.pop("coarse_method")
+    if "coarse_ransac_max_error" in coarse_kwargs:
+        coarse_kwargs["ransac_max_error"] = coarse_kwargs.pop(
+            "coarse_ransac_max_error"
+        )
+    if "coarse_ransac_min_inliers" in coarse_kwargs:
+        coarse_kwargs["ransac_min_inliers"] = coarse_kwargs.pop(
+            "coarse_ransac_min_inliers"
+        )
+
+    icp_kwargs = _pick((
+        *common_match_keys,
+        "icp_iterations", "icp_max_error", "icp_use_ransac",
+        "icp_ransac_max_error", "icp_ransac_min_inliers",
+        "icp_ransac_iterations",
+    ))
+    icp_kwargs["method"] = "ICP"
+    if "icp_ransac_max_error" in icp_kwargs:
+        icp_kwargs["ransac_max_error"] = icp_kwargs.pop("icp_ransac_max_error")
+    if "icp_ransac_min_inliers" in icp_kwargs:
+        icp_kwargs["ransac_min_inliers"] = icp_kwargs.pop(
+            "icp_ransac_min_inliers"
+        )
+    if "icp_ransac_iterations" in icp_kwargs:
+        icp_kwargs["ransac_iterations"] = icp_kwargs.pop(
+            "icp_ransac_iterations"
+        )
+
+    solver_kwargs = _pick((
+        "label",
+        "transformation_model", "regularization_model", "lambda_reg",
+        "solver_method",
+        "solver_relative_threshold", "solver_absolute_threshold",
+        *runtime_keys,
+    ))
+    if "solver_method" in solver_kwargs:
+        solver_kwargs["method"] = solver_kwargs.pop("solver_method")
+    if "solver_relative_threshold" in solver_kwargs:
+        solver_kwargs["relative_threshold"] = solver_kwargs.pop(
+            "solver_relative_threshold"
+        )
+    if "solver_absolute_threshold" in solver_kwargs:
+        solver_kwargs["absolute_threshold"] = solver_kwargs.pop(
+            "solver_absolute_threshold"
+        )
+
+    do_icp = bool(args.get("do_icp_refine", True))
+
+    monitor.update(0.05, "BigStitcher-Spark: detect-interestpoints")
+    bigstitcher.detect_interestpoints(
+        xml_path, spark_root, log=logger, **detect_kwargs
+    )
+
+    monitor.update(0.30, "BigStitcher-Spark: coarse match (descriptor)")
+    bigstitcher.match_interestpoints(
+        xml_path, spark_root, log=logger,
+        clear_correspondences=True, **coarse_kwargs,
+    )
+
+    monitor.update(0.55, "BigStitcher-Spark: solver (post-coarse)")
+    bigstitcher.solver(xml_path, spark_root, log=logger, **solver_kwargs)
+
+    if do_icp:
+        monitor.update(0.70, "BigStitcher-Spark: fine match (ICP)")
+        bigstitcher.match_interestpoints(
+            xml_path, spark_root, log=logger,
+            clear_correspondences=True, **icp_kwargs,
+        )
+
+        monitor.update(0.90, "BigStitcher-Spark: solver (post-ICP)")
+        bigstitcher.solver(xml_path, spark_root, log=logger, **solver_kwargs)
 
     monitor.finish(f"BigStitcher registration complete: {xml_path}")
     logger.info(f"BigStitcher registration completed; XML updated: {xml_path}")
