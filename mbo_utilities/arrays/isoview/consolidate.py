@@ -167,17 +167,17 @@ _MIN_INT_RE = re.compile(
 # (mask2D, transformedMask2D) drop one CM and stay keyed by the
 # remaining (cam, vw).
 _FUSED_MASK_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_VW(\d+)\.mask\."
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_VW(\d+)(?:_CHN(\d+))?\.mask\."
     r"(?:ome\.tif|tif|tiff|zarr|klb)$"
 )
 _FUSION_MASK_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_VW(\d+)\.fusionMask\.(?:tif|tiff)$"
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_VW(\d+)(?:_CHN(\d+))?\.fusionMask\.(?:tif|tiff)$"
 )
 _MASK2D_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)_VW(\d+)\.mask2D\.(?:tif|tiff)$"
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_VW(\d+)(?:_CHN(\d+))?\.mask2D\.(?:tif|tiff)$"
 )
 _TRANSFORMED_MASK2D_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)_VW(\d+)\.transformedMask2D\.(?:tif|tiff)$"
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_VW(\d+)(?:_CHN(\d+))?\.transformedMask2D\.(?:tif|tiff)$"
 )
 
 
@@ -219,12 +219,13 @@ def _scan_fused_companions(method_dir: Path) -> dict[str, dict[int, dict[tuple, 
     Returns the four fused-specific companion kinds, keyed differently
     based on file scope:
 
-    Pair-level keys = ``(cam0, cam1, vw)`` — match the (cam0, cam1, vw)
-    tuples returned by :func:`IsoviewArray(kind="fused").views`:
+    Pair-level keys = ``(cam0, cam1, vw, chn)`` — match the tuples
+    returned by :func:`IsoviewArray(kind="fused").views`. ``chn=-1``
+    when the filename omits the trailing ``_CHN##``:
       - ``"mask"``         — 3D combined ``mask.zarr``
       - ``"fusion_mask"``  — 2D blending boundary ``fusionMask.tif``
 
-    Single-cam-in-pair keys = ``(cam, vw)`` — one file per source
+    Single-cam-in-pair keys = ``(cam, vw, chn)`` — one file per source
     camera within each pair:
       - ``"mask2D"``               — 2D depth-encoded slice mask
       - ``"transformedMask2D"``    — 2D slice mask AFTER camera transform
@@ -281,41 +282,46 @@ def _scan_fused_companions(method_dir: Path) -> dict[str, dict[int, dict[tuple, 
             if ti is None:
                 continue
             if m_mask:
-                key = (int(m_mask.group(3)), int(m_mask.group(4)), int(m_mask.group(5)))
+                chn = int(m_mask.group(6)) if m_mask.group(6) is not None else -1
+                key = (int(m_mask.group(3)), int(m_mask.group(4)), int(m_mask.group(5)), chn)
                 out["mask"].setdefault(ti, {})[key] = f
             elif m_fus:
-                key = (int(m_fus.group(3)), int(m_fus.group(4)), int(m_fus.group(5)))
+                chn = int(m_fus.group(6)) if m_fus.group(6) is not None else -1
+                key = (int(m_fus.group(3)), int(m_fus.group(4)), int(m_fus.group(5)), chn)
                 out["fusion_mask"].setdefault(ti, {})[key] = f
             elif m_m2:
-                key = (int(m_m2.group(3)), int(m_m2.group(4)))
+                chn = int(m_m2.group(5)) if m_m2.group(5) is not None else -1
+                key = (int(m_m2.group(3)), int(m_m2.group(4)), chn)
                 out["mask2D"].setdefault(ti, {})[key] = f
             elif m_tm:
-                key = (int(m_tm.group(3)), int(m_tm.group(4)))
+                chn = int(m_tm.group(5)) if m_tm.group(5) is not None else -1
+                key = (int(m_tm.group(3)), int(m_tm.group(4)), chn)
                 out["transformedMask2D"].setdefault(ti, {})[key] = f
 
     return out
 
 
 def _remap_single_cam_to_pair(
-    per_cam_vw: dict[int, dict[tuple[int, int], Path]],
-    pair_view_keys: list[tuple[int, int, int]],
+    per_cam_vw: dict[int, dict[tuple[int, int, int], Path]],
+    pair_view_keys: list[tuple[int, int, int, int]],
     cam_position: int,  # 0 → cam0 of each pair; 1 → cam1
 ) -> dict[int, dict[tuple, Path]]:
-    """Pivot a (cam, vw)-keyed scanner to match pair-tuple view_keys.
+    """Pivot a (cam, vw, chn)-keyed scanner to match pair-tuple view_keys.
 
-    The mask2D / transformedMask2D scanners key by (cam, vw) — one
+    The mask2D / transformedMask2D scanners key by (cam, vw, chn) — one
     entry per source camera. For consolidation we want them indexed
-    by the pair (cam0, cam1, vw) so they line up with the channel
+    by the pair (cam0, cam1, vw, chn) so they line up with the channel
     axis of the consolidated array. This walks each pair, looks up
     the right single-cam entry, and rebuilds the scanner shape.
+    ``chn=-1`` denotes filenames that omit the trailing ``_CHN##``.
     """
     out: dict[int, dict[tuple, Path]] = {}
     for ti, by_cam in per_cam_vw.items():
         per_pair: dict[tuple, Path] = {}
         for pair in pair_view_keys:
-            cam0, cam1, vw = pair
+            cam0, cam1, vw, chn = pair
             cam = cam0 if cam_position == 0 else cam1
-            p = by_cam.get((cam, vw))
+            p = by_cam.get((cam, vw, chn))
             if p is not None:
                 per_pair[pair] = p
         if per_pair:

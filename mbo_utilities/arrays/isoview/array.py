@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from mbo_utilities.arrays._base import Shape5DMixin
+from mbo_utilities.arrays._base import ReductionMixin, Shape5DMixin
 from mbo_utilities.log import get as _get_logger
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
@@ -209,11 +209,68 @@ class LazyVolume:
                 full_key = user_key
             return np.asarray(self._arr[full_key])
 
-        # klb fallback — materialize then slice
-        if self._arr is None and self._path.suffix.lower() == ".klb":
-            import pyklb
-            self._arr = pyklb.readfull(str(self._path))
+        if self._path.suffix.lower() == ".klb":
+            if self._arr is None:
+                roi = self._klb_readroi(key)
+                if roi is not None:
+                    return roi
+                import pyklb
+                self._arr = pyklb.readfull(str(self._path))
+            return np.asarray(self._arr[key])
+
         return np.asarray(self._arr[key])
+
+    def _klb_readroi(self, key):
+        """Read a contiguous (z, y, x) sub-volume via pyklb.readroi.
+
+        Returns ``None`` when the key can't be expressed as a bounding
+        box (fancy index, step != 1, empty slice) or asks for the whole
+        volume — the caller falls back to readfull in those cases.
+        """
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (3 - len(key))
+        if len(key) > 3:
+            return None
+        nz, ny, nx = self._shape
+
+        bounds: list[tuple[int, int]] = []
+        squeeze: list[bool] = []
+        for k, n in zip(key, (nz, ny, nx)):
+            if isinstance(k, (int, np.integer)):
+                i = int(k) + (n if int(k) < 0 else 0)
+                if i < 0 or i >= n:
+                    return None
+                bounds.append((i, i))
+                squeeze.append(True)
+            elif isinstance(k, slice):
+                start, stop, step = k.indices(n)
+                if step != 1 or stop <= start:
+                    return None
+                bounds.append((start, stop - 1))
+                squeeze.append(False)
+            else:
+                return None
+
+        if all(b == (0, n - 1) for b, n in zip(bounds, (nz, ny, nx))):
+            return None
+
+        import pyklb
+        arr = pyklb.readroi(
+            str(self._path),
+            [b[0] for b in bounds],
+            [b[1] for b in bounds],
+        )
+        arr = np.asarray(arr)
+        target = tuple(b[1] - b[0] + 1 for b in bounds)
+        if arr.shape != target:
+            arr = arr.reshape(target)
+        for axis in (2, 1, 0):
+            if squeeze[axis]:
+                slicer = [slice(None)] * arr.ndim
+                slicer[axis] = 0
+                arr = arr[tuple(slicer)]
+        return arr
 
     def _read_tiff(self, key):
         nz = self._shape[0]
@@ -548,25 +605,59 @@ def _read_all_isoview_xml(
     return common, per_cam
 
 
+def _ome_block(zarr_attrs: dict) -> dict:
+    """Return the OME block whether NGFF 0.5 nests under ``ome`` or not."""
+    if not zarr_attrs:
+        return {}
+    if "ome" in zarr_attrs and isinstance(zarr_attrs["ome"], dict):
+        return zarr_attrs["ome"]
+    return zarr_attrs
+
+
 def _extract_zarr_scale(zarr_attrs: dict) -> dict:
-    """Pull dz/dy/dx from OME-Zarr multiscales coordinateTransformations."""
+    """Pull dz/dy/dx + stage_x/y/z from OME-Zarr coordinateTransformations.
+
+    Reads scale (pixel spacing) and an optional translation block (the
+    isoview writer emits one when stage position is known) at the first
+    multiscales level. Both NGFF v0.4 (multiscales at top level) and
+    v0.5 (multiscales under ``ome``) layouts are accepted.
+    """
     out: dict = {}
-    multiscales = zarr_attrs.get("multiscales") if zarr_attrs else None
+    block = _ome_block(zarr_attrs)
+    multiscales = block.get("multiscales") if block else None
     if not multiscales:
         return out
     ms = multiscales[0] if isinstance(multiscales, list) else multiscales
     datasets = ms.get("datasets", []) if isinstance(ms, dict) else []
     if not datasets:
         return out
-    for t in datasets[0].get("coordinateTransformations", []):
+    transforms = datasets[0].get("coordinateTransformations", [])
+    for t in transforms:
         if t.get("type") == "scale":
             scale = t.get("scale", [])
             if len(scale) >= 3:
                 out["dz"] = float(scale[-3])
                 out["dy"] = float(scale[-2])
                 out["dx"] = float(scale[-1])
-            break
+        elif t.get("type") == "translation":
+            tr = t.get("translation", [])
+            if len(tr) >= 3:
+                out["stage_z"] = float(tr[-3])
+                out["stage_y"] = float(tr[-2])
+                out["stage_x"] = float(tr[-1])
     return out
+
+
+def _extract_isoview_attrs(zarr_attrs: dict) -> dict:
+    """Return the ``ome.isoview`` attrs block, or empty when absent.
+
+    Carries specimen, specimen_name, timepoint, camera_pair, view,
+    channel, stage_um, xml_metadata. Written by isoview's writer so
+    downstream readers don't need to re-parse the XML sidecar.
+    """
+    block = _ome_block(zarr_attrs)
+    iv = block.get("isoview") if block else None
+    return dict(iv) if isinstance(iv, dict) else {}
 
 
 def _extract_tiff_scale(tif) -> dict:
@@ -694,7 +785,7 @@ _CORRECTED_RE = re.compile(
     r"SPM(\d+)_TM(\d+)_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _FUSED_RE = re.compile(
-    r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)"
+    r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
     r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _RAW_STACK_RE = re.compile(
@@ -706,7 +797,7 @@ _PROJ_FLAT_RE = re.compile(
     r"^SPM(\d+)_TM(\d+)_CM(\d+)\.(xy|xz|yz)Projection\.tif$", re.IGNORECASE
 )
 _PROJ_FUSED_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)\.(xy|xz|yz)Projection\.tif$",
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_VW_ONLY_RE = re.compile(
@@ -801,7 +892,7 @@ def _scan_fused_projections(method_dir: Path) -> dict | None:
             if vw_only:
                 _, tm_str, vw, axis = m.groups()
             else:
-                _, tm_str, _cm0, _cm1, vw, axis = m.groups()
+                _, tm_str, _cm0, _cm1, vw, _chn, axis = m.groups()
             axis = axis.lower()
             view = f"VW{int(vw):02d}"
             t = tm_from_dir if tm_from_dir is not None else int(tm_str)
@@ -818,18 +909,28 @@ def _scan_corrected(spm_dir: Path):
 
         <root>.corrected/SPM##/TM######/SPM##_TM######_CM##(_VW##)?.<ext>
 
-    Returns ``(tp_paths, view_keys, channel_names)`` where:
+    Returns ``(tp_paths, view_keys, channel_names, is_tiled)`` where:
       - tp_paths: dict[int, dict[int, Path]] keyed by timepoint index
         then camera index.
       - view_keys: sorted list of camera indices.
       - channel_names: ``["CM00", "CM01", ...]``.
+      - is_tiled: True when the .corrected/ root has multiple SPM##
+        siblings (tiled acquisition); False otherwise.
     """
+    parent = spm_dir.parent
+    is_tiled = (
+        parent.is_dir()
+        and _CORRECTED_TAIL_RE.search(parent.name) is not None
+        and sum(
+            1 for d in parent.iterdir() if d.is_dir() and _SPM_PATTERN.match(d.name)
+        ) > 1
+    )
     if _has_tm_pattern(spm_dir.name):
         tm_dirs = [spm_dir]
     else:
         tm_dirs = _find_tm_folders(spm_dir)
     if not tm_dirs:
-        return {}, [], []
+        return {}, [], [], is_tiled
 
     tp_paths: dict[int, dict[int, Path]] = {}
     cams: set[int] = set()
@@ -849,7 +950,7 @@ def _scan_corrected(spm_dir: Path):
 
     view_keys = sorted(cams)
     channel_names = [f"CM{c:02d}" for c in view_keys]
-    return tp_paths, view_keys, channel_names
+    return tp_paths, view_keys, channel_names, is_tiled
 
 
 def _scan_fused(method_dir: Path):
@@ -860,14 +961,18 @@ def _scan_fused(method_dir: Path):
         timelapse: <method>/TM######/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
         tiled:     <method>/SPM##/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
 
-    Returns ``(tp_paths, view_keys, channel_names)`` where ``view_keys``
-    are ``(cam0, cam1, vw)`` tuples and channel names are
-    ``["VW00_fused", ...]``. For tiled mode each file's TM number drives
-    the timepoint index; for timelapse mode the enclosing TM dir does.
+    Returns ``(tp_paths, view_keys, channel_names, is_tiled)`` where
+    ``view_keys`` are ``(cam0, cam1, vw, chn)`` tuples (``chn=-1`` when
+    the filename omits the trailing ``_CHN##``) and channel names are
+    ``["VW00_fused", "VW00_CHN01_fused", ...]``. ``is_tiled`` is True
+    when leaves are SPM## (tiled) instead of TM###### (timelapse). For
+    tiled mode each file's TM number drives the timepoint index; for
+    timelapse mode the enclosing TM dir does.
     """
     leaves = list(_iter_fused_leaf_dirs(method_dir))
+    is_tiled = any(tm_from_dir is None for tm_from_dir, _ in leaves)
     if not leaves:
-        return {}, [], []
+        return {}, [], [], is_tiled
 
     by_tm: dict[int, dict[tuple, Path]] = {}
     views: set[tuple[int, int, int]] = set()
@@ -882,17 +987,21 @@ def _scan_fused(method_dir: Path):
             if not m:
                 continue
             tm = tm_from_dir if tm_from_dir is not None else int(m.group(2))
-            key = (int(m.group(3)), int(m.group(4)), int(m.group(5)))
+            chn = int(m.group(6)) if m.group(6) is not None else -1
+            key = (int(m.group(3)), int(m.group(4)), int(m.group(5)), chn)
             by_tm.setdefault(tm, {})[key] = f
             views.add(key)
 
     if not by_tm:
-        return {}, [], []
+        return {}, [], [], is_tiled
 
     tp_paths = {ti: by_tm[tm] for ti, tm in enumerate(sorted(by_tm))}
     view_keys = sorted(views)
-    channel_names = [f"VW{vw:02d}_fused" for _, _, vw in view_keys]
-    return tp_paths, view_keys, channel_names
+    channel_names = [
+        f"VW{vw:02d}_CHN{chn:02d}_fused" if chn >= 0 else f"VW{vw:02d}_fused"
+        for _, _, vw, chn in view_keys
+    ]
+    return tp_paths, view_keys, channel_names, is_tiled
 
 
 def _scan_raw(base_path: Path):
@@ -930,7 +1039,7 @@ def _scan_raw(base_path: Path):
         parsed.append((spc, tm, cam, chn, f))
 
     if not parsed:
-        return {}, [], []
+        return {}, [], [], False
 
     use_spc = len(tm_set) == 1 and len(spc_set) > 1
     for spc, tm, cam, chn, f in parsed:
@@ -941,7 +1050,7 @@ def _scan_raw(base_path: Path):
     tp_paths = {ti: by_key[k] for ti, k in enumerate(sorted_keys)}
     view_keys = sorted(views)
     channel_names = [f"CM{cm}_CHN{ch:02d}" for cm, ch in view_keys]
-    return tp_paths, view_keys, channel_names
+    return tp_paths, view_keys, channel_names, use_spc
 
 
 def _scan_klb_tm(base_path: Path):
@@ -956,7 +1065,7 @@ def _scan_klb_tm(base_path: Path):
     else:
         tm_dirs = _find_tm_folders(base_path)
     if not tm_dirs:
-        return {}, [], []
+        return {}, [], [], False
 
     tp_paths: dict[int, dict[tuple, Path]] = {}
     views: set[tuple[int, int]] = set()
@@ -971,7 +1080,7 @@ def _scan_klb_tm(base_path: Path):
 
     view_keys = sorted(views)
     channel_names = [f"CM{cm:02d}_CHN{ch:02d}" for cm, ch in view_keys]
-    return tp_paths, view_keys, channel_names
+    return tp_paths, view_keys, channel_names, False
 
 
 _PIPELINE_INFOS = (
@@ -1174,7 +1283,7 @@ def detect_isoview_kind(path: str | Path) -> str | None:
     return None
 
 
-class IsoviewArray(Shape5DMixin):
+class IsoviewArray(ReductionMixin, Shape5DMixin):
     """Lazy ``(T, C, Z, Y, X)`` reader for any isoview output tree.
 
     One class, four kinds (``"corrected"``, ``"fused"``, ``"raw"``,
@@ -1224,7 +1333,7 @@ class IsoviewArray(Shape5DMixin):
         if self._kind_cfg["needs_raw_dims"]:
             self._probe_raw_xml()
 
-        tp_paths, view_keys, channel_names = self._kind_cfg["scan"](scan_root)
+        tp_paths, view_keys, channel_names, is_tiled = self._kind_cfg["scan"](scan_root)
         if not tp_paths or not view_keys:
             raise ValueError(
                 f"No {self.stack_type} volumes discovered under {scan_root}"
@@ -1233,6 +1342,7 @@ class IsoviewArray(Shape5DMixin):
         self._tp_paths = tp_paths
         self._view_keys = list(view_keys)
         self._channel_names = list(channel_names)
+        self._is_tiled: bool = bool(is_tiled)
         self._timepoints = sorted(tp_paths.keys())
         self._cache: dict[tuple[int, int], np.ndarray] = {}
 
@@ -1330,6 +1440,22 @@ class IsoviewArray(Shape5DMixin):
             self._dtype = v.dtype
             if v.attrs:
                 self._metadata.update(_extract_zarr_scale(v.attrs))
+                iv = _extract_isoview_attrs(v.attrs)
+                if iv:
+                    # surface structured identifiers as top-level fields
+                    # so callers (GUI metadata panel, BigStitcher submit)
+                    # see specimen/timepoint/etc. without digging.
+                    for key in (
+                        "specimen", "specimen_name", "timepoint",
+                        "camera_pair", "view", "channel",
+                    ):
+                        if key in iv:
+                            self._metadata.setdefault(key, iv[key])
+                    # merge embedded xml_metadata last so it doesn't
+                    # overwrite identifiers above
+                    xml_meta = iv.get("xml_metadata") or {}
+                    for k, val in xml_meta.items():
+                        self._metadata.setdefault(k, val)
             if v._path.suffix.lower() in (".tif", ".tiff") and v._arr is not None:
                 self._metadata.update(_extract_tiff_scale(v._arr))
 
@@ -1347,6 +1473,30 @@ class IsoviewArray(Shape5DMixin):
     @property
     def dims(self) -> tuple[str, str, str, str, str]:
         return ("T", "C", "Z", "Y", "X")
+
+    @property
+    def is_tiled(self) -> bool:
+        return self._is_tiled
+
+    @property
+    def slider_dim_labels(self) -> tuple[str, ...]:
+        """User-facing slider labels for non-singleton T, C, Z axes.
+
+        Tiled datasets fold spatial tiles into the T axis, so T is
+        labeled ``"Tile"``; timepoint datasets label it ``"Timepoint"``.
+        The C axis is ``"View"`` for fused trees (VW##) and ``"Cam"``
+        otherwise (CM##).
+        """
+        t_label = "Tile" if self._is_tiled else "Timepoint"
+        c_label = "View" if self.kind == "fused" else "Cam"
+        labels: list[str] = []
+        if len(self._timepoints) > 1:
+            labels.append(t_label)
+        if len(self._view_keys) > 1:
+            labels.append(c_label)
+        if self._nz > 1:
+            labels.append("Zplane")
+        return tuple(labels)
 
     @property
     def dtype(self):
@@ -1485,10 +1635,8 @@ class IsoviewArray(Shape5DMixin):
                 view_key = self._view_keys[c_idx]
                 path = self._tp_paths.get(self._timepoints[t_idx], {}).get(view_key)
                 if path is None:
-                    raise FileNotFoundError(
-                        f"missing volume at t={t_idx} view={view_key} "
-                        f"in {self.scan_root}"
-                    )
+                    result[ti, ci] = 0
+                    continue
 
                 if single_tv:
                     slab = self._read_slab(path, t_idx, c_idx, z_key, y_key, x_key)
@@ -1583,7 +1731,7 @@ class IsoviewArray(Shape5DMixin):
         return slab
 
     def __array__(self, dtype=None, copy=None) -> np.ndarray:
-        out = self[:]
+        out = np.asarray(self[0, 0])
         if dtype is not None:
             out = out.astype(dtype)
         return out
