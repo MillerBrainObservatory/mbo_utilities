@@ -42,6 +42,7 @@ from pathlib import Path
 import numpy as np
 import zarr
 from zarr.codecs import (
+    BloscCodec,
     BytesCodec,
     Crc32cCodec,
     GzipCodec,
@@ -55,16 +56,51 @@ from zarr.storage import LocalStore
 # SPM00_TM000005_CM02_CM03_VW00.zarr (fused). Mask siblings under both
 # trees are filtered below unless --include-masks is passed.
 _VOLUME_GLOB = "**/SPM*_TM*_CM*.zarr"
-_MASK_SUFFIXES = (".segmentationMask.zarr", ".mask.zarr")
+# Substrings that mark a file as a mask companion rather than a volume.
+# Matches ``foo.mask.zarr``, ``foo.mask.ome.zarr``, ``foo.segmentationMask.zarr``,
+# etc. — anything with ``.mask.`` or ``segmentationMask`` in the directory name.
+_MASK_MARKERS = (".mask.", "segmentationMask", "fusionMask")
+
+
+def _is_mask(p: Path) -> bool:
+    name = p.name
+    return any(m in name for m in _MASK_MARKERS)
 
 
 def _is_already_rechunked(arr) -> bool:
-    """True if the array's inner chunks are already (1, 1, 1, Y, X)."""
-    if arr.ndim != 5:
-        # 3D or 4D source — not the usual layout, skip
-        return False
+    """True if the array's inner chunks are already Z-narrow.
+
+    For 5D ``(T, C, Z, Y, X)`` arrays this means chunks[0..2] == (1, 1, 1);
+    for 4D ``(T, Z, Y, X)`` it means chunks[0..1] == (1, 1); etc. The
+    invariant is: every dim except Y and X must be chunked at 1.
+    """
+    if arr.ndim < 2:
+        return True
     chunks = arr.chunks
-    return chunks[0] == 1 and chunks[1] == 1 and chunks[2] == 1
+    return all(c == 1 for c in chunks[:-2])
+
+
+def _iter_arrays(group):
+    """Yield (path, array) for every sub-array under a zarr group.
+
+    OME-Zarr pyramids land at top-level keys ``"0"``, ``"1"``, etc.; a
+    plain array store has no children and reports itself with path ``"0"``.
+    """
+    if hasattr(group, "shape"):
+        # group IS an array — wrap as a single-item iteration
+        yield "0", group
+        return
+    keys = sorted(group.array_keys()) if hasattr(group, "array_keys") else sorted(group)
+    for k in keys:
+        try:
+            arr = group[k]
+        except KeyError:
+            continue
+        if hasattr(arr, "shape"):
+            yield k, arr
+        else:
+            for sub_k, sub_arr in _iter_arrays(arr):
+                yield f"{k}/{sub_k}", sub_arr
 
 
 def _open_array(zarr_path: Path):
@@ -91,143 +127,189 @@ def _disk_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
-def _detect_compressor(arr) -> tuple[str, int]:
-    """Best-effort: read the source's existing compressor + level so the
-    rechunked file matches as closely as possible. Falls back to
-    ``("gzip", 1)`` if we can't introspect.
+def _detect_compressor(arr) -> dict:
+    """Best-effort: read the source's existing compressor settings so the
+    rechunked file matches as closely as possible. Returns a dict the
+    builder consumes; falls back to ``{"name": "gzip", "level": 1}`` when
+    introspection fails.
     """
-    # zarr v3: compressor lives in arr.metadata.codecs
     try:
         codecs = arr.metadata.codecs
     except AttributeError:
-        return "gzip", 1
-    for c in codecs:
+        return {"name": "gzip", "level": 1}
+    candidates = list(codecs)
+    # ShardingCodec wraps the real compressor inside ``.codecs``; flatten.
+    flattened: list = []
+    for c in candidates:
+        flattened.append(c)
+        if type(c).__name__ == "ShardingCodec":
+            flattened.extend(getattr(c, "codecs", ()) or ())
+    for c in flattened:
         cls_name = type(c).__name__
-        if cls_name == "ZstdCodec":
-            return "zstd", getattr(c, "level", 1)
-        if cls_name == "GzipCodec":
-            return "gzip", getattr(c, "level", 1)
         if cls_name == "BloscCodec":
-            return "blosc", getattr(c, "clevel", 1)
-        # ShardingCodec wraps inner codecs; recurse
-        if cls_name == "ShardingCodec":
-            inner = getattr(c, "codecs", ())
-            for ic in inner:
-                if type(ic).__name__ == "ZstdCodec":
-                    return "zstd", getattr(ic, "level", 1)
-                if type(ic).__name__ == "GzipCodec":
-                    return "gzip", getattr(ic, "level", 1)
-    return "gzip", 1
+            return {
+                "name": "blosc",
+                "cname": getattr(c, "cname", "zstd"),
+                "level": getattr(c, "clevel", 1),
+                "shuffle": getattr(c, "shuffle", "bitshuffle"),
+            }
+        if cls_name == "ZstdCodec":
+            return {"name": "zstd", "level": getattr(c, "level", 1)}
+        if cls_name == "GzipCodec":
+            return {"name": "gzip", "level": getattr(c, "level", 1)}
+    return {"name": "gzip", "level": 1}
 
 
-def _build_inner_codecs(name: str, level: int) -> list:
+def _build_inner_codecs(spec: dict) -> list:
+    name = spec.get("name", "gzip")
+    if name == "blosc":
+        cname = spec.get("cname", "zstd")
+        # zarr stores enum values internally; accept either str or enum.
+        if hasattr(cname, "value"):
+            cname = cname.value
+        shuffle = spec.get("shuffle", "bitshuffle")
+        if hasattr(shuffle, "value"):
+            shuffle = shuffle.value
+        return [
+            BytesCodec(),
+            BloscCodec(
+                cname=cname,
+                clevel=int(spec.get("level", 1)),
+                shuffle=shuffle,
+            ),
+        ]
     if name == "zstd":
-        return [BytesCodec(), ZstdCodec(level=level)]
-    return [BytesCodec(), GzipCodec(level=level)]
+        return [BytesCodec(), ZstdCodec(level=int(spec.get("level", 1)))]
+    return [BytesCodec(), GzipCodec(level=int(spec.get("level", 1)))]
+
+
+def _rechunk_one_array(
+    src_arr, dest_group, dest_path: str
+) -> np.ndarray:
+    """Rechunk a single zarr array into ``dest_group`` at ``dest_path``.
+
+    Returns the materialized source data for round-trip verification.
+    Chunk shape is ``(1,)*(ndim-2) + (Y, X)`` and the wrapping shard
+    spans every non-spatial dim — so the on-disk file count stays
+    constant regardless of T/C/Z extent.
+    """
+    data = np.asarray(src_arr[:])
+    compressor_spec = _detect_compressor(src_arr)
+    inner_codecs = _build_inner_codecs(compressor_spec)
+
+    if data.ndim < 2:
+        # 1D or scalar: just copy as-is, single chunk
+        new_arr = zarr.create(
+            store=dest_group.store,
+            path=dest_path,
+            shape=data.shape,
+            chunks=data.shape or (1,),
+            dtype=data.dtype,
+            codecs=inner_codecs,
+            overwrite=True,
+        )
+    else:
+        Y, X = data.shape[-2], data.shape[-1]
+        # one Y×X plane per inner chunk; outer shard spans all non-spatial
+        # dims so file count is one shard per array.
+        inner = (1,) * (data.ndim - 2) + (Y, X)
+        shard = data.shape
+        new_codec = ShardingCodec(
+            chunk_shape=inner,
+            codecs=inner_codecs,
+            index_codecs=[BytesCodec(), Crc32cCodec()],
+        )
+        new_arr = zarr.create(
+            store=dest_group.store,
+            path=dest_path,
+            shape=data.shape,
+            chunks=shard,
+            dtype=data.dtype,
+            codecs=[new_codec],
+            overwrite=True,
+        )
+
+    try:
+        new_arr.attrs.update(dict(src_arr.attrs))
+    except Exception:
+        pass
+    new_arr[:] = data
+    return data
 
 
 def rechunk_file(src_path: Path, *, dry_run: bool, keep_backup: bool) -> dict:
-    """Rechunk one zarr in place. Returns a status dict for reporting."""
+    """Rechunk one zarr (or OME-Zarr group) in place.
+
+    For pyramidal stores every sub-array under the group (level 0, 1, …)
+    is rewritten with the same Y×X-plane chunk layout, and the parent
+    group's attrs (multiscales metadata, omero block, etc.) are carried
+    over verbatim.
+    """
     status = {"path": src_path, "skipped": False, "error": None,
               "before_files": 0, "after_files": 0,
               "before_bytes": 0, "after_bytes": 0,
-              "elapsed_s": 0.0}
+              "levels": 0, "elapsed_s": 0.0}
 
-    src_arr, sub_path = _open_array(src_path)
+    src_group = zarr.open(str(src_path), mode="r")
     status["before_bytes"] = _disk_size(src_path)
     status["before_files"] = sum(1 for f in src_path.rglob("*") if f.is_file())
 
-    if _is_already_rechunked(src_arr):
+    arrays = list(_iter_arrays(src_group))
+    if not arrays:
+        status["error"] = "no arrays found in store"
+        return status
+    status["levels"] = len(arrays)
+
+    if all(_is_already_rechunked(a) for _, a in arrays):
         status["skipped"] = True
         status["after_files"] = status["before_files"]
         status["after_bytes"] = status["before_bytes"]
         return status
 
-    if src_arr.ndim != 5 or src_arr.shape[0] != 1 or src_arr.shape[1] != 1:
-        # not the (1, 1, Z, Y, X) per-(t, c) layout we know how to rechunk
-        status["error"] = f"unexpected shape {src_arr.shape}"
-        return status
-
     if dry_run:
         return status
 
-    # read source data once. per-(t, c) volumes are ~108 MB; comfortable to
-    # hold one at a time. the original file's chunks are Y×X-tiled, so the
-    # full read decompresses every chunk — same cost as the GUI's old hot
-    # path, but only paid once per rechunk.
     tmp_path = src_path.with_suffix(src_path.suffix + ".rechunk-tmp")
     bak_path = src_path.with_suffix(src_path.suffix + ".bak")
 
-    # clean any leftovers from a prior interrupted run
     for p in (tmp_path, bak_path):
         if p.exists():
             shutil.rmtree(p)
 
     t0 = time.perf_counter()
-    data = np.asarray(src_arr[:])
 
-    # match the source's compressor settings so disk size stays comparable
-    compressor, level = _detect_compressor(src_arr)
-    inner_codecs = _build_inner_codecs(compressor, level)
-
-    Y, X = data.shape[-2], data.shape[-1]
-    Z = data.shape[-3]
-
-    # inner chunk: one Y×X plane at one z. shard: all Z (entire volume)
-    # in one shard. The source layout is per-(t, c) files, so each file
-    # holds T=1, C=1, Z=Z; one shard per file is the most you can do.
-    inner = (1, 1, 1, Y, X)
-    shard = (1, 1, Z, Y, X)
-
-    root = zarr.open_group(str(tmp_path), mode="w", zarr_format=3)
-    new_codec = ShardingCodec(
-        chunk_shape=inner,
-        codecs=inner_codecs,
-        index_codecs=[BytesCodec(), Crc32cCodec()],
-    )
-    out_path = sub_path or "0"
-    new_arr = zarr.create(
-        store=root.store,
-        path=out_path,
-        shape=data.shape,
-        chunks=shard,
-        dtype=data.dtype,
-        codecs=[new_codec],
-        overwrite=True,
-    )
-    # carry over user attrs (NOT codec/chunk metadata, that's structural)
-    try:
-        new_arr.attrs.update(dict(src_arr.attrs))
-    except Exception:
-        pass
-    # OME-Zarr group attrs (multiscales, etc.) live on the parent group
-    src_group = zarr.open(str(src_path), mode="r")
+    dest_group = zarr.open_group(str(tmp_path), mode="w", zarr_format=3)
     if not hasattr(src_group, "shape"):
-        # was a group → carry attrs over
         try:
-            root.attrs.update(dict(src_group.attrs))
+            dest_group.attrs.update(dict(src_group.attrs))
         except Exception:
             pass
 
-    new_arr[:] = data
+    # rewrite each level and remember the read-back data for verification
+    written: list[tuple[str, np.ndarray]] = []
+    for sub_path, src_arr in arrays:
+        out_path = sub_path if sub_path else "0"
+        try:
+            data = _rechunk_one_array(src_arr, dest_group, out_path)
+        except Exception as exc:  # noqa: BLE001
+            shutil.rmtree(tmp_path, ignore_errors=True)
+            status["error"] = f"write failed at {out_path}: {exc}"
+            return status
+        written.append((out_path, data))
 
-    # round-trip verification before we touch the original
-    rt_arr, _ = _open_array(tmp_path)
-    rt = np.asarray(rt_arr[:])
-    if not np.array_equal(rt, data):
-        shutil.rmtree(tmp_path, ignore_errors=True)
-        status["error"] = "round-trip verification failed"
-        return status
+    # round-trip verification (each sub-array)
+    for out_path, data in written:
+        rt = np.asarray(zarr.open_array(str(tmp_path), path=out_path, mode="r")[:])
+        if not np.array_equal(rt, data):
+            shutil.rmtree(tmp_path, ignore_errors=True)
+            status["error"] = f"round-trip mismatch at {out_path}"
+            return status
 
-    # atomic-ish swap. on Windows shutil.move + rename gets a directory
-    # rename which is atomic at the FS level. We move the original to
-    # *.bak first, then move tmp into place. If the second move fails,
-    # the original is still intact at *.bak.
+    # atomic-ish swap via .bak indirection.
     src_path.rename(bak_path)
     try:
         tmp_path.rename(src_path)
     except OSError:
-        # restore original
         bak_path.rename(src_path)
         shutil.rmtree(tmp_path, ignore_errors=True)
         status["error"] = "atomic swap failed"
@@ -270,10 +352,7 @@ def main() -> int:
 
     candidates = sorted(root.glob(_VOLUME_GLOB))
     if not args.include_masks:
-        candidates = [
-            p for p in candidates
-            if not any(s in p.name for s in _MASK_SUFFIXES)
-        ]
+        candidates = [p for p in candidates if not _is_mask(p)]
 
     print(f"Found {len(candidates)} candidate zarr files under {root}")
     if not candidates:
@@ -314,9 +393,10 @@ def main() -> int:
             rechunked += 1
             files_delta = status["after_files"] - status["before_files"]
             bytes_delta = status["after_bytes"] - status["before_bytes"]
+            levels = status.get("levels", 1)
             print(
                 f"  [{i+1}/{len(candidates)}] {src.name}: "
-                f"{status['elapsed_s']:.1f}s "
+                f"{status['elapsed_s']:.1f}s lvls={levels} "
                 f"files {status['before_files']}->{status['after_files']} "
                 f"({files_delta:+d}), "
                 f"size {_human(status['before_bytes'])}"
