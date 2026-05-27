@@ -19,35 +19,177 @@ mbo-only (no upstream equivalent) it simply isn't in the map.
 
 from __future__ import annotations
 
+import importlib.metadata
+import json
+import os
+import subprocess
+import sys
 import threading
+from pathlib import Path
 from typing import Any
 
-# suite2p is loaded lazily — importing it is heavy (1-3s on first hit:
-# pulls in torch, numba JIT init, scipy, sklearn, etc.). keeping this
-# module cheap to import means `settings.py` import is fast at gui
-# startup; the actual suite2p load happens on first call to any of the
-# accessor functions below (or via warm_up_suite2p_schema() from a
-# background thread). idempotent and thread-safe.
+# suite2p loads out-of-process: a daemon at module import either reads a
+# disk cache (~/.mbo/cache/s2p_settings_<version>.json) or spawns a one-
+# shot subprocess that imports suite2p and dumps SETTINGS/DB to that file.
+# This avoids importing suite2p (and its torch/numba/scipy/sklearn chain)
+# in the GUI interpreter, which previously froze the imgui loop 1-3 s on
+# the first Run-tab click and even longer when attempted from a thread.
+# Cache key includes the installed suite2p version so upgrades invalidate.
 _SETTINGS: dict | None = None
 _DB: dict | None = None
 _LOAD_LOCK = threading.Lock()
+_LOAD_EVENT = threading.Event()
+_LOAD_THREAD: threading.Thread | None = None
+# bounded wait when callers hit _ensure_loaded before the daemon finishes.
+# longer than typical subprocess cold-start (~3 s) but short enough that a
+# truly broken environment surfaces as "no schema" instead of hanging UI.
+_LOAD_TIMEOUT_S = 10.0
+
+
+def _cache_dir() -> Path:
+    override = os.environ.get("MBO_CACHE_DIR")
+    return Path(override) if override else Path.home() / ".mbo" / "cache"
+
+
+def _suite2p_version() -> str:
+    try:
+        return importlib.metadata.version("suite2p")
+    except Exception:
+        return "unknown"
+
+
+def _cache_path() -> Path:
+    return _cache_dir() / f"s2p_settings_{_suite2p_version()}.json"
+
+
+def _load_cache_file(path: Path) -> tuple[dict, dict] | None:
+    try:
+        with path.open() as f:
+            data = json.load(f)
+        s = data.get("SETTINGS")
+        d = data.get("DB")
+        if isinstance(s, dict) and isinstance(d, dict):
+            return s, d
+    except (OSError, json.JSONDecodeError, KeyError):
+        return None
+    return None
+
+
+# Source for the subprocess. Encodes type objects as their __name__
+# (consumers only need a display string via _format_type) and falls
+# back to repr() for any other non-JSON-serializable value.
+_EXTRACTOR_SRC = r"""
+import json, sys
+def encode(o):
+    if isinstance(o, type):
+        return o.__name__
+    if isinstance(o, dict):
+        return {k: encode(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [encode(v) for v in o]
+    try:
+        json.dumps(o)
+        return o
+    except TypeError:
+        return repr(o)
+try:
+    from suite2p import parameters as p
+    json.dump({"SETTINGS": encode(p.SETTINGS), "DB": encode(p.DB)}, sys.stdout)
+except Exception as e:
+    sys.stderr.write(repr(e))
+    sys.exit(2)
+"""
+
+
+def _build_cache_via_subprocess() -> tuple[dict, dict] | None:
+    """Spawn a child that imports suite2p and dumps SETTINGS+DB as JSON.
+
+    Writes the result to the on-disk cache before returning so the next
+    process launch hits the fast path. Returns ``None`` on any failure
+    (suite2p not installed, subprocess crash, timeout) — callers degrade
+    to ``_SETTINGS is None`` which downstream code already handles.
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _EXTRACTOR_SRC],
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    settings = data.get("SETTINGS")
+    db = data.get("DB")
+    if not isinstance(settings, dict) or not isinstance(db, dict):
+        return None
+    cache_path = _cache_path()
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        with tmp.open("w") as f:
+            json.dump({"SETTINGS": settings, "DB": db}, f)
+        os.replace(tmp, cache_path)
+    except OSError:
+        pass
+    return settings, db
+
+
+def _load_or_build() -> None:
+    """Daemon body: populate _SETTINGS/_DB from cache, else from subprocess."""
+    global _SETTINGS, _DB
+    try:
+        cached = _load_cache_file(_cache_path())
+        if cached is None:
+            cached = _build_cache_via_subprocess()
+        if cached is not None:
+            with _LOAD_LOCK:
+                _SETTINGS, _DB = cached
+    finally:
+        _LOAD_EVENT.set()
+
+
+def _start_loader() -> None:
+    global _LOAD_THREAD
+    if _LOAD_THREAD is not None:
+        return
+    with _LOAD_LOCK:
+        if _LOAD_THREAD is not None:
+            return
+        t = threading.Thread(
+            target=_load_or_build, daemon=True, name="s2p-schema-loader",
+        )
+        _LOAD_THREAD = t
+    t.start()
+
+
+# Kick off loader on module import. Daemon thread + subprocess means the
+# main interpreter never imports suite2p; the GUI paints normally while
+# the child process spins up.
+_start_loader()
 
 
 def _ensure_loaded() -> None:
-    """Import suite2p.parameters on first use. Safe to call from any thread."""
-    global _SETTINGS, _DB
+    """Block (bounded) until the loader daemon finishes."""
     if _SETTINGS is not None:
         return
-    with _LOAD_LOCK:
-        if _SETTINGS is not None:
-            return
-        from suite2p import parameters as _s2p_parameters
-        _SETTINGS = _s2p_parameters.SETTINGS
-        _DB = _s2p_parameters.DB
+    if _LOAD_THREAD is None:
+        _start_loader()
+    _LOAD_EVENT.wait(timeout=_LOAD_TIMEOUT_S)
 
 
 def warm_up_suite2p_schema() -> None:
-    """Public alias — call from a background thread to preload suite2p."""
+    """Block (bounded) until the schema is loaded.
+
+    Public alias for the load contract. Used by file-load paths that
+    need ``is_default`` / ``get_default`` to return real values rather
+    than the pre-load "everything is default" fallback (see ``is_default``).
+    """
     _ensure_loaded()
 
 
@@ -281,12 +423,10 @@ def is_default(mbo_field: str, value: Any) -> bool:
     """
     if mbo_field in MBO_ONLY_FIELDS:
         return False  # no upstream default to compare against
-    # don't trigger the suite2p import from per-frame draw paths. if the
-    # schema hasn't been loaded yet (cold session, settings popup not yet
-    # opened), report "matches default" so we don't paint every parameter
-    # row in the modified-color while the user is just looking at the
-    # Run tab. once any user action loads the schema (opening settings,
-    # querying a tooltip), subsequent draws color-code accurately.
+    # Schema loads in a background daemon (subprocess on cold cache,
+    # disk read on warm). While it's pending, report "matches default"
+    # so the Run tab isn't a sea of orange for the few seconds it takes
+    # on cold launch. Subsequent draws color-code accurately.
     if _SETTINGS is None:
         return True
     default = get_default(mbo_field)

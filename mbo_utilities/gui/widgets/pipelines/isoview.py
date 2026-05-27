@@ -476,27 +476,9 @@ class IsoviewPipelineWidget(PipelineWidget):
             sr.parent / f"{sr.name}{self._consolidate_suffix}"
         )
 
-        # Default BigStitcher destination: <raw_root><stitcher_suffix>/
-        # (sibling of the corrected and fused trees, matching how isoview
-        # computes config.stitcher_dir in ProcessingConfig.__post_init__).
-        # Resolves via _sibling_raw_root which handles either
-        # ``.corrected`` or ``.fused`` ancestors. Falls back to
-        # sr.parent when no raw sibling is found so the readout still
-        # shows something sensible.
-        from mbo_utilities.arrays.isoview.array import _sibling_raw_root
-        raw = _sibling_raw_root(arr) if arr.kind in ("corrected", "fused") else None
-        if raw is None:
-            anchor = sr.parent
-            for suf in (".corrected", ".fused"):
-                if anchor.name.endswith(suf):
-                    raw = anchor.parent / anchor.name[: -len(suf)]
-                    break
-        if raw is not None:
-            self._stitcher_output_path = str(
-                raw.parent / f"{raw.name}{self._stitcher_suffix}"
-            )
-        else:
-            self._stitcher_output_path = ""
+        # BigStitcher destination is derived live in _current_output_path
+        # from the loaded tree + suffix box (no raw-root dependency), so
+        # nothing to seed here.
 
         # Correct / Fuse output_dir defaults:
         #   raw       → leave EMPTY so isoview's ProcessingConfig derives
@@ -531,7 +513,70 @@ class IsoviewPipelineWidget(PipelineWidget):
             return "_stitcher_output_path"
         return "_output_dir"
 
+    @staticmethod
+    def _iso_input_tree(arr: Any) -> "Path | None":
+        """The .corrected*/.fused* tree the array was loaded from.
+
+        Matches custom suffixes (e.g. ``.fused_v2``) by accepting a
+        ``.corrected``/``.fused`` token followed by end-of-name or ``_``.
+        """
+        scan_root = Path(arr.scan_root)
+        for ancestor in (scan_root, *scan_root.parents):
+            n = ancestor.name
+            for suf in (".corrected", ".fused"):
+                idx = n.find(suf)
+                if idx >= 0:
+                    rest = n[idx + len(suf):]
+                    if rest == "" or rest.startswith("_"):
+                        return ancestor
+        return None
+
+    @staticmethod
+    def _iso_raw_stem(tree: "Path") -> str:
+        """Raw dataset stem of a tree dir, e.g. ``zebrafish.fused_v2`` -> ``zebrafish``."""
+        from mbo_utilities.arrays.isoview.array import (
+            _CORRECTED_TAIL_RE, _FUSED_TAIL_RE,
+        )
+        stem = tree.name
+        for rx in (_CORRECTED_TAIL_RE, _FUSED_TAIL_RE):
+            m = rx.search(stem)
+            if m:
+                return stem[: m.start()]
+        return stem
+
+    @staticmethod
+    def _iso_tree_suffix(tree: "Path") -> str:
+        """Variant suffix carried by a tree dir, e.g. ``zebrafish.fused_v2`` -> ``v2``."""
+        n = tree.name
+        for pre in (".corrected", ".fused"):
+            idx = n.find(pre)
+            if idx >= 0:
+                return n[idx + len(pre):].lstrip("_")
+        return ""
+
+    def _iso_stitcher_dest(self, arr: Any) -> "Path | None":
+        """BigStitcher output dir, matching how isoview derives
+        ``config.stitcher_dir``: ``<rawstem>.stitcher[_<variant>]/`` where
+        the variant comes from the loaded fused/corrected tree
+        (``.fused_v2`` -> ``.stitcher_v2``). isoview couples the stitcher
+        suffix to the fused-read suffix, so it tracks the loaded tree and
+        isn't independently settable. Works without the raw root on disk."""
+        tree = self._iso_input_tree(arr)
+        if tree is None:
+            return None
+        variant = self._iso_tree_suffix(tree)
+        name = f"{self._iso_raw_stem(tree)}.stitcher" + (f"_{variant}" if variant else "")
+        return tree.parent / name
+
     def _current_output_path(self) -> str:
+        # STITCHER has no user path field — its destination is always
+        # derived live from the input tree + suffix box, so editing the
+        # suffix updates the path and corrected-only datasets (raw root
+        # deleted) still resolve a destination.
+        if self._selected_mode == _MODE_STITCHER:
+            arr = self._get_array()
+            dest = self._iso_stitcher_dest(arr) if arr is not None else None
+            return str(dest) if dest is not None else ""
         explicit = getattr(self, self._output_path_attr(), "") or ""
         if explicit:
             return explicit
@@ -1995,9 +2040,13 @@ class IsoviewPipelineWidget(PipelineWidget):
         meta = arr.metadata if hasattr(arr, "metadata") else {}
         specimen = meta.get("specimen", 0)
 
+        # output_suffix must match the loaded tree's variant: isoview
+        # derives config.fused_dir from input_dir.name stripped + ".fused"
+        # + output_suffix, so passing the wrong (or empty) suffix makes it
+        # scan bare ".fused" instead of e.g. ".fused_v2" and find nothing.
         args = {
             "input_path": str(input_dir),
-            "output_suffix": self._fuse_output_suffix or self._correct_output_suffix,
+            "output_suffix": self._iso_tree_suffix(input_dir),
             "stitcher_suffix": self._stitcher_suffix,
             "coarse_align": self._stitcher_coarse_align,
             "specimens": [int(specimen)],
@@ -2007,15 +2056,13 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._spawn(
             "isoview_bigstitcher", args,
             description=f"BigStitcher XML: {input_dir.name}",
-            output_path=self._stitcher_output_path or str(input_dir),
+            output_path=self._current_output_path() or str(input_dir),
         )
 
     def _submit_spark_register(self, arr: Any) -> None:
         """Run bigstitcher-spark's detect → match → solve pipeline against
         the dataset.xml previously emitted by :meth:`_submit_stitcher`.
         """
-        from mbo_utilities.arrays.isoview.array import _sibling_raw_root
-
         if not self._stitcher_spark_root:
             self._last_status = (
                 "Set the bigstitcher-spark executables dir (or fat JAR) "
@@ -2023,21 +2070,15 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
             return
 
-        scan_root = Path(arr.scan_root)
-        raw_root = _sibling_raw_root(arr)
-        if raw_root is None:
-            anchor = scan_root.parent
-            for suf in (".corrected", ".fused"):
-                if anchor.name.endswith(suf):
-                    raw_root = anchor.parent / anchor.name[: -len(suf)]
-                    break
-        if raw_root is None or not raw_root.is_dir():
+        # Stitcher tree is a sibling of the loaded corrected/fused tree
+        # (<rawstem><stitcher_suffix>/), derived without the raw root.
+        stitcher_root = self._iso_stitcher_dest(arr)
+        if stitcher_root is None:
             self._last_status = (
-                "Cannot locate raw acquisition root. Run Export first."
+                "Cannot locate a corrected/fused tree to register."
             )
             return
 
-        stitcher_root = raw_root.parent / f"{raw_root.name}{self._stitcher_suffix}"
         xml_candidates = sorted(stitcher_root.glob("*/dataset.xml"))
         if not xml_candidates:
             self._last_status = (
@@ -2157,31 +2198,30 @@ class IsoviewPipelineWidget(PipelineWidget):
         )
 
     def _submit_fuse(self, arr: Any) -> None:
-        # multi_fuse's `input_dir` is the RAW acquisition root containing
-        # the SPC##_TM##_*.stack files — NOT the .corrected/ tree.
+        # multi_fuse accepts a ``.corrected/`` root directly — isoview's
+        # ProcessingConfig.__post_init__ walks SPM##/TM###### from there
+        # and strips the ".corrected*" suffix to name the sibling fused
+        # output dir. No raw stacks required on disk.
+        #
         # IsoviewArray(kind="corrected").scan_root is the SPM## subdir
-        # under .corrected/, so walk to the .corrected/ root and strip
-        # the corrected-suffix to land on the raw root sibling.
-        # ProcessingConfig defaults output_dir to <raw_root><suffix>/,
-        # so leaving output_dir=None re-uses the existing .corrected/
-        # as the corrected tree; fused output goes to the sibling
-        # <raw_root>.fused/<method>/.
-        from mbo_utilities.arrays.isoview.array import _sibling_raw_root
+        # under .corrected/, so walk ancestors for the .corrected* dir
+        # (same idiom as _submit_stitcher).
         scan_root = Path(arr.scan_root)
-        raw_root = _sibling_raw_root(arr)
-        if raw_root is None:
-            # Fallback: assume scan_root.parent is the .corrected/ root
-            # and strip a literal ".corrected" — covers the case where
-            # _sibling_raw_root returns None because the sibling was
-            # moved/renamed.
-            anchor = scan_root.parent
-            if anchor.name.endswith(".corrected"):
-                raw_root = anchor.parent / anchor.name[: -len(".corrected")]
-        if raw_root is None or not raw_root.is_dir():
-            self._last_status = (
-                "Cannot locate raw acquisition root (sibling of "
-                ".corrected/). Move or symlink the raw folder next to "
-                "the .corrected/ tree before running multi_fuse."
+        input_dir: Path | None = None
+        for ancestor in (scan_root, *scan_root.parents):
+            n = ancestor.name
+            idx = n.find(".corrected")
+            if idx < 0:
+                continue
+            rest = n[idx + len(".corrected"):]
+            if rest == "" or rest.startswith("_"):
+                input_dir = ancestor
+                break
+        if input_dir is None or not input_dir.is_dir():
+            self.parent.logger.error(
+                "multi_fuse: could not locate a .corrected tree above "
+                f"{scan_root}. Open a dataset whose scan root sits "
+                "under a *.corrected[_suffix]/ directory."
             )
             return
         # Resolve the active view's params as the scalar defaults; the
@@ -2230,7 +2270,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             ]
 
         args = {
-            "input_path": str(raw_root),
+            "input_path": str(input_dir),
             "output_dir": self._output_dir or None,
             "output_format": self._output_format,
             "compression": (
@@ -2305,8 +2345,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._spawn(
             "isoview_fuse", args,
             description=f"multi_fuse ({active['blending_method']}): "
-                        f"{raw_root.name}",
-            output_path=self._output_dir or str(raw_root),
+                        f"{input_dir.name}",
+            output_path=self._output_dir or str(input_dir),
         )
 
     def _init_iso_selection_state(self, arr: Any) -> int:
@@ -2508,16 +2548,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         sr = Path(arr.scan_root)
         if self._selected_mode in (_MODE_CORRECT, _MODE_CONSOLIDATE):
             return sr.name
+        tree = self._iso_input_tree(arr)
+        if tree is not None:
+            return self._iso_raw_stem(tree)
         from mbo_utilities.arrays.isoview.array import _sibling_raw_root
         raw = _sibling_raw_root(arr)
-        if raw is not None:
-            return raw.name
-        # Fallback: strip a known suffix off the scan_root's parent.
-        anchor = sr.parent
-        for suf in (".corrected", ".fused"):
-            if anchor.name.endswith(suf):
-                return anchor.name[: -len(suf)]
-        return sr.name
+        return raw.name if raw is not None else sr.name
 
     def _draw_iso_output_options(self, arr: Any) -> None:
         """Universal Output options block: one suffix input + a

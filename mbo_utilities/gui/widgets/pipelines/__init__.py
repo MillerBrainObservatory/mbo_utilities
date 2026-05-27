@@ -66,13 +66,11 @@ def _register_pipelines_sync() -> None:
 
         _REGISTRATION_COMPLETE = True
 
-    # NOTE: do NOT eagerly import suite2p.parameters here. doing so
-    # pulls torch/numba/scipy/cellpose into the bg thread and the
-    # python GIL held during that import freezes the imgui main loop
-    # for 10–20s. _s2p_schema._ensure_loaded() runs lazily on first
-    # actual use (settings panel / Run tab), which restores the v2.7.7
-    # startup behavior (instant) at the cost of a one-time freeze when
-    # the user first opens settings — same trade as before.
+    # suite2p.parameters.SETTINGS is loaded out-of-process by
+    # `_s2p_schema`'s module-level daemon (cached to
+    # `~/.mbo/cache/s2p_settings_<version>.json`). Importing the widget
+    # classes above triggers that daemon transitively; the subprocess
+    # never enters this interpreter's address space.
 
 
 def _delayed_preload(delay_s: float) -> None:

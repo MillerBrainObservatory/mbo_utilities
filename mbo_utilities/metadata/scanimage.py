@@ -100,7 +100,18 @@ def get_saved_channel_ports(metadata: dict) -> dict[str, list[int]]:
 
     cs = si.get("hChannels", {}).get("channelSave", None)
     if isinstance(cs, list):
-        saved: set[int] | None = {int(x) for x in cs}
+        flat: list = []
+        for x in cs:
+            if isinstance(x, list):
+                if len(x) != 1:
+                    raise NotImplementedError(
+                        f"channelSave entry {x!r} has multiple elements; "
+                        "multi-element inner lists are not supported"
+                    )
+                flat.append(x[0])
+            else:
+                flat.append(x)
+        saved: set[int] | None = {int(x) for x in flat}
     elif isinstance(cs, (int, float)):
         saved = {int(cs)}
     else:

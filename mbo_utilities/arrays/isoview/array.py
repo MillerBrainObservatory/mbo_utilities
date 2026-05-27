@@ -1346,6 +1346,19 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         self._timepoints = sorted(tp_paths.keys())
         self._cache: dict[tuple[int, int], np.ndarray] = {}
 
+        # Snapshot the (timepoint, view) → path mapping into a flat list
+        # at construction time. The scanner already verified every entry
+        # exists; re-stat'ing on every `arr.filenames` access turned the
+        # property into 1,204+ stat calls per frame for time-lapse
+        # datasets. Build once, return a defensive copy on access.
+        self._filenames_snapshot: list[Path] = [
+            Path(p)
+            for ti in self._timepoints
+            for vk in self._view_keys
+            for p in (self._tp_paths.get(ti, {}).get(vk),)
+            if p is not None
+        ]
+
         first_tp = self._timepoints[0]
         first_view = self._view_keys[0]
         first_path = self._tp_paths[first_tp][first_view]
@@ -1544,13 +1557,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
 
     @property
     def filenames(self) -> list[Path]:
-        out: list[Path] = []
-        for ti in self._timepoints:
-            for vk in self._view_keys:
-                p = self._tp_paths.get(ti, {}).get(vk)
-                if p is not None and Path(p).exists():
-                    out.append(Path(p))
-        return out
+        return list(self._filenames_snapshot)
 
     @property
     def metadata(self) -> dict:

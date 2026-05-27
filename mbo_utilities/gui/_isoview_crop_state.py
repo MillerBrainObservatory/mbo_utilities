@@ -25,13 +25,15 @@ _STORE: dict[str, dict[int, dict[str, tuple]]] = {}
 
 
 def _raw_root_for(arr: Any) -> Path | None:
-    """Map any IsoviewArray to the raw acquisition root that holds the
-    ``SPC##_TM##_*.stack`` files.
+    """Resolve a stable per-acquisition key for ``arr``'s crops.
 
-    For ``kind="raw"`` it's ``arr.scan_root`` itself.
-    For ``kind="corrected"`` / ``kind="fused"`` we use the existing
-    :func:`mbo_utilities.arrays.isoview.array._sibling_raw_root` resolver,
-    which already knows how to strip ``.corrected`` / ``.fused`` suffixes.
+    Logically the key is the raw acquisition root (where the
+    ``SPC##_TM##_*.stack`` files would live). When the raw stacks
+    aren't on disk we synthesize that same path by walking ancestors
+    of ``scan_root`` for the ``.corrected[_suffix]`` / ``.fused[_suffix]``
+    directory and stripping the suffix — yielding the path the raw root
+    WOULD have. This keeps the crop store keyed by acquisition identity
+    regardless of which downstream tree the user opened.
     """
     if arr is None:
         return None
@@ -39,11 +41,34 @@ def _raw_root_for(arr: Any) -> Path | None:
     if kind == "raw":
         sr = getattr(arr, "scan_root", None)
         return Path(sr) if sr is not None else None
+
+    # First-choice: existing sibling raw root (works for legacy layouts
+    # where the raw acquisition is still alongside the .corrected/ tree).
     try:
         from mbo_utilities.arrays.isoview.array import _sibling_raw_root
-        return _sibling_raw_root(arr)
+        sibling = _sibling_raw_root(arr)
+        if sibling is not None:
+            return sibling
     except Exception:
+        pass
+
+    # Fallback: derive the canonical raw path by walking up from
+    # scan_root, finding the .corrected*/.fused* ancestor, and stripping
+    # that suffix. Stable even when the raw stacks have been deleted.
+    sr = getattr(arr, "scan_root", None)
+    if sr is None:
         return None
+    scan_root = Path(sr)
+    for ancestor in (scan_root, *scan_root.parents):
+        n = ancestor.name
+        for suf in (".corrected", ".fused"):
+            idx = n.find(suf)
+            if idx < 0:
+                continue
+            rest = n[idx + len(suf):]
+            if rest == "" or rest.startswith("_"):
+                return ancestor.parent / n[:idx]
+    return None
 
 
 def _key(arr: Any) -> str | None:

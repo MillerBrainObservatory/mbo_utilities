@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 import os
 import traceback
@@ -1031,27 +1032,41 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
         )
         logger.info(f"isoview per-run log: {fusion_log_path} (DEBUG records)")
         monitor.update(0.05, "Running multi_fuse (see log file for details)...")
-        multi_fuse(config)
 
-        # Optional folder-suffix rename: the pipeline always writes to
-        # <fused_dir>/<method>/. If the user supplied output_suffix
-        # (e.g. "param-set-1"), move that folder to
-        # <fused_dir>/<method>_<suffix>/ so multiple parameter sweeps
-        # can coexist. Skipped silently when suffix is None/blank or
-        # the source folder is missing (e.g. all tiles were skipped).
-        suffix = args.get("output_suffix")
-        if suffix:
-            src = fused_dir / config.blending_method
-            dst = fused_dir / f"{config.blending_method}_{suffix}"
-            if src.is_dir():
-                if dst.exists():
-                    logger.warning(
-                        f"output_suffix rename: destination already exists, "
-                        f"leaving source in place: {dst}"
-                    )
-                else:
-                    src.rename(dst)
-                    logger.info(f"renamed fused output: {src.name} -> {dst.name}")
+        # multi_fuse runs the whole parallel loop with no progress callback,
+        # so the worker watchdog (kills after MAX_STALL_MINUTES of unchanged
+        # progress) would terminate a long but healthy run. Run it in a
+        # thread and heartbeat from the count of fused timepoint dirs: the
+        # count advances as each timepoint completes (keeping the watchdog
+        # alive) and freezes if fusion genuinely hangs (so it still fires).
+        method_dir = fused_dir / config.blending_method
+        total = max(len(config.timepoints), 1)
+        result: dict = {}
+
+        def _run():
+            try:
+                multi_fuse(config)
+            except BaseException as exc:
+                result["error"] = exc
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        while worker.is_alive():
+            worker.join(timeout=30)
+            try:
+                done = sum(1 for p in method_dir.glob("TM*") if p.is_dir())
+            except OSError:
+                done = 0
+            frac = 0.05 + 0.9 * min(done / total, 1.0)
+            monitor.update(frac, f"multi_fuse: {done}/{total} timepoints")
+        if "error" in result:
+            raise result["error"]
+
+        # output_suffix is already encoded in fused_dir (isoview names the
+        # tree <root>.fused_<suffix>), so the method subdir stays <method>.
+        # No post-run rename — doing so would double-apply the suffix and
+        # break resume (next run writes to <method>/, completed data sits
+        # in <method>_<suffix>/).
 
         monitor.finish("multi_fuse pipeline complete.")
         logger.info("multi_fuse completed successfully")
