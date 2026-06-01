@@ -11,16 +11,11 @@ from tifffile import tifffile
 from . import log
 
 try:
-    from zarr import open as zarr_open
-    from zarr.storage import FsspecStore
-    from fsspec.implementations.reference import ReferenceFileSystem
+    import zarr  # noqa: F401  (availability probe for HAS_ZARR)
 
     HAS_ZARR = True
 except ImportError:
     HAS_ZARR = False
-    zarr_open = None
-    ReferenceFileSystem = None
-    FsspecStore = None
 
 CHUNKS = {0: 1, 1: "auto", 2: -1, 3: -1}
 

@@ -205,18 +205,6 @@ def _close_specific_tiff_writer(filepath):
                 _write_tiff._imagej_mode.pop(key, None)
 
 
-def _close_all_tiff_writers():
-    """Close all open TIFF writers (for testing/cleanup)."""
-    if hasattr(_write_tiff, "_writers"):
-        for writer in _write_tiff._writers.values():
-            writer.close()
-        _write_tiff._writers.clear()
-        if hasattr(_write_tiff, "_first_write"):
-            _write_tiff._first_write.clear()
-        if hasattr(_write_tiff, "_imagej_mode"):
-            _write_tiff._imagej_mode.clear()
-
-
 def _close_specific_npy_writer(filepath):
     """Close a specific .npy memory-mapped writer by filepath (thread-safe).
 
@@ -531,15 +519,6 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     mmap[off : off + data.shape[0]] = data
     mmap.flush()
     _write_npy._offsets[key] = off + data.shape[0]
-
-
-def _close_npy_writers():
-    """Close all open .npy memory-mapped writers."""
-    if hasattr(_write_npy, "_arrays"):
-        # Close each writer properly to package data with metadata
-        keys = list(_write_npy._arrays.keys())
-        for key in keys:
-            _close_specific_npy_writer(key)
 
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):

@@ -254,81 +254,6 @@ def _sanitize_suffix(suffix: str) -> str:
     return suffix.rstrip("_")
 
 
-def _build_output_path(
-    outpath: Path,
-    plane_idx: int,
-    roi: int | None,
-    ext: str,
-    output_name: str | None = None,
-    structural: bool = False,
-    has_multiple_rois: bool = False,
-    output_suffix: str | None = None,
-    **kwargs,
-) -> Path:
-    """
-    Build output file path for a single plane.
-
-    Parameters
-    ----------
-    outpath : Path
-        Base output directory.
-    plane_idx : int
-        0-indexed plane number.
-    roi : int | None
-        ROI index (1-based) or None for stitched/single ROI.
-    ext : str
-        File extension (without dot).
-    output_name : str | None
-        Override output filename (for .bin files).
-    structural : bool
-        If True, use data_chan2.bin naming for structural channel.
-    has_multiple_rois : bool
-        If True and roi is None, use "_stitched" suffix by default.
-    output_suffix : str | None
-        Custom suffix to append to filenames. If None, uses "_stitched" for
-        multi-ROI data when roi is None, or "_roiN" for specific ROIs.
-        The suffix is sanitized to remove illegal characters and prevent
-        double extensions.
-
-    Returns
-    -------
-    Path
-        Full output file path.
-    """
-    plane_num = plane_idx + 1  # Convert to 1-based for filenames
-
-    # Determine suffix based on ROI and custom output_suffix
-    if roi is None:
-        if output_suffix is not None:
-            # Use custom suffix (sanitized)
-            roi_suffix = _sanitize_suffix(output_suffix)
-        elif has_multiple_rois:
-            # Default to "_stitched" for multi-ROI data
-            roi_suffix = "_stitched"
-        else:
-            roi_suffix = ""
-    else:
-        roi_suffix = f"_roi{roi}"
-
-    if ext == "bin":
-        if output_name:
-            # Caller specified exact output - use it directly
-            if structural:
-                return outpath / "data_chan2.bin"
-            return outpath / output_name
-
-        # Build subdirectory structure
-        subdir = f"plane{plane_num:02d}{roi_suffix}"
-        plane_dir = outpath / subdir
-        plane_dir.mkdir(parents=True, exist_ok=True)
-
-        if structural:
-            return plane_dir / "data_chan2.bin"
-        return plane_dir / "data_raw.bin"
-    # Non-binary formats: single file per plane
-    return outpath / f"plane{plane_num:02d}{roi_suffix}.{ext}"
-
-
 def _sanitize_value(v):
     if isinstance(v, dict):
         return {k: _sanitize_value(val) for k, val in v.items()}
@@ -713,17 +638,6 @@ def _imwrite_base(
         progress_callback(1.0, "Complete")
 
     return outpath
-
-
-def _axes_or_guess(arr_ndim: int) -> str:
-    """Guess axis labels from array dimensionality."""
-    if arr_ndim == 2:
-        return "YX"
-    if arr_ndim == 3:
-        return "ZYX"
-    if arr_ndim == 4:
-        return "TZYX"
-    return "Unknown"
 
 
 class TiffReaderMixin:

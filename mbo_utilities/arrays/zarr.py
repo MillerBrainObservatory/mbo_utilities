@@ -16,8 +16,6 @@ from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionM
 from mbo_utilities.arrays.features import (
     DimLabelsMixin,
     DimensionSpecMixin,
-    SegmentationMixin,
-    Suite2pRegistrationMixin,
 )
 from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
@@ -51,7 +49,7 @@ _ZARR_INFO = PipelineInfo(
 register_pipeline(_ZARR_INFO)
 
 
-class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Suite2pRegistrationMixin, SegmentationMixin, Shape5DMixin):
+class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin):
     """
     Reader for Zarr stores (including OME-Zarr).
 

@@ -28,7 +28,6 @@ from mbo_utilities.arrays import (
     TiffArray,
     ZarrArray,
     _extract_tiff_plane_number,
-    open_scanimage,
 )
 from mbo_utilities.arrays.isoview import (
     IsoviewArray,
