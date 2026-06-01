@@ -42,6 +42,7 @@ from mbo_utilities.arrays.features._dim_labels import (
     DIM_DESCRIPTIONS,
     DimLabels,
     KNOWN_ORDERINGS,
+    find_slider_name,
     get_dim_index,
     get_dims,
     get_num_planes,
@@ -81,9 +82,7 @@ from mbo_utilities.arrays.features._phase_correction import (
     PhaseCorrMethod,
 )
 from mbo_utilities.arrays.features._roi import ROIFeature, RoiFeatureMixin
-from mbo_utilities.arrays.features._registration import Suite2pRegistrationMixin
 from mbo_utilities.arrays.features._segmentation import (
-    SegmentationMixin,
     masks_to_stat,
     stat_to_masks,
 )
@@ -171,8 +170,6 @@ __all__ = [
     # roi
     "ROIFeature",
     "RoiFeatureMixin",
-    # segmentation
-    "SegmentationMixin",
     "SliceStats",
     # stats
     "StatsFeature",
@@ -182,6 +179,7 @@ __all__ = [
     # backwards compat aliases
     "ZStatsFeature",
     "estimate_chunk_memory",
+    "find_slider_name",
     "get_dim_index",
     "get_dims",
     "get_num_planes",

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 import os
 import traceback
@@ -29,85 +30,29 @@ from mbo_utilities.metadata import get_param
 logger = log.get("worker.tasks")
 
 
-class _ChannelView:
-    """4D TZYX view of a single channel from 5D TCZYX data.
+from mbo_utilities.arrays._channel_view import _ChannelView
 
-    Wraps a lazy array and presents it as 4D by fixing the channel index.
-    Used to feed single-channel data to pipelines that expect TZYX input.
+
+def _auto_workers(num_planes: int, *, use_gpu: bool = False) -> int:
+    """Pick a worker count from hardware capacity and dataset size.
+
+    Bounded by ``num_planes`` (no point spawning more workers than tasks),
+    leaves CPU headroom for the OS + GUI, and budgets ~8 GB of available
+    RAM per worker (one suite2p plane fits comfortably in that).
+
+    GPU consumers (cellpose on GPU, etc.) are capped at 2 workers since
+    they contend for one device — set ``use_gpu=True`` to enable that.
     """
-
-    def __init__(self, arr, channel_0idx: int):
-        self._arr = arr
-        self._ch = channel_0idx
-        self._metadata_override = None
-
-    @property
-    def shape(self):
-        s = self._arr.shape
-        return (s[0], s[2], s[3], s[4])
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        s = self._arr.shape5d if hasattr(self._arr, "shape5d") else self._arr.shape
-        return (s[0], 1, s[2], s[3], s[4])
-
-    @property
-    def shape5d(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
-
-    @property
-    def ndim(self):
-        return 4
-
-    @property
-    def dtype(self):
-        return self._arr.dtype
-
-    @property
-    def metadata(self):
-        if self._metadata_override is not None:
-            return self._metadata_override
-        md = dict(getattr(self._arr, "metadata", {}))
-        md["num_color_channels"] = 1
-        return md
-
-    @metadata.setter
-    def metadata(self, value):
-        self._metadata_override = value
-
-    @property
-    def filenames(self):
-        return getattr(self._arr, "filenames", [])
-
-    @property
-    def num_planes(self):
-        return self._arr.shape[2]
-
-    @property
-    def num_color_channels(self):
-        return 1
-
-    @property
-    def num_channels(self):
-        return self._arr.shape[2]
-
-    @property
-    def dims(self):
-        return ("T", "Z", "Y", "X")
-
-    def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
-        if len(key) == 5:
-            return self._arr[(key[0], self._ch, key[2], key[3], key[4])]
-        key = key + (slice(None),) * (4 - len(key))
-        return self._arr[(key[0], self._ch, key[1], key[2], key[3])]
-
-    def _imwrite(self, outpath, planes=None, ext=".tiff", **kwargs):
-        from mbo_utilities.arrays._base import _imwrite_base
-
-        return _imwrite_base(
-            self, outpath, planes=planes, ext=ext, **kwargs
-        )
+    cpu = os.cpu_count() or 4
+    cpu_workers = max(1, cpu - 2)
+    try:
+        import psutil
+        avail_gb = psutil.virtual_memory().available / (1024 ** 3)
+        mem_workers = max(1, int(avail_gb // 8))
+    except Exception:
+        mem_workers = cpu_workers
+    cap = 2 if use_gpu else 12
+    return max(1, min(num_planes, cpu_workers, mem_workers, cap))
 
 
 class TaskMonitor:
@@ -602,23 +547,42 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     elif src_shape is not None:
         ops["nframes"] = int(src_shape[0])
 
-    # per-channel extraction: wrap data as 4D TZYX so pipeline sees single channel
+    # per-channel extraction: pass channel through reader_kwargs so each
+    # parallel worker re-creates the same 4D TZYX wrap after its own
+    # imread (the wrap can't survive pickling — workers re-open from
+    # paths). Path-based pipeline_input survives unchanged.
     channel = args.get("channel")
     pipeline_input = input_path
+    reader_kwargs: dict = {}
     if channel is not None:
         ops["functional_chan"] = 1
         ops["align_by_chan"] = 1
-        logger.info(f"Single-channel extraction: channel {channel}")
+        reader_kwargs["channel"] = int(channel) - 1
+        logger.info(f"Single-channel extraction: channel {channel} (zero-based: {channel - 1})")
 
-        # register _ChannelView as recognized lazy array type
+        # register _ChannelView as a recognized lazy array type in lsp's
+        # subprocess workers (they'll re-import on imread).
         import lbm_suite2p_python.utils as _lsp_utils
         if "_ChannelView" not in _lsp_utils._LAZY_ARRAY_TYPES:
             _lsp_utils._LAZY_ARRAY_TYPES = _lsp_utils._LAZY_ARRAY_TYPES + ("_ChannelView",)
 
-        # load data and wrap with channel view (presents 5D as 4D TZYX)
-        arr = imread(input_path)
-        pipeline_input = _ChannelView(arr, channel - 1)
-        logger.info(f"Wrapped as 4D view: shape={pipeline_input.shape}")
+    # Resolve workers: pass-through user choice, but honour 0/None as
+    # "auto" using hardware capacity. lsp also has its own auto path,
+    # but ours additionally bounds by available RAM and respects a GPU
+    # cap. Passing the resolved number through means logs say a real
+    # count instead of "auto/0".
+    raw_workers = s2p_settings.get("workers")
+    if raw_workers in (None, 0):
+        n_planes = len(planes) if planes else 1
+        use_gpu = bool(s2p_settings.get("rastermap_kwargs"))  # rough proxy for GPU work
+        resolved = _auto_workers(n_planes, use_gpu=use_gpu)
+        if resolved != raw_workers:
+            logger.info(
+                f"task_suite2p: workers=auto resolved to {resolved} "
+                f"(num_planes={n_planes}, cpu={os.cpu_count()})"
+            )
+            s2p_settings = dict(s2p_settings)
+            s2p_settings["workers"] = resolved
 
     # build writer_kwargs for phase correction settings
     writer_kwargs = {
@@ -694,6 +658,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             # built gui-side by build_rastermap_kwargs() in settings.py.
             rastermap_kwargs=s2p_settings.get("rastermap_kwargs"),
             writer_kwargs=writer_kwargs,
+            reader_kwargs=reader_kwargs or None,
             progress_callback=_progress,
             workers=s2p_settings.get("workers", 1),
             skip_volumetric=s2p_settings.get("skip_volumetric", False),
@@ -864,8 +829,7 @@ def _build_isoview_processing_config(args: dict):
 
     # plain pass-throughs — keep keys only when the widget supplied them
     for key in (
-        "corrected_suffix",
-        "fused_suffix",
+        "output_suffix",
         "stitcher_suffix",
         "output_format",
         "compression",
@@ -876,6 +840,7 @@ def _build_isoview_processing_config(args: dict):
         "pyramid",
         "pyramid_max_layers",
         "timepoints",
+        "specimens",
         "segment_mode",
         "gauss_kernel",
         "gauss_sigma",
@@ -894,6 +859,19 @@ def _build_isoview_processing_config(args: dict):
         "flip_vertical",
         "rotation",
         "front_flag",
+        # Per-view overrides — dict[int, T] keyed by view ID. Resolved
+        # by isoview's ProcessingConfig.get_blend(view); views absent
+        # from a dict fall back to the scalar above.
+        "blending_method_by_view",
+        "blending_range_by_view",
+        "transition_plane_by_view",
+        "front_flag_by_view",
+        "flip_z_by_view",
+        "flip_horizontal_by_view",
+        "flip_vertical_by_view",
+        "rotation_by_view",
+        "search_offsets_x_by_view",
+        "search_offsets_y_by_view",
         "pixel_spacing_z",
         "detection_objective_mag",
         "pixel_spacing_camera",
@@ -915,6 +893,10 @@ def _build_isoview_processing_config(args: dict):
         config_kwargs["search_offsets_x"] = tuple(args["search_offsets_x"])
     if args.get("search_offsets_y") is not None:
         config_kwargs["search_offsets_y"] = tuple(args["search_offsets_y"])
+    for key in ("search_offsets_x_by_view", "search_offsets_y_by_view"):
+        d = args.get(key)
+        if d is not None:
+            config_kwargs[key] = {int(v): tuple(off) for v, off in d.items()}
 
     return ProcessingConfig(**config_kwargs)
 
@@ -1050,27 +1032,41 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
         )
         logger.info(f"isoview per-run log: {fusion_log_path} (DEBUG records)")
         monitor.update(0.05, "Running multi_fuse (see log file for details)...")
-        multi_fuse(config)
 
-        # Optional folder-suffix rename: the pipeline always writes to
-        # <fused_dir>/<method>/. If the user supplied output_suffix
-        # (e.g. "param-set-1"), move that folder to
-        # <fused_dir>/<method>_<suffix>/ so multiple parameter sweeps
-        # can coexist. Skipped silently when suffix is None/blank or
-        # the source folder is missing (e.g. all tiles were skipped).
-        suffix = args.get("output_suffix")
-        if suffix:
-            src = fused_dir / config.blending_method
-            dst = fused_dir / f"{config.blending_method}_{suffix}"
-            if src.is_dir():
-                if dst.exists():
-                    logger.warning(
-                        f"output_suffix rename: destination already exists, "
-                        f"leaving source in place: {dst}"
-                    )
-                else:
-                    src.rename(dst)
-                    logger.info(f"renamed fused output: {src.name} -> {dst.name}")
+        # multi_fuse runs the whole parallel loop with no progress callback,
+        # so the worker watchdog (kills after MAX_STALL_MINUTES of unchanged
+        # progress) would terminate a long but healthy run. Run it in a
+        # thread and heartbeat from the count of fused timepoint dirs: the
+        # count advances as each timepoint completes (keeping the watchdog
+        # alive) and freezes if fusion genuinely hangs (so it still fires).
+        method_dir = fused_dir / config.blending_method
+        total = max(len(config.timepoints), 1)
+        result: dict = {}
+
+        def _run():
+            try:
+                multi_fuse(config)
+            except BaseException as exc:
+                result["error"] = exc
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        while worker.is_alive():
+            worker.join(timeout=30)
+            try:
+                done = sum(1 for p in method_dir.glob("TM*") if p.is_dir())
+            except OSError:
+                done = 0
+            frac = 0.05 + 0.9 * min(done / total, 1.0)
+            monitor.update(frac, f"multi_fuse: {done}/{total} timepoints")
+        if "error" in result:
+            raise result["error"]
+
+        # output_suffix is already encoded in fused_dir (isoview names the
+        # tree <root>.fused_<suffix>), so the method subdir stays <method>.
+        # No post-run rename — doing so would double-apply the suffix and
+        # break resume (next run writes to <method>/, completed data sits
+        # in <method>_<suffix>/).
 
         monitor.finish("multi_fuse pipeline complete.")
         logger.info("multi_fuse completed successfully")
@@ -1121,102 +1117,26 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
         raise
 
 
-# bigstitcher-spark command → main class for `java -cp <jar> <class>` invocation.
-# The fat JAR built by `mvn -P fatjar` has no Main-Class in its manifest, so
-# we dispatch by classname instead.
-_SPARK_COMMAND_CLASSES = {
-    "detect-interestpoints": "net.preibisch.bigstitcher.spark.SparkInterestPointDetection",
-    "match-interestpoints": "net.preibisch.bigstitcher.spark.SparkGeometricDescriptorMatching",
-    "solver": "net.preibisch.bigstitcher.spark.Solver",
-    "resave": "net.preibisch.bigstitcher.spark.SparkResaveN5",
-    "stitching": "net.preibisch.bigstitcher.spark.SparkPairwiseStitching",
-    "affine-fusion": "net.preibisch.bigstitcher.spark.SparkAffineFusion",
-    "nonrigid-fusion": "net.preibisch.bigstitcher.spark.SparkNonRigidFusion",
-    "create-fusion-container": "net.preibisch.bigstitcher.spark.CreateFusionContainer",
-    "downsample": "net.preibisch.bigstitcher.spark.SparkDownsample",
-}
-
-
-def _resolve_spark_executable(
-    spark_root: Path,
-    command: str,
-    java_home: str | None = None,
-) -> list[str]:
-    """Resolve a bigstitcher-spark CLI command into a runnable argv prefix.
-
-    ``spark_root`` may point at either:
-    - A directory containing the executable wrapper scripts produced by
-      bigstitcher-spark's ``./install`` step.
-    - A fat JAR built with ``mvn -P fatjar``. The JAR is invoked via
-      ``java -cp <jar> <main-class>`` because the shaded manifest has
-      no Main-Class entry.
-
-    ``java_home`` overrides which JDK is used in fat-JAR mode. Required
-    when the system default Java is incompatible (Spark 3.3.x needs
-    Java 8–17; Java 21+ fails at runtime).
-    """
-    candidates = [
-        spark_root / command,
-        spark_root / f"{command}.bat",
-        spark_root / f"{command}.cmd",
-        spark_root / f"{command}.sh",
-    ]
-    for p in candidates:
-        if p.is_file():
-            return [str(p)]
-
-    if spark_root.is_file() and spark_root.suffix.lower() == ".jar":
-        main_class = _SPARK_COMMAND_CLASSES.get(command)
-        if main_class is None:
-            raise ValueError(
-                f"unknown bigstitcher-spark command: {command!r}. "
-                f"Known: {sorted(_SPARK_COMMAND_CLASSES)}"
-            )
-        if java_home:
-            java_exe = Path(java_home) / "bin" / "java.exe"
-            if not java_exe.is_file():
-                java_exe = Path(java_home) / "bin" / "java"
-            java = str(java_exe)
-        else:
-            import shutil as _shutil
-            java = _shutil.which("java") or "java"
-        return [java, "-cp", str(spark_root), main_class]
-
-    raise FileNotFoundError(
-        f"could not resolve bigstitcher-spark command {command!r} under {spark_root}. "
-        f"Expected an executable script (e.g. {command}, {command}.bat) "
-        f"or a fat JAR file."
-    )
-
-
 def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
-    """Run bigstitcher-spark's detect → match → solver pipeline.
+    """Run bigstitcher-spark's coarse → fine registration pipeline.
 
-    Mutates the dataset.xml in place, adding interest-point detections,
-    pairwise matches, and the solved per-view ViewTransforms.
+    Mutates ``dataset.xml`` in place. Five spark stages run sequentially:
+
+      1. ``detect-interestpoints`` (DoG)
+      2. ``match-interestpoints`` (descriptor pass, e.g. PRECISE_TRANSLATION)
+      3. ``solver`` (global optimization)
+      4. ``match-interestpoints`` (ICP refinement, when ``do_icp_refine``)
+      5. ``solver`` again
 
     Required args:
       - xml_path: path to dataset.xml
       - spark_root: path to bigstitcher-spark executables dir OR fat JAR
 
-    Optional args (with sensible defaults for beads/precise descriptor):
-      - label: interest point label (default "beads")
-      - sigma: DoG sigma (default 1.8)
-      - threshold: DoG threshold (default 0.008)
-      - downsample_xy: -dsxy (default 2)
-      - downsample_z: -dsz (default 1)
-      - min_intensity / max_intensity: normalization range (default 0/65535)
-      - match_algorithm: -m (default PRECISE_TRANSLATION)
-      - transformation_model: -tm (default AFFINE)
-      - regularization_model: -rm (default RIGID)
-      - lambda_reg: --lambda (default 0.1)
-      - view_registration_scope: -vr (default ALL_AGAINST_ALL)
-      - ransac_min_inliers: -rmni (default 4; bigstitcher default 12 is too
-        strict for sparse-overlap bead datasets like orthogonal isoview)
-      - ransac_max_error: -rme (default 5.0 px)
-      - clear_correspondences: bool (default True)
+    Optional args: see :func:`isoview.bigstitcher.register`. Both the
+    new keys (``coarse_method``, ``solver_method``, …) and the legacy
+    ``match_algorithm`` alias are accepted.
     """
-    import subprocess
+    from isoview import bigstitcher
 
     monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing bigstitcher-spark...")
@@ -1224,160 +1144,124 @@ def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
     xml_path = Path(args["xml_path"]).resolve()
     if not xml_path.is_file():
         raise FileNotFoundError(f"dataset.xml not found: {xml_path}")
-    # BigStitcher-Spark's URITools rejects "D:/..." as ambiguous with a
-    # URI scheme. Pass an explicit file URI so Windows drive paths parse
-    # cleanly regardless of slash direction.
-    xml_arg = xml_path.as_uri()
-
     spark_root = Path(args["spark_root"]).resolve()
     if not spark_root.exists():
         raise FileNotFoundError(f"spark_root does not exist: {spark_root}")
 
-    label = str(args.get("label", "beads"))
-    sigma = float(args.get("sigma", 1.8))
-    threshold = float(args.get("threshold", 0.008))
-    dsxy = int(args.get("downsample_xy", 2))
-    dsz = int(args.get("downsample_z", 1))
-    min_intensity = float(args.get("min_intensity", 0))
-    max_intensity = float(args.get("max_intensity", 65535))
-    match_algorithm = str(args.get("match_algorithm", "PRECISE_TRANSLATION"))
-    transformation_model = str(args.get("transformation_model", "AFFINE"))
-    regularization_model = str(args.get("regularization_model", "RIGID"))
-    lambda_reg = float(args.get("lambda_reg", 0.1))
-    view_registration_scope = str(
-        args.get("view_registration_scope", "ALL_AGAINST_ALL")
-    )
-    ransac_min_inliers = int(args.get("ransac_min_inliers", 4))
-    ransac_max_error = float(args.get("ransac_max_error", 5.0))
-    clear_correspondences = bool(args.get("clear_correspondences", True))
-    verbose = bool(args.get("verbose", False))
-    java_home = args.get("java_home") or None
-    # JVM/Spark flags for standalone (non-spark-submit) execution.
-    # Mirrors what BigStitcher-Spark's install script bakes into its
-    # wrapper executables: `-Xmx<N>g -Dspark.master=local[N]`.
-    spark_threads = int(args.get("spark_threads", max(2, (os.cpu_count() or 4) // 2)))
-    spark_memory_gb = int(args.get("spark_memory_gb", 8))
+    # Legacy alias: GUI used to send `match_algorithm`; rename to the
+    # new `coarse_method` keyword if the caller hasn't already.
+    if "coarse_method" not in args and "match_algorithm" in args:
+        args = dict(args)
+        args["coarse_method"] = args.pop("match_algorithm")
 
-    def _inject_jvm_args(argv: list[str]) -> list[str]:
-        # Only inject when invoking via `java -cp …`; leave script-mode
-        # invocations alone (their wrappers set these themselves).
-        if len(argv) >= 3 and argv[1] == "-cp" and argv[0].lower().endswith(
-            ("java", "java.exe")
-        ):
-            return [
-                argv[0],
-                f"-Xmx{spark_memory_gb}g",
-                f"-Dspark.master=local[{spark_threads}]",
-                *argv[1:],
-            ]
-        return argv
+    runtime_keys = ("java_home", "spark_memory_gb", "spark_threads")
 
-    # Lines worth keeping from spark stdout: summary counts, per-pair match
-    # outcomes, solved transforms, and error/exception traces. Everything else
-    # (per-job DoG progress, spark log4j chatter, JVM illegal-access warnings,
-    # progress bars, etc) is dropped unless verbose=True.
-    _keep_stdout = re.compile(
-        r"Saved xml"
-        r"|^Done\b"
-        r"|Total number of"
-        r"|Transformation Models:"
-        r"|^tpId=\d+ setupId=\d+: (\d+$|\()"
-        r"|Computed all interest points, statistics:"
-        r"|Defined pairs"
-        r"|Identified \d+ subset"
-        r"|Pairwise model"
-        r"|In total[: ]"
-        r"|NO Model found"
-        r"|No corresponding points"
-        r"|: Model found"
-        r"|(Avg|Min|Max) Error:"
-        r"|prealigned all tiles"
-        r"|Global optimization"
-        r"|Total number of jobs for"
-        r"|Removed \d+ pairs because"
-        r"|Exception|Caused by|\bERROR\b|\bError\b"
-    )
-    _stderr_noise = (
-        "Compression 'org.janelia.saalfeldlab.n5.blosc.BloscCompression'",
-        "Using Spark's default log4j",
-        "WARNING: An illegal reflective access",
-        "WARNING: Illegal reflective access",
-        "WARNING: Please consider reporting",
-        "WARNING: Use --illegal-access",
-        "WARNING: All illegal access",
-        "WARNING: sun.reflect.Reflection",
-    )
+    def _pick(keys):
+        return {
+            k: args[k] for k in keys
+            if k in args and args[k] is not None
+        }
 
-    def _run(label_step: str, prog: float, argv: list[str]) -> None:
-        logger.info(f"{label_step}:")
-        if verbose:
-            logger.info("  " + " ".join(argv))
-        monitor.update(prog, f"BigStitcher-Spark: {label_step}")
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, check=False,
+    detect_kwargs = _pick((
+        "label", "sigma", "threshold",
+        "downsample_xy", "downsample_z",
+        "min_intensity", "max_intensity",
+        "max_spots", "dog_type", "localization",
+        "overlapping_only_detect",
+        *runtime_keys,
+    ))
+    # bigstitcher.detect_interestpoints expects ``overlapping_only``, not the
+    # prefixed name the register() facade uses.
+    if "overlapping_only_detect" in detect_kwargs:
+        detect_kwargs["overlapping_only"] = detect_kwargs.pop(
+            "overlapping_only_detect"
         )
-        failed = proc.returncode != 0
-        if proc.stdout:
-            for line in proc.stdout.splitlines():
-                if verbose or failed or _keep_stdout.search(line):
-                    logger.info(f"  [stdout] {line}")
-        if proc.stderr:
-            for line in proc.stderr.splitlines():
-                if verbose or failed or not any(
-                    n in line for n in _stderr_noise
-                ):
-                    logger.info(f"  [stderr] {line}")
-        if failed:
-            raise RuntimeError(
-                f"{label_step} failed with exit code {proc.returncode}; "
-                f"see worker log for stdout/stderr"
-            )
 
-    # 1. detect-interestpoints
-    detect_argv = _inject_jvm_args(
-        _resolve_spark_executable(spark_root, "detect-interestpoints", java_home)
-    ) + [
-        "-x", xml_arg,
-        "-l", label,
-        "-s", str(sigma),
-        "-t", str(threshold),
-        "-dsxy", str(dsxy),
-        "-dsz", str(dsz),
-        "--minIntensity", str(min_intensity),
-        "--maxIntensity", str(max_intensity),
-    ]
-    _run("detect-interestpoints", 0.1, detect_argv)
+    common_match_keys = (
+        "label",
+        "transformation_model", "regularization_model", "lambda_reg",
+        "view_registration_scope", "interestpoints_for_reg",
+        *runtime_keys,
+    )
+    coarse_kwargs = _pick((
+        *common_match_keys,
+        "coarse_method",
+        "num_neighbors", "redundancy", "significance", "search_radius",
+        "coarse_ransac_max_error", "coarse_ransac_min_inliers",
+    ))
+    # rename register()-style names to match_interestpoints()-style.
+    if "coarse_method" in coarse_kwargs:
+        coarse_kwargs["method"] = coarse_kwargs.pop("coarse_method")
+    if "coarse_ransac_max_error" in coarse_kwargs:
+        coarse_kwargs["ransac_max_error"] = coarse_kwargs.pop(
+            "coarse_ransac_max_error"
+        )
+    if "coarse_ransac_min_inliers" in coarse_kwargs:
+        coarse_kwargs["ransac_min_inliers"] = coarse_kwargs.pop(
+            "coarse_ransac_min_inliers"
+        )
 
-    # 2. match-interestpoints
-    match_argv = _inject_jvm_args(
-        _resolve_spark_executable(spark_root, "match-interestpoints", java_home)
-    ) + [
-        "-x", xml_arg,
-        "-l", label,
-        "-m", match_algorithm,
-        "-tm", transformation_model,
-        "-rm", regularization_model,
-        "--lambda", str(lambda_reg),
-        "-vr", view_registration_scope,
-        "-rmni", str(ransac_min_inliers),
-        "-rme", str(ransac_max_error),
-    ]
-    if clear_correspondences:
-        match_argv.append("--clearCorrespondences")
-    _run("match-interestpoints", 0.5, match_argv)
+    icp_kwargs = _pick((
+        *common_match_keys,
+        "icp_iterations", "icp_max_error", "icp_use_ransac",
+        "icp_ransac_max_error", "icp_ransac_min_inliers",
+        "icp_ransac_iterations",
+    ))
+    icp_kwargs["method"] = "ICP"
+    if "icp_ransac_max_error" in icp_kwargs:
+        icp_kwargs["ransac_max_error"] = icp_kwargs.pop("icp_ransac_max_error")
+    if "icp_ransac_min_inliers" in icp_kwargs:
+        icp_kwargs["ransac_min_inliers"] = icp_kwargs.pop(
+            "icp_ransac_min_inliers"
+        )
+    if "icp_ransac_iterations" in icp_kwargs:
+        icp_kwargs["ransac_iterations"] = icp_kwargs.pop(
+            "icp_ransac_iterations"
+        )
 
-    # 3. solver
-    solver_argv = _inject_jvm_args(
-        _resolve_spark_executable(spark_root, "solver", java_home)
-    ) + [
-        "-x", xml_arg,
-        "-s", "IP",
-        "-l", label,
-        "-tm", transformation_model,
-        "-rm", regularization_model,
-        "--lambda", str(lambda_reg),
-    ]
-    _run("solver", 0.85, solver_argv)
+    solver_kwargs = _pick((
+        "label",
+        "transformation_model", "regularization_model", "lambda_reg",
+        "solver_method",
+        "solver_relative_threshold", "solver_absolute_threshold",
+        *runtime_keys,
+    ))
+    if "solver_method" in solver_kwargs:
+        solver_kwargs["method"] = solver_kwargs.pop("solver_method")
+    if "solver_relative_threshold" in solver_kwargs:
+        solver_kwargs["relative_threshold"] = solver_kwargs.pop(
+            "solver_relative_threshold"
+        )
+    if "solver_absolute_threshold" in solver_kwargs:
+        solver_kwargs["absolute_threshold"] = solver_kwargs.pop(
+            "solver_absolute_threshold"
+        )
+
+    do_icp = bool(args.get("do_icp_refine", True))
+
+    monitor.update(0.05, "BigStitcher-Spark: detect-interestpoints")
+    bigstitcher.detect_interestpoints(
+        xml_path, spark_root, log=logger, **detect_kwargs
+    )
+
+    monitor.update(0.30, "BigStitcher-Spark: coarse match (descriptor)")
+    bigstitcher.match_interestpoints(
+        xml_path, spark_root, log=logger,
+        clear_correspondences=True, **coarse_kwargs,
+    )
+
+    monitor.update(0.55, "BigStitcher-Spark: solver (post-coarse)")
+    bigstitcher.solver(xml_path, spark_root, log=logger, **solver_kwargs)
+
+    if do_icp:
+        monitor.update(0.70, "BigStitcher-Spark: fine match (ICP)")
+        bigstitcher.match_interestpoints(
+            xml_path, spark_root, log=logger,
+            clear_correspondences=True, **icp_kwargs,
+        )
+
+        monitor.update(0.90, "BigStitcher-Spark: solver (post-ICP)")
+        bigstitcher.solver(xml_path, spark_root, log=logger, **solver_kwargs)
 
     monitor.finish(f"BigStitcher registration complete: {xml_path}")
     logger.info(f"BigStitcher registration completed; XML updated: {xml_path}")

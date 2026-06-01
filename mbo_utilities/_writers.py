@@ -38,7 +38,7 @@ def _filter_disabled_modules(metadata: dict, recursive: bool = True) -> dict:
         return metadata
     result = {}
     for k, v in metadata.items():
-        if k.startswith("h") and _is_disabled_si_module(v):
+        if isinstance(k, str) and k.startswith("h") and _is_disabled_si_module(v):
             continue
         if recursive and isinstance(v, dict):
             v = _filter_disabled_modules(v, recursive=True)
@@ -203,18 +203,6 @@ def _close_specific_tiff_writer(filepath):
                 _write_tiff._first_write.pop(key, None)
             if hasattr(_write_tiff, "_imagej_mode"):
                 _write_tiff._imagej_mode.pop(key, None)
-
-
-def _close_all_tiff_writers():
-    """Close all open TIFF writers (for testing/cleanup)."""
-    if hasattr(_write_tiff, "_writers"):
-        for writer in _write_tiff._writers.values():
-            writer.close()
-        _write_tiff._writers.clear()
-        if hasattr(_write_tiff, "_first_write"):
-            _write_tiff._first_write.clear()
-        if hasattr(_write_tiff, "_imagej_mode"):
-            _write_tiff._imagej_mode.clear()
 
 
 def _close_specific_npy_writer(filepath):
@@ -531,15 +519,6 @@ def _write_npy(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
     mmap[off : off + data.shape[0]] = data
     mmap.flush()
     _write_npy._offsets[key] = off + data.shape[0]
-
-
-def _close_npy_writers():
-    """Close all open .npy memory-mapped writers."""
-    if hasattr(_write_npy, "_arrays"):
-        # Close each writer properly to package data with metadata
-        keys = list(_write_npy._arrays.keys())
-        for key in keys:
-            _close_specific_npy_writer(key)
 
 
 def _write_h5(path, data, *, overwrite=True, metadata=None, **kwargs):
@@ -1176,10 +1155,12 @@ def _write_volumetric_h5(
             f"  Output metadata: dz={out_meta.dz}, fs={out_meta.fs}, contiguous={out_meta.is_contiguous}"
         )
 
-    # h5 chunking — one frame per chunk so any (t, z, y, x) read pulls
-    # exactly its plane's worth of bytes off disk. matches the zarr
-    # `inner_chunk = (1, n_planes, Ly_out, Lx_out)` decision.
-    inner_chunk = (1, n_planes, Ly_out, Lx_out)
+    # h5 chunking — one Y×X plane per chunk so a fixed-(t, z) GUI scrub
+    # pulls exactly that plane off disk. The previous (1, n_planes, Y, X)
+    # spec packed every Z layer into one chunk, forcing the whole volume
+    # to decompress for any single-plane read — the same Z-bunching bug
+    # the zarr writers fixed.
+    inner_chunk = (1, 1, Ly_out, Lx_out)
 
     # h5 compression knobs
     h5_compression = None
@@ -2707,7 +2688,7 @@ def to_video(
         str(output_path),
         fps=output_fps,
         codec=codec,
-        macro_block_size=1,
+        macro_block_size=2,
         output_params=output_params,
     )
 

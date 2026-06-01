@@ -672,7 +672,9 @@ class PreviewDataWidget(EdgeWindow):
         """
         # current displayed indices, defaulting to 0 when a slider is absent
         # (e.g. T-only data has no z slider, so we report z=0).
+        from mbo_utilities.arrays.features import find_slider_name
         indices = {}
+        names = ()
         if self.image_widget is not None:
             try:
                 names = self.image_widget._slider_dim_names or ()
@@ -683,9 +685,12 @@ class PreviewDataWidget(EdgeWindow):
                         pass
             except Exception:
                 pass
-        t_idx = indices.get("t", 0)
-        c_idx = indices.get("c", 0)
-        z_idx = indices.get("z", 0)
+        t_name = find_slider_name(names, "t")
+        c_name = find_slider_name(names, "c")
+        z_name = find_slider_name(names, "z")
+        t_idx = indices.get(t_name, 0) if t_name else 0
+        c_idx = indices.get(c_name, 0) if c_name else 0
+        z_idx = indices.get(z_name, 0) if z_name else 0
 
         offsets = []
         for arr in self._get_data_arrays():
@@ -940,11 +945,12 @@ class PreviewDataWidget(EdgeWindow):
 
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
+        from mbo_utilities.arrays.features import find_slider_name
         names = self.image_widget._slider_dim_names or ()
         # fastplotlib's `indices` is case-sensitive; isoview uses
-        # uppercase TCZYX, LBM/ScanImage use lowercase. Resolve the
-        # canonical key by case-insensitive match before indexing.
-        z_name = next((n for n in names if n.lower() == "z"), None)
+        # descriptive labels (Tile/Timepoint, Cam/View, Zplane), LBM
+        # uses lowercase. find_slider_name resolves both via aliases.
+        z_name = find_slider_name(names, "z")
         try:
             z_idx = self.image_widget.indices[z_name] if z_name else 0
         except (IndexError, KeyError):
@@ -956,7 +962,7 @@ class PreviewDataWidget(EdgeWindow):
         # mean subtraction matches what the user sees. `_zstats_means[i]`
         # is now `dict[c, (n_slices, Y, X)]`; fall back to channel 0 if
         # the slider channel hasn't been computed yet.
-        c_name = next((n for n in names if n.lower() == "c"), None)
+        c_name = find_slider_name(names, "c")
         try:
             c_for_mean = self.image_widget.indices[c_name] if c_name else 0
         except (IndexError, KeyError):
@@ -1145,10 +1151,12 @@ class PreviewDataWidget(EdgeWindow):
         # all channels precomputed by zstats, a C change just rebinds the
         # mean image from the per-channel cache — no recompute needed.
         # `indices` is case-sensitive; resolve canonical names from the
-        # slider list before indexing (isoview uses upper, LBM uses lower).
+        # slider list before indexing (isoview uses descriptive labels,
+        # LBM uses lowercase t/c/z).
+        from mbo_utilities.arrays.features import find_slider_name
         names = self.image_widget._slider_dim_names or ()
-        z_name = next((n for n in names if n.lower() == "z"), None)
-        c_name = next((n for n in names if n.lower() == "c"), None)
+        z_name = find_slider_name(names, "z")
+        c_name = find_slider_name(names, "c")
         try:
             z_idx = self.image_widget.indices[z_name] if z_name else 0
         except (IndexError, KeyError):
@@ -1181,10 +1189,13 @@ class PreviewDataWidget(EdgeWindow):
 
     def get_raw_frame(self) -> tuple[ndarray, ...]:
         """Get raw frame data at current indices."""
+        from mbo_utilities.arrays.features import find_slider_name
         idx = self.image_widget.indices
         names = self.image_widget._slider_dim_names or ()
-        t = idx["t"] if "t" in names else 0
-        z = idx["z"] if "z" in names else 0
+        t_name = find_slider_name(names, "t")
+        z_name = find_slider_name(names, "z")
+        t = idx[t_name] if t_name else 0
+        z = idx[z_name] if z_name else 0
 
         def _ndim_to_frame(arr, t=0, z=0):
             if arr.ndim == 4:

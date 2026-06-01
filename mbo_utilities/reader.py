@@ -28,7 +28,6 @@ from mbo_utilities.arrays import (
     TiffArray,
     ZarrArray,
     _extract_tiff_plane_number,
-    open_scanimage,
 )
 from mbo_utilities.arrays.isoview import (
     IsoviewArray,
@@ -126,6 +125,12 @@ def imread(
         - List/tuple of file paths
         - A numpy array (will be wrapped as NumpyArray for full imwrite support)
         - An existing lazy array (passed through unchanged)
+    channel : int, optional
+        Zero-based color-channel index. When given, the returned array
+        is wrapped as a 4D TZYX view of that single channel — useful for
+        feeding multi-channel sources into pipelines that expect TZYX
+        input. Subprocess workers can re-create the same view by passing
+        ``reader_kwargs={"channel": N}`` to ``imread``.
     **kwargs
         Extra keyword arguments passed to specific array readers.
 
@@ -147,6 +152,28 @@ def imread(
     >>> arr = imread(data)  # Returns NumpyArray
     >>> imwrite(arr, "output", ext=".zarr")  # Full write support
     """
+    # Pull single-channel wrapping out so every return path benefits.
+    # Stored as ``channel`` (zero-based) — picklable through reader_kwargs
+    # so subprocess workers can re-create the wrap after their own imread.
+    channel = kwargs.pop("channel", None)
+    arr = _imread_impl(inputs, **kwargs)
+    if channel is not None:
+        from mbo_utilities.arrays._channel_view import _ChannelView
+        if not hasattr(arr, "shape") or len(arr.shape) < 5:
+            logger.debug(
+                "imread(channel=%r): underlying array is %dD, returning unwrapped",
+                channel, getattr(arr, "ndim", "?"),
+            )
+            return arr
+        return _ChannelView(arr, int(channel))
+    return arr
+
+
+def _imread_impl(
+    inputs: str | Path | np.ndarray | Sequence[str | Path],
+    **kwargs,
+):
+    """Internal imread that returns the raw lazy array without channel wrapping."""
     # Wrap numpy arrays in NumpyArray for full imwrite/protocol support
     if isinstance(inputs, np.ndarray):
         logger.debug(f"Wrapping numpy array with shape {inputs.shape} as NumpyArray")
@@ -160,12 +187,29 @@ def imread(
         if not p.exists():
             raise ValueError(f"Input path does not exist: {p}")
 
-        # Isoview detection runs FIRST, before any file-vs-dir dispatch.
-        # "Open File" on `<root>.corrected/SPM##/TM######/*.zarr` and "Open
-        # Folder" on `<root>.corrected/SPM##` and `mbo <root>.corrected/` on
-        # the CLI must all land here — same array, same shape. detect walks
-        # up parents so individual zarrs/tifs/klbs/stacks inside the tree
-        # resolve to the enclosing stack root.
+        # Suite2p outputs take priority over isoview ancestor matching.
+        # detect_isoview_kind walks up parents looking for `.corrected` /
+        # `.fused` ancestors, so a suite2p plane folder sitting inside
+        # `<root>.corrected.registered/` would otherwise be returned as
+        # an IsoviewArray over the 5D source. ops.npy / plane subdirs are
+        # unambiguous suite2p markers — if present, the user pointed at
+        # the suite2p folder, not the source tree.
+        if p.is_dir():
+            if (p / "ops.npy").exists():
+                logger.info(f"Detected Suite2p directory at {p}")
+                return Suite2pArray(p)
+            if p.name == "reg_tif" and (p.parent / "ops.npy").exists():
+                logger.info(f"Detected Suite2p reg_tif folder at {p}")
+                return Suite2pArray(p.parent / "ops.npy", use_reg_tif=True)
+            plane_subdirs = [d for d in p.iterdir() if d.is_dir() and (d / "ops.npy").exists()]
+            if plane_subdirs:
+                logger.info(f"Detected Suite2p volume with {len(plane_subdirs)} planes in {p}")
+                return Suite2pArray(p)
+
+        # Isoview detection runs before file-vs-dir dispatch so "Open File"
+        # on `<root>.corrected/SPM##/TM######/*.zarr`, "Open Folder" on
+        # `<root>.corrected/SPM##`, and `mbo <root>.corrected/` all resolve
+        # to the enclosing stack root via parent-walk.
         iso_kind = detect_isoview_kind(p)
         if iso_kind is not None:
             logger.info(f"Detected isoview-{iso_kind} tree at {p}")

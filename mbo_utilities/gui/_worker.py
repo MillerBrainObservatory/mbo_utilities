@@ -123,11 +123,12 @@ def _atomic_replace(src: Path, dst: Path, attempts: int = 10, delay: float = 0.0
         raise last_err
 
 
-def _start_watchdog(uuid: str | None, logger: logging.Logger):
+def _start_watchdog(uuid: str | None, logger: logging.Logger, log_file: str | None = None):
     """daemon thread that kills this process if progress stalls."""
     def _watchdog():
         log_dir = Path.home() / ".mbo" / "logs"
         last_progress = 0.0
+        last_log_mtime = 0.0
         last_change = time.time()
         stall_seconds = MAX_STALL_MINUTES * 60
 
@@ -153,6 +154,22 @@ def _start_watchdog(uuid: str | None, logger: logging.Logger):
                         last_progress = progress
                         last_change = time.time()
             except Exception:
+                pass
+
+            # Liveness fallback: the worker's stdout/stderr and logger are
+            # all redirected to log_file. Long pipeline tasks (correct_stack,
+            # multi_fuse) run a single blocking call that emits per-step log
+            # lines but never moves the progress number. An advancing log
+            # mtime means the task is still working, so only a process that
+            # is both progress-frozen and log-silent for the full window is
+            # treated as hung.
+            try:
+                if log_file:
+                    m = os.path.getmtime(log_file)
+                    if m > last_log_mtime:
+                        last_log_mtime = m
+                        last_change = time.time()
+            except OSError:
                 pass
 
             if time.time() - last_change > stall_seconds:
@@ -220,7 +237,7 @@ def main():
     logger.info(f"Worker started: task={task_type}, pid={os.getpid()}")
 
     # watchdog kills this process if it stalls for too long
-    _start_watchdog(uuid, logger)
+    _start_watchdog(uuid, logger, log_file)
 
     # get task function
     if task_type not in TASKS:

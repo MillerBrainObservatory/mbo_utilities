@@ -14,8 +14,6 @@ from mbo_utilities.arrays._base import (
     CHUNKS_4D,
     DIMS,
     Shape5DMixin,
-    _axes_or_guess,
-    _build_output_path,
     _imwrite_base,
     _normalize_planes,
     _sanitize_suffix,
@@ -94,20 +92,16 @@ if TYPE_CHECKING:
         isoview_to_ome_zarr as isoview_to_ome_zarr,
     )
     from mbo_utilities.arrays.numpy import NumpyArray as NumpyArray
-    from mbo_utilities.arrays.nwb import NWBArray as NWBArray
     from mbo_utilities.arrays.suite2p import (
         Suite2pArray as Suite2pArray,
-        find_suite2p_plane_dirs as find_suite2p_plane_dirs,
     )
     from mbo_utilities.arrays.tiff import (
         LBMPiezoArray as LBMPiezoArray,
-        ImageJHyperstackArray as ImageJHyperstackArray,
         LBMArray as LBMArray,
         PiezoArray as PiezoArray,
         ScanImageArray as ScanImageArray,
         SinglePlaneArray as SinglePlaneArray,
         TiffArray as TiffArray,
-        find_tiff_plane_files as find_tiff_plane_files,
         open_scanimage as open_scanimage,
     )
     from mbo_utilities.arrays.zarr import ZarrArray as ZarrArray
@@ -116,7 +110,6 @@ if TYPE_CHECKING:
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     # array classes
     "Suite2pArray": (".suite2p", "Suite2pArray"),
-    "find_suite2p_plane_dirs": (".suite2p", "find_suite2p_plane_dirs"),
     "H5Array": (".h5", "H5Array"),
     "TiffArray": (".tiff", "TiffArray"),
     "ScanImageArray": (".tiff", "ScanImageArray"),
@@ -124,11 +117,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "PiezoArray": (".tiff", "PiezoArray"),
     "LBMPiezoArray": (".tiff", "LBMPiezoArray"),
     "SinglePlaneArray": (".tiff", "SinglePlaneArray"),
-    "ImageJHyperstackArray": (".tiff", "ImageJHyperstackArray"),
     "open_scanimage": (".tiff", "open_scanimage"),
-    "find_tiff_plane_files": (".tiff", "find_tiff_plane_files"),
     "NumpyArray": (".numpy", "NumpyArray"),
-    "NWBArray": (".nwb", "NWBArray"),
     "ZarrArray": (".zarr", "ZarrArray"),
     "BinArray": (".bin", "BinArray"),
     "IsoviewArray": (".isoview", "IsoviewArray"),
@@ -191,12 +181,10 @@ __all__ = [
     "BinArray",
     "LBMPiezoArray",
     "H5Array",
-    "ImageJHyperstackArray",
     "IsoviewArray",
     "consolidate_isoview",
     "detect_isoview_kind",
     "LBMArray",
-    "NWBArray",
     "NumpyArray",
     "PiezoArray",
     # ROI mixin
@@ -207,18 +195,12 @@ __all__ = [
     "Suite2pArray",
     "TiffArray",
     "ZarrArray",
-    "_axes_or_guess",
-    "_build_output_path",
     "_extract_tiff_plane_number",
     "_imwrite_base",
     "_normalize_planes",
     "_sanitize_suffix",
     # Features subpackage
     "features",
-    # Suite2p helpers
-    "find_suite2p_plane_dirs",
-    # TIFF helpers
-    "find_tiff_plane_files",
     "isoview_to_ome_zarr",
     "iter_rois",
     "normalize_roi",

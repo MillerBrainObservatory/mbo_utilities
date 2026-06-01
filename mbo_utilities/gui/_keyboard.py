@@ -240,12 +240,11 @@ def handle_arrow_keys(parent: Any):
     # up/down: Z dimension. Resolve Z by name so 5D TCZYX data (where
     # indices[1] is C, not Z) scrolls the correct axis. Hardcoding
     # indices[1] used to make Up/Down scroll C on 5D data.
-    names = tuple(
-        n.lower()
-        for n in (getattr(parent.image_widget, "_slider_dim_names", None) or ())
-    )
-    if "z" in names:
-        z_pos = names.index("z")
+    from mbo_utilities.arrays.features import find_slider_name
+    names = tuple(getattr(parent.image_widget, "_slider_dim_names", None) or ())
+    z_name = find_slider_name(names, "z")
+    if z_name is not None:
+        z_pos = names.index(z_name)
         z_max = shape[z_pos] - 1
         current_z = current_indices[z_pos]
 

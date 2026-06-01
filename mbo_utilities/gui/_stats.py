@@ -37,8 +37,9 @@ def _active_z(parent: Any) -> int | None:
     iw = getattr(parent, "image_widget", None)
     if iw is None or getattr(iw, "n_sliders", 0) < 1:
         return None
+    from mbo_utilities.arrays.features import find_slider_name
     names = tuple(getattr(iw, "_slider_dim_names", None) or ())
-    z_name = next((n for n in names if n.lower() == "z"), None)
+    z_name = find_slider_name(names, "z")
     if z_name is None:
         return None
     try:
@@ -142,8 +143,9 @@ def _current_channel(parent: Any) -> int:
     indices = getattr(iw, "indices", None)
     if indices is None:
         return 0
+    from mbo_utilities.arrays.features import find_slider_name
     names = tuple(getattr(iw, "_slider_dim_names", None) or ())
-    c_name = next((n for n in names if n.lower() == "c"), None)
+    c_name = find_slider_name(names, "c")
     if c_name is None:
         return 0
     try:

@@ -380,32 +380,6 @@ def build_planar_rastermap_kwargs(extras) -> dict | None:
     return _build_planar_sub(extras)
 
 
-_s2p_schema_warmup_thread: "threading.Thread | None" = None
-
-
-def _kick_s2p_schema_warmup() -> None:
-    """Background-load `suite2p.parameters.SETTINGS` so `is_default` can
-    distinguish modified suite2p fields from defaults.
-
-    `_s2p_schema._ensure_loaded` is idempotent and thread-safe; until it
-    runs, `is_default` short-circuits to True and `collect_modified_params`
-    sees zero suite2p modifications. We start the warmup the first time
-    Modified Parameters is computed and let subsequent frames pick up the
-    loaded schema. Idempotent: skip if a thread is already running or the
-    schema is already loaded.
-    """
-    global _s2p_schema_warmup_thread
-    from mbo_utilities.gui.widgets.pipelines import _s2p_schema as _sch
-    if _sch._SETTINGS is not None:
-        return
-    if _s2p_schema_warmup_thread is not None and _s2p_schema_warmup_thread.is_alive():
-        return
-    _s2p_schema_warmup_thread = threading.Thread(
-        target=_sch.warm_up_suite2p_schema, daemon=True
-    )
-    _s2p_schema_warmup_thread.start()
-
-
 def collect_modified_params(
     s2p, s2p_db, s2p_extras=None
 ) -> list[tuple[str, object, object, str]]:
@@ -419,7 +393,6 @@ def collect_modified_params(
 
     Sorted: s2p group first (alphabetical), then lsp group (alphabetical).
     """
-    _kick_s2p_schema_warmup()
     from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
         _MBO_TO_S2P,
         _MBO_DB_TO_S2P,
@@ -1558,33 +1531,20 @@ def _format_size(size_bytes: int | None) -> str:
     return f"{n:.2f} {units[i]}"
 
 
-def _dataset_size_bytes(self, filenames: list) -> int | None:
-    """Sum file sizes for `filenames`, cached on `self` keyed by the
-    file-list tuple. We don't poll for on-disk changes since input
-    files are read-only during a run.
+def _compute_dataset_size_sync(filenames: list) -> int:
+    """Recursive sum of bytes for ``filenames``.
 
     Handles directory-format containers (``.zarr``, ``.ome.zarr``,
-    suite2p ``ops/stat`` folders) by recursing through their contents.
-    ``Path.stat().st_size`` on a directory only reports the dir entry
-    size (a few KB), which is why a reloaded zarr-backed dataset
-    displayed as "0 B" before this recursion.
+    suite2p plane dirs) by walking their contents — ``Path.stat()`` on
+    a directory only reports the dir-entry size, not the tree.
     """
-    if not filenames:
-        return None
-    key = tuple(str(f) for f in filenames)
-    cache = getattr(self, "_dataset_size_cache", None)
-    if cache is not None and cache[0] == key:
-        return cache[1]
+    from stat import S_ISDIR
     total = 0
     for f in filenames:
         try:
             p = Path(f)
             st = p.stat()
-            from stat import S_ISDIR
             if S_ISDIR(st.st_mode):
-                # rglob("*") doesn't include `p` itself; sum every file
-                # under it. Errors on individual entries (symlinks to
-                # missing targets, permission denied) are skipped.
                 for child in p.rglob("*"):
                     try:
                         cst = child.stat()
@@ -1596,8 +1556,88 @@ def _dataset_size_bytes(self, filenames: list) -> int | None:
                 total += st.st_size
         except OSError:
             continue
-    self._dataset_size_cache = (key, total)
     return total
+
+
+def _dataset_size_disk_cache_path(key: tuple[str, ...]) -> Path:
+    """Per-dataset cache path; hashed to keep the filename short."""
+    import hashlib
+    h = hashlib.blake2b(
+        "\n".join(key).encode("utf-8", errors="replace"), digest_size=16
+    ).hexdigest()
+    override = os.environ.get("MBO_CACHE_DIR")
+    base = Path(override) if override else Path.home() / ".mbo" / "cache"
+    return base / f"dataset_size_{h}.json"
+
+
+def _dataset_size_load_disk(key: tuple[str, ...]) -> int | None:
+    p = _dataset_size_disk_cache_path(key)
+    try:
+        with p.open() as f:
+            data = json.load(f)
+        # Reject stale entries where the saved filename set differs
+        # from the requested one — hash collisions are astronomically
+        # unlikely but the explicit key check is essentially free.
+        if data.get("key") == list(key) and isinstance(data.get("size"), int):
+            return int(data["size"])
+    except (OSError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def _dataset_size_save_disk(key: tuple[str, ...], size: int) -> None:
+    p = _dataset_size_disk_cache_path(key)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with tmp.open("w") as f:
+            json.dump({"key": list(key), "size": int(size)}, f)
+        os.replace(tmp, p)
+    except OSError:
+        pass
+
+
+def _dataset_size_bytes(self, filenames: list) -> int | None:
+    """Total bytes across ``filenames``, with two-level cache + async fill.
+
+    Lookup order:
+      1. in-memory cache on ``self`` (key = filenames tuple)
+      2. on-disk cache at ``~/.mbo/cache/dataset_size_<hash>.json``
+      3. cold — return ``None`` immediately and spawn a daemon to
+         compute the size, populate both caches, and let the next
+         frame's call hit (1). UI renders ``_format_size(None) → "—"``
+         until the daemon finishes.
+
+    Input files are treated as read-only for the lifetime of a dataset
+    open, so once we have a size we never recompute it.
+    """
+    if not filenames:
+        return None
+    key = tuple(str(f) for f in filenames)
+    cache = getattr(self, "_dataset_size_cache", None)
+    if cache is not None and cache[0] == key:
+        return cache[1]
+    disk = _dataset_size_load_disk(key)
+    if disk is not None:
+        self._dataset_size_cache = (key, disk)
+        return disk
+    pending = getattr(self, "_dataset_size_pending_key", None)
+    if pending == key:
+        return None
+    self._dataset_size_pending_key = key
+
+    def _worker(_key: tuple[str, ...], _files: list) -> None:
+        size = _compute_dataset_size_sync(_files)
+        _dataset_size_save_disk(_key, size)
+        self._dataset_size_cache = (_key, size)
+        if getattr(self, "_dataset_size_pending_key", None) == _key:
+            self._dataset_size_pending_key = None
+
+    threading.Thread(
+        target=_worker, args=(key, list(filenames)),
+        daemon=True, name="dataset-size-walker",
+    ).start()
+    return None
 
 
 def _truncate_to_width(text: str, max_width: float) -> str:
@@ -4111,9 +4151,11 @@ def run_process(self):
         selected_planes = getattr(self, "_selected_planes", None)
         if not selected_planes:
             # Fallback to current plane
+            from mbo_utilities.arrays.features import find_slider_name
             names = self.image_widget._slider_dim_names or ()
+            z_name = find_slider_name(names, "z")
             try:
-                current_z = self.image_widget.indices["z"] if "z" in names else 0
+                current_z = self.image_widget.indices[z_name] if z_name else 0
             except (IndexError, KeyError):
                 current_z = 0
             selected_planes = {current_z + 1}

@@ -629,7 +629,11 @@ def _create_image_widget(data_array, widget: bool = True):
     # Determine slider dimension names from array's dims property if available
     from mbo_utilities.arrays.features import get_slider_dims
 
-    slider_dim_names = get_slider_dims(data_array)
+    custom_labels = getattr(data_array, "slider_dim_labels", None)
+    if custom_labels:
+        slider_dim_names = tuple(custom_labels)
+    else:
+        slider_dim_names = get_slider_dims(data_array)
 
     # window_funcs/window_sizes must match slider_dim_names length
     if slider_dim_names:

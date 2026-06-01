@@ -22,7 +22,7 @@ from . import BaseViewer
 from mbo_utilities.gui._imgui_helpers import set_tooltip
 from mbo_utilities.metadata import get_param
 from mbo_utilities.metadata.scanimage import (
-    get_lbm_ai_sources,
+    get_saved_channel_ports,
     get_z_step_size,
 )
 
@@ -50,7 +50,7 @@ def get_cavity_indices(metadata: dict, nc: int) -> dict:
         return result
 
     result["is_lbm"] = True
-    ai_sources = get_lbm_ai_sources(metadata)
+    ai_sources = get_saved_channel_ports(metadata)
 
     if not ai_sources:
         half = nc // 2
