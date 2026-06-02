@@ -279,11 +279,13 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         # Reorientation applied to the VW00 (angle-0) view in the exported
         # XML, mirroring BigStitcher's manual transform (bring VW00 into
-        # VW90's frame, VW90 stays the reference). Two coplanar orthogonal
-        # cameras differ by an in-plane Z rotation plus a chirality flip,
-        # so the control is one Z-rotation + one flip. Defaults (0 / none)
-        # write no transform, so the views appear exactly as fused.
-        self._stitcher_rot_z: int = 0          # 0 / 90 / -90 / 180
+        # VW90's frame, VW90 stays the reference). A 90° rotation about any
+        # of X/Y/Z (composed X→Y→Z) plus a flip — orthogonal views can
+        # differ about any axis, so all three are exposed. Defaults
+        # (0 / none) write no transform, so views appear exactly as fused.
+        self._stitcher_rot_x: int = 0          # 0 / 90 / -90 / 180
+        self._stitcher_rot_y: int = 0
+        self._stitcher_rot_z: int = 0
         self._stitcher_flip: str = "none"      # none / X / Y / Z
 
         # bigstitcher-spark registration step (opt-in via separate "Run
@@ -1025,29 +1027,34 @@ class IsoviewPipelineWidget(PipelineWidget):
                 imgui.pop_style_color(3)
 
     def _draw_stitcher_orientation_box(self) -> None:
-        """VW00 reorientation — one in-plane Z rotation + one flip, applied
-        to the VW00 (angle-0) view only (like BigStitcher's manual
-        transform). Two coplanar orthogonal cameras differ by a Z rotation
-        plus a chirality flip, so this is the full alignment toolkit.
-        Defaults (None / None) write no transform → views shown as fused.
+        """VW00 reorientation — a 90° rotation about any of X/Y/Z (composed
+        in that order) plus a flip, applied to the VW00 (angle-0) view
+        only. "On its side vs standing" is a 90° rotation about a
+        HORIZONTAL axis (X or Z); rotating about Y only spins it within the
+        horizontal plane and never stands it up. A flip is a mirror (fixes
+        handedness, not standing-vs-lying). Defaults write nothing → views
+        shown as fused.
         """
         _hint(
-            "Bring VW00 onto VW90: an in-plane Z rotation, then a flip to "
-            "match chirality. Applied to VW00 only; default writes nothing."
+            "Bring VW00 onto VW90. Try one axis at a time: 'on its side vs "
+            "standing' needs X or Z (not Y). Flip only fixes a mirror. "
+            "Applied to VW00 only; default writes nothing."
         )
         imgui.spacing()
-        self._draw_orient_button_row(
-            "Rotate Z", "_stitcher_rot_z",
-            [("None", 0), ("+90°", 90), ("−90°", -90), ("180°", 180)],
-        )
+        rot_opts = [("None", 0), ("+90°", 90), ("−90°", -90), ("180°", 180)]
+        self._draw_orient_button_row("Rotate X", "_stitcher_rot_x", rot_opts)
+        self._draw_orient_button_row("Rotate Y", "_stitcher_rot_y", rot_opts)
+        self._draw_orient_button_row("Rotate Z", "_stitcher_rot_z", rot_opts)
         self._draw_orient_button_row(
             "Flip", "_stitcher_flip",
             [("None", "none"), ("X", "X"), ("Y", "Y"), ("Z", "Z")],
         )
         imgui.spacing()
         parts = []
-        if self._stitcher_rot_z:
-            parts.append(f"Z{'+' if self._stitcher_rot_z >= 0 else ''}{self._stitcher_rot_z}")
+        for ax, val in (("X", self._stitcher_rot_x), ("Y", self._stitcher_rot_y),
+                        ("Z", self._stitcher_rot_z)):
+            if val:
+                parts.append(f"{ax}{'+' if val >= 0 else ''}{val}")
         if self._stitcher_flip != "none":
             parts.append(f"flip{self._stitcher_flip}")
         imgui.text_disabled("applied to VW00: " + (", ".join(parts) or "none (as fused)"))
@@ -2111,11 +2118,13 @@ class IsoviewPipelineWidget(PipelineWidget):
         if getattr(arr, "kind", None) == "fused":
             method = Path(arr.scan_root).name
 
-        # VW00 reorientation ops: in-plane Z rotation then a chirality
-        # flip (composed in that order). Empty list = no transform.
+        # VW00 reorientation ops: X→Y→Z rotations then a flip (composed in
+        # that order). Empty list = no transform.
         orientation: list = []
-        if self._stitcher_rot_z:
-            orientation.append(["rot", "Z", int(self._stitcher_rot_z)])
+        for ax, deg in (("X", self._stitcher_rot_x), ("Y", self._stitcher_rot_y),
+                        ("Z", self._stitcher_rot_z)):
+            if deg:
+                orientation.append(["rot", ax, int(deg)])
         if self._stitcher_flip != "none":
             orientation.append(["flip", self._stitcher_flip])
 
