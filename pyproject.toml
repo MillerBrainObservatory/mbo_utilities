@@ -69,11 +69,10 @@ rastermap = [
     "rastermap",
 ]
 # Isoview multi-view fusion / BigStitcher XML generation.
-# isoview pins python==3.12.9; restrict the dep to that interpreter so uv
-# can resolve [all] across the broader requires-python range.
-# isoview = [
-#     "isoview ; python_full_version == '3.12.9'",
-# ]
+# isoview pins python==3.12.9; marker keeps universal resolution working.
+isoview = [
+    "isoview ; python_full_version == '3.12.9'",
+]
 # PyTorch for neural network operations
 # torch = [
 #     "torch",
@@ -103,12 +102,20 @@ docs = [
 # Everything
 all = ["mbo_utilities[rastermap,docs]"]
 
+[tool.uv]
+default-groups = ["dev", "isoview"]
+
+# Local dev: editable sibling checkouts. Stripped on publish (uv build --no-sources),
+# so PyPI consumers resolve isoview / lbm_suite2p_python from the registry.
+[tool.uv.sources]
+isoview = { path = "../isoview", editable = true }
+lbm_suite2p_python = { path = "../LBM-Suite2p-Python", editable = true }
+
 # [[tool.uv.index]]
 # name = "pytorch-cu126"
 # url = "https://download.pytorch.org/whl/cu126"
 # explicit = true
 #
-# [tool.uv.sources]
 # torch = [
 #   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 # ]
@@ -188,4 +195,8 @@ dev = [
     "pyautogui>=0.9.54",
     "pygetwindow>=0.0.9",
     "pytest>=8.4.2",
+]
+# Local-only; auto-synced via default-groups so `uv run mbo` uses ../isoview.
+isoview = [
+    "isoview ; python_full_version == '3.12.9'",
 ]
