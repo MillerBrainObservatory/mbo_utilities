@@ -19,9 +19,10 @@ import bpy
 from mathutils import Vector
 
 CAM_DIST = 6.0       # camera distance from center axis
-CAM_HEIGHT = 2.0     # camera / sample height above the table
-CYL_RADIUS = 0.6
-CYL_HEIGHT = 4.0
+CYL_RADIUS = 0.5
+CYL_HEIGHT = 2.6
+SAMPLE_R = 0.25
+CAM_HEIGHT = CYL_HEIGHT + SAMPLE_R  # aim at the sample sitting atop the cylinder
 TABLE_SIZE = 22.0
 LENS_LEN = 1.2
 BODY_SIZE = 0.9
@@ -138,7 +139,7 @@ def build_rig(n_cameras):
                          metallic=0.9, roughness=0.3))
 
     # sample at the convergence point
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.22, location=(0, 0, CAM_HEIGHT))
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=SAMPLE_R, location=(0, 0, CAM_HEIGHT))
     sample = bpy.context.active_object
     sample.name = "sample"
     bpy.ops.object.shade_smooth()
