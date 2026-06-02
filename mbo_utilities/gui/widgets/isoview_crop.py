@@ -57,6 +57,29 @@ def _camera_view_map(arr: Any) -> dict[int, int]:
     return dict(_DEFAULT_CAMERA_VIEW_MAP)
 
 
+def cameras_for_crop(arr: Any) -> list[int]:
+    """Camera ints (CM##) present in the loaded array.
+
+    Uses the array's actual ``views`` (a corrected tree's C axis is the
+    cameras), since the XML-synthesized ``camera_view_map`` is often
+    incomplete (e.g. only ``{0, 1}`` when stack_direction lists one arm).
+    Falls back to the map, then to 4 cameras.
+    """
+    out: list[int] = []
+    for v in (getattr(arr, "views", None) or []):
+        if isinstance(v, tuple) and v:
+            out.append(int(v[0]))
+        else:
+            try:
+                out.append(int(v))
+            except (TypeError, ValueError):
+                pass
+    if out:
+        return sorted(set(out))
+    cv = _camera_view_map(arr)
+    return sorted(cv.keys()) if cv else [0, 1, 2, 3]
+
+
 def _view_shape(arr: Any) -> tuple[int, int, int] | None:
     shape = getattr(arr, "shape", None)
     if not shape or len(shape) != 5:
@@ -287,7 +310,7 @@ def _ensure_loaded_for(parent: Any, arr: Any) -> None:
     shp = _view_shape(arr)
     if shp is None:
         return
-    cameras = sorted(_camera_view_map(arr).keys())
+    cameras = cameras_for_crop(arr)
     parent._iso_crop_pending = {}
     nz, ny, nx = shp
     for cam in cameras:

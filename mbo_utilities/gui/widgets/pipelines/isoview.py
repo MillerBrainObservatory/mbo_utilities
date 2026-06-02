@@ -951,9 +951,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             return
         _, _, nz, ny, nx = shape
 
-        meta = getattr(arr, "metadata", None) or {}
-        cv = meta.get("camera_view_map") or {0: 0, 1: 0, 2: 90, 3: 90}
-        cameras = sorted({int(k) for k in cv.keys()})
+        cameras = crop_window.cameras_for_crop(arr)
         if not cameras:
             cameras = [0, 1, 2, 3]
 
