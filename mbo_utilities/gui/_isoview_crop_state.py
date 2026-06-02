@@ -8,8 +8,9 @@ or fused IsoviewArray later resolves to the same entry.
 Two consumers:
 - The Run tab's submit code: turns the store into
   ``crop_left``/``crop_top``/``crop_front``/``crop_width``/``crop_height``/
-  ``crop_depth`` dicts that go into isoview's ``ProcessingConfig``.
-- The standalone crop window: reads + writes per-view bounds as the user
+  ``crop_depth`` dicts (keyed by camera index) that go into isoview's
+  ``ProcessingConfig``.
+- The standalone crop window: reads + writes per-camera bounds as the user
   drags sliders.
 """
 from __future__ import annotations
@@ -19,8 +20,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-# crops[<raw_root_str>][view_int] = {"z": (z0, z1), "y": (y0, y1), "x": (x0, x1),
-#                                    "shape": (nz, ny, nx)}
+# crops[<raw_root_str>][camera_int] = {"z": (z0, z1), "y": (y0, y1), "x": (x0, x1),
+#                                      "shape": (nz, ny, nx)}
 _STORE: dict[str, dict[int, dict[str, tuple]]] = {}
 
 
@@ -84,20 +85,20 @@ def get_crops(arr: Any) -> dict[int, dict[str, tuple]]:
     return dict(_STORE.get(k, {}))
 
 
-def set_view_bounds(
+def set_camera_bounds(
     arr: Any,
-    view: int,
+    camera: int,
     *,
     z: tuple[int, int],
     y: tuple[int, int],
     x: tuple[int, int],
     shape: tuple[int, int, int],
 ) -> None:
-    """Record ``view``'s crop. ``z``/``y``/``x`` are half-open ranges."""
+    """Record ``camera``'s crop. ``z``/``y``/``x`` are half-open ranges."""
     k = _key(arr)
     if k is None:
         return
-    _STORE.setdefault(k, {})[int(view)] = {
+    _STORE.setdefault(k, {})[int(camera)] = {
         "z": (int(z[0]), int(z[1])),
         "y": (int(y[0]), int(y[1])),
         "x": (int(x[0]), int(x[1])),
@@ -121,12 +122,12 @@ def _is_full_extent(bounds: dict[str, tuple]) -> bool:
 
 
 def to_config_args(arr: Any) -> dict[str, dict[int, int]]:
-    """Project the per-view bounds onto isoview's ``ProcessingConfig`` fields.
+    """Project the per-camera bounds onto isoview's ``ProcessingConfig`` fields.
 
     Returns up to six keys:
       crop_left / crop_top / crop_front  — starts
       crop_width / crop_height / crop_depth — spans
-    Each is a ``{view_int: value}`` dict. Views whose bounds match the
+    Each is a ``{camera_int: value}`` dict. Cameras whose bounds match the
     full source shape are omitted entirely (isoview leaves those fields
     None, falling back to the source dims).
 
@@ -144,18 +145,18 @@ def to_config_args(arr: Any) -> dict[str, dict[int, int]]:
     height: dict[int, int] = {}
     depth: dict[int, int] = {}
 
-    for view, b in crops.items():
+    for camera, b in crops.items():
         if _is_full_extent(b):
             continue
         z0, z1 = b["z"]
         y0, y1 = b["y"]
         x0, x1 = b["x"]
-        left[view] = x0
-        top[view] = y0
-        front[view] = z0
-        width[view] = x1 - x0
-        height[view] = y1 - y0
-        depth[view] = z1 - z0
+        left[camera] = x0
+        top[camera] = y0
+        front[camera] = z0
+        width[camera] = x1 - x0
+        height[camera] = y1 - y0
+        depth[camera] = z1 - z0
 
     out: dict[str, dict[int, int]] = {}
     if left:
@@ -179,13 +180,13 @@ def summary(arr: Any) -> str:
     if not crops:
         return "(none)"
     parts: list[str] = []
-    for view in sorted(crops):
-        b = crops[view]
+    for camera in sorted(crops):
+        b = crops[camera]
         z0, z1 = b["z"]
         y0, y1 = b["y"]
         x0, x1 = b["x"]
         parts.append(
-            f"VW{view:02d} z[{z0}:{z1}] y[{y0}:{y1}] x[{x0}:{x1}]"
+            f"CM{camera:02d} z[{z0}:{z1}] y[{y0}:{y1}] x[{x0}:{x1}]"
             + ("" if not _is_full_extent(b) else " (full)")
         )
     return " | ".join(parts)

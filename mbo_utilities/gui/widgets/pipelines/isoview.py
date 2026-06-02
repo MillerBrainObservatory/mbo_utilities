@@ -953,9 +953,9 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         meta = getattr(arr, "metadata", None) or {}
         cv = meta.get("camera_view_map") or {0: 0, 1: 0, 2: 90, 3: 90}
-        views = sorted({int(v) for v in cv.values()})
-        if not views:
-            views = [0, 90]
+        cameras = sorted({int(k) for k in cv.keys()})
+        if not cameras:
+            cameras = [0, 1, 2, 3]
 
         with tooltip_marks_right():
             if imgui.button("Edit...##fuse_crop_edit", imgui.ImVec2(_BTN_W, 0)):
@@ -974,15 +974,15 @@ class IsoviewPipelineWidget(PipelineWidget):
 
         imgui.spacing()
         crops = crop_state.get_crops(arr)
-        for view in views:
-            existing = crops.get(view) or {}
+        for camera in cameras:
+            existing = crops.get(camera) or {}
             bounds = {
                 "Z": existing.get("z", (0, nz)),
                 "Y": existing.get("y", (0, ny)),
                 "X": existing.get("x", (0, nx)),
             }
             limits = {"Z": (0, nz), "Y": (0, ny), "X": (0, nx)}
-            imgui.text_colored(_SUBSECTION_COLOR, f"VW{view:02d}")
+            imgui.text_colored(_SUBSECTION_COLOR, f"CM{camera:02d}")
             imgui.indent(12)
             changed = False
             new_bounds: dict[str, tuple[int, int]] = {}
@@ -990,15 +990,15 @@ class IsoviewPipelineWidget(PipelineWidget):
                 lo, hi = bounds[axis]
                 vmin, vmax = limits[axis]
                 new_lo, new_hi = self._draw_axis_inputs(
-                    view, axis, lo, hi, vmin, vmax,
+                    camera, axis, lo, hi, vmin, vmax,
                 )
                 new_bounds[axis] = (new_lo, new_hi)
                 if (new_lo, new_hi) != (lo, hi):
                     changed = True
             imgui.unindent(12)
             if changed:
-                crop_state.set_view_bounds(
-                    arr, view,
+                crop_state.set_camera_bounds(
+                    arr, camera,
                     z=new_bounds["Z"], y=new_bounds["Y"], x=new_bounds["X"],
                     shape=(nz, ny, nx),
                 )

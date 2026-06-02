@@ -898,6 +898,14 @@ def _build_isoview_processing_config(args: dict):
         if d is not None:
             config_kwargs[key] = {int(v): tuple(off) for v, off in d.items()}
 
+    # crop_* dicts are keyed by camera index; JSON round-trips int keys to
+    # strings, so coerce back to int or get_crop(camera) misses every entry.
+    for key in ("crop_left", "crop_top", "crop_front",
+                "crop_width", "crop_height", "crop_depth"):
+        d = config_kwargs.get(key)
+        if isinstance(d, dict):
+            config_kwargs[key] = {int(k): int(v) for k, v in d.items()}
+
     return ProcessingConfig(**config_kwargs)
 
 
