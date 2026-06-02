@@ -1248,7 +1248,7 @@ wheels = [
 
 [[package]]
 name = "isoview"
-version = "0.1.5"
+version = "0.1.6"
 source = { editable = "../isoview" }
 dependencies = [
     { name = "cellpose", marker = "python_full_version == '3.12.9'" },
