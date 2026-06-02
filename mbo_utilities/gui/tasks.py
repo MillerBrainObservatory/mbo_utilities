@@ -994,10 +994,7 @@ def task_correct_stack(args: dict, logger: logging.Logger) -> None:
             f"output={config.output_dir}, format={config.output_format}, "
             f"workers={config.workers}, segment_mode={config.segment_mode}"
         )
-        logger.info(
-            f"isoview per-run log: {config.output_dir}/correct.log "
-            "(fine-grained DEBUG records)"
-        )
+        logger.info(f"isoview per-run log: {config.output_dir}/correct.log")
         monitor.update(0.05, "Running correct_stack (see log file for details)...")
         correct_stack(config)
         monitor.finish("correct_stack pipeline complete.")

@@ -46,11 +46,7 @@ def _filter_disabled_modules(metadata: dict, recursive: bool = True) -> dict:
     return result
 
 
-# belt-and-suspenders cap. EXPORT_DENYLIST handles known suite2p
-# fields, but a future ops version could add a new big array we
-# haven't named — drop anything over the cap so output never blows
-# up by surprise. 1 MB lets per-frame vectors through (xoff/yoff at
-# 10k frames = 80 KB) but stops regPC-class arrays cold.
+# drop ndarrays larger than this from serialized output
 _MAX_NDARRAY_NBYTES = 1 * 1024 * 1024
 
 
