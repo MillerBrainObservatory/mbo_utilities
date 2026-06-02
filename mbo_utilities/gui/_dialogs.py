@@ -420,6 +420,14 @@ def load_new_data(parent: Any, path: str):
         parent._viewer.on_data_loaded()
         parent.logger.debug(f"Viewer switched to: {parent._viewer.name}")
 
+        try:
+            from mbo_utilities.gui.widgets.pipelines.isoview import (
+                maybe_spawn_raw_projections,
+            )
+            maybe_spawn_raw_projections(parent)
+        except Exception:
+            parent.logger.debug("raw projection prefetch skipped", exc_info=True)
+
         # Automatically recompute z-stats for new data (only for time series)
         if isinstance(parent._viewer, TimeSeriesViewer):
             parent.refresh_zstats()
