@@ -41,6 +41,26 @@ _SLIDER_W = 220
 _DISPLAY_DRAG_W = 110
 _MAX_FILTER_CACHE = 8
 _SUBSAMPLE_FACTOR_HINT = 100
+_TARGET_PROJ_PX = 512       # preview math runs at <= this longest side
+
+
+def _downsample_max(proj: np.ndarray, cap: int = _TARGET_PROJ_PX) -> tuple[np.ndarray, int]:
+    """Max-pool downsample so the longest side is <= ``cap``.
+
+    Max pooling keeps hot/dead pixels (the thing being detected) instead
+    of averaging them away. Returns ``(downsampled float32, factor)``;
+    factor 1 means no downsampling.
+    """
+    h, w = proj.shape
+    longest = max(h, w)
+    if longest <= cap:
+        return np.ascontiguousarray(proj, dtype=np.float32), 1
+    factor = int(np.ceil(longest / cap))
+    hh = (h // factor) * factor
+    ww = (w // factor) * factor
+    blocks = proj[:hh, :ww].reshape(hh // factor, factor, ww // factor, factor)
+    ds = blocks.max(axis=(1, 3))
+    return np.ascontiguousarray(ds, dtype=np.float32), factor
 
 
 def _camera_view_map(arr: Any) -> dict[int, int]:
@@ -169,7 +189,7 @@ def _detect_dead_pixels(
         kernel += 1
     k = (int(kernel), int(kernel))
 
-    f = proj.astype(np.float64)
+    f = proj.astype(np.float32)
     med_abs = median_filter(f, size=k, mode="reflect")
     dist_abs = np.abs(f - med_abs)
     t_abs = _determine_threshold(np.sort(dist_abs.ravel()))
@@ -216,6 +236,15 @@ class _GpuRGBA:
         self.ref = None
         self._upload(rgba)
 
+    def _write(self, rgba: np.ndarray) -> None:
+        device = self.backend._device
+        device.queue.write_texture(
+            {"texture": self._texture, "mip_level": 0, "origin": (0, 0, 0)},
+            np.ascontiguousarray(rgba).tobytes(),
+            {"offset": 0, "bytes_per_row": self.w * 4, "rows_per_image": self.h},
+            (self.w, self.h, 1),
+        )
+
     def _upload(self, rgba: np.ndarray) -> None:
         wgpu = self._wgpu
         device = self.backend._device
@@ -224,12 +253,7 @@ class _GpuRGBA:
             format=wgpu.TextureFormat.rgba8unorm,
             usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
         )
-        device.queue.write_texture(
-            {"texture": self._texture, "mip_level": 0, "origin": (0, 0, 0)},
-            np.ascontiguousarray(rgba).tobytes(),
-            {"offset": 0, "bytes_per_row": self.w * 4, "rows_per_image": self.h},
-            (self.w, self.h, 1),
-        )
+        self._write(rgba)
         self._view = self._texture.create_view()
         self.ref = self.backend.register_texture(self._view)
 
@@ -239,8 +263,10 @@ class _GpuRGBA:
             self.h, self.w = int(rgba.shape[0]), int(rgba.shape[1])
             self._upload(rgba)
             return
-        self.destroy()
-        self._upload(rgba)
+        # Same size: write into the existing texture, keeping the view and
+        # backend registration so we don't churn a GPU alloc + re-register
+        # every frame a slider moves.
+        self._write(rgba)
 
     def destroy(self) -> None:
         if self.ref is not None:
@@ -287,6 +313,13 @@ def _ensure_state(parent: Any) -> None:
         parent._iso_dp_vmax = 1.0
     if not hasattr(parent, "_iso_dp_display_inited"):
         parent._iso_dp_display_inited = False
+    if not hasattr(parent, "_iso_dp_dragging"):
+        parent._iso_dp_dragging = False
+    if not hasattr(parent, "_iso_dp_shown"):
+        # view -> last computed {tp, bg, kernel, enabled, mask, t_abs,
+        # t_rel}; held while a slider is dragged so the expensive median
+        # filter defers to release.
+        parent._iso_dp_shown: dict[int, dict] = {}
 
 
 def _get_iso_array(parent: Any) -> Any | None:
@@ -346,25 +379,40 @@ def _initial_display_range(parent: Any) -> tuple[float, float]:
     return 0.0, 1000.0
 
 
-def _get_projection(parent: Any, view: int, tp: int) -> np.ndarray | None:
+def _get_working(parent: Any, view: int, tp: int):
+    """Return ``(downsampled projection float32, factor)`` or ``None``.
+
+    Max-pooled once to ``_TARGET_PROJ_PX`` so the per-frame median filter
+    runs on the small working image instead of the full sensor.
+    """
     key = (view, tp)
-    proj = parent._iso_dp_proj_cache.get(key)
-    if proj is not None:
-        return proj
+    cached = parent._iso_dp_proj_cache.get(key)
+    if cached is not None:
+        return cached
     path = (parent._iso_dp_proj_index.get(view) or {}).get(tp)
     if path is None:
         return None
     proj = _load_projection(path)
     if proj is None:
         return None
-    parent._iso_dp_proj_cache[key] = proj
-    return proj
+    work = _downsample_max(proj)
+    parent._iso_dp_proj_cache[key] = work
+    return work
+
+
+def _get_projection(parent: Any, view: int, tp: int) -> np.ndarray | None:
+    work = _get_working(parent, view, tp)
+    return None if work is None else work[0]
 
 
 def _get_mask(
     parent: Any, view: int, tp: int, background: float, kernel: int,
 ) -> tuple[np.ndarray, float, float] | None:
-    key = (int(view), int(tp), round(float(background), 3), int(kernel))
+    work = _get_working(parent, view, tp)
+    if work is None:
+        return None
+    proj, factor = work
+    key = (int(view), int(tp), round(float(background), 3), int(kernel), factor)
     cache = parent._iso_dp_mask_cache
     if key in cache:
         try:
@@ -373,10 +421,14 @@ def _get_mask(
             pass
         parent._iso_dp_mask_lru.append(key)
         return cache[key]
-    proj = _get_projection(parent, view, tp)
-    if proj is None:
-        return None
-    result = _detect_dead_pixels(proj, float(background), int(kernel))
+    # When downsampling, floor the scaled window to 3 so the median stays
+    # a real filter (a scaled kernel of 1 would be an identity and flag
+    # nothing). At native resolution keep the user's kernel exactly.
+    if factor > 1:
+        k = max(3, int(round(int(kernel) / factor)))
+    else:
+        k = max(1, int(kernel))
+    result = _detect_dead_pixels(proj, float(background), k)
     cache[key] = result
     parent._iso_dp_mask_lru.append(key)
     while len(parent._iso_dp_mask_lru) > _MAX_FILTER_CACHE:
@@ -396,6 +448,7 @@ def _ensure_loaded_for(parent: Any, arr: Any) -> None:
     parent._iso_dp_proj_cache = {}
     parent._iso_dp_mask_cache = {}
     parent._iso_dp_mask_lru = []
+    parent._iso_dp_shown = {}
     parent._iso_dp_display_inited = False
     _destroy_gpu(parent)
 
@@ -512,7 +565,7 @@ def draw_window(parent: Any) -> None:
         imgui.spacing()
         _draw_display_controls(parent)
         imgui.separator()
-        _draw_param_controls(iso)
+        _draw_param_controls(parent, iso)
         imgui.separator()
         imgui.spacing()
         _draw_view_previews(parent, iso)
@@ -580,11 +633,15 @@ def _draw_display_controls(parent: Any) -> None:
         parent._iso_dp_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
-def _draw_param_controls(iso: Any) -> None:
+def _draw_param_controls(parent: Any, iso: Any) -> None:
+    """Sets ``_iso_dp_dragging`` so the per-view median-filter recompute
+    defers to slider release.
+    """
     imgui.text_colored(
         imgui.ImVec4(1.0, 0.85, 0.4, 1.0), "Dead-pixel params",
     )
     imgui.spacing()
+    dragging = False
 
     _, iso._correct_median_kernel_enabled = imgui.checkbox(
         "Enable median filter##iso_dp",
@@ -596,6 +653,7 @@ def _draw_param_controls(iso: Any) -> None:
         "kernel##iso_dp",
         int(iso._correct_median_kernel_size), 1, 31, "%d",
     )
+    dragging |= imgui.is_item_active()
     imgui.same_line()
     imgui.text_colored(
         imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
@@ -607,11 +665,13 @@ def _draw_param_controls(iso: Any) -> None:
         "background pct##iso_dp",
         float(iso._correct_background_percentile), 0.0, 50.0, "%.2f",
     )
+    dragging |= imgui.is_item_active()
     imgui.same_line()
     imgui.text_colored(
         imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
         "  baseline subtracted before relative-deviation test",
     )
+    parent._iso_dp_dragging = dragging
 
 
 def _draw_view_previews(parent: Any, iso: Any) -> None:
@@ -667,20 +727,39 @@ def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float, raw_mode: bo
         imgui.dummy(imgui.ImVec2(cell_w, cell_w * 0.6))
         return
 
-    if enabled:
-        result = _get_mask(parent, view, tp, bg, kernel)
-    else:
-        result = None
-    if result is None:
-        mask = np.zeros(proj.shape, dtype=bool)
-        t_abs = 0.0
-        t_rel = 0.0
-    else:
-        mask, t_abs, t_rel = result
+    # While a param slider is dragged, reuse the last computed mask instead
+    # of re-running the (slow) median filter every frame; recompute on
+    # release. A timepoint or enable change always recomputes.
+    dragging = bool(getattr(parent, "_iso_dp_dragging", False))
+    shown = parent._iso_dp_shown.get(view)
+    stale = (
+        shown is None
+        or shown.get("tp") != tp
+        or shown.get("enabled") != enabled
+        or (
+            not dragging
+            and (shown.get("bg") != bg or shown.get("kernel") != kernel)
+        )
+    )
+    if stale:
+        result = _get_mask(parent, view, tp, bg, kernel) if enabled else None
+        if result is None:
+            mask = np.zeros(proj.shape, dtype=bool)
+            t_abs = t_rel = 0.0
+        else:
+            mask, t_abs, t_rel = result
+        shown = {
+            "tp": tp, "bg": bg, "kernel": kernel, "enabled": enabled,
+            "mask": mask, "t_abs": t_abs, "t_rel": t_rel,
+        }
+        parent._iso_dp_shown[view] = shown
+
+    mask = shown["mask"]
+    t_abs, t_rel = shown["t_abs"], shown["t_rel"]
     flagged_pct = 100.0 * mask.sum() / mask.size if mask.size else 0.0
 
     compose_key = (
-        view, tp, bg, kernel, enabled,
+        view, shown["tp"], shown["bg"], shown["kernel"], shown["enabled"],
         round(float(parent._iso_dp_vmin), 4),
         round(float(parent._iso_dp_vmax), 4),
     )

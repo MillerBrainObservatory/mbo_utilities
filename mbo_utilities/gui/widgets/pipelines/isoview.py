@@ -156,6 +156,33 @@ _RUN_LABELS = {
     _MODE_STITCHER: "Export XML",
 }
 
+# VW00 orientation presets for the BigStitcher export → ops forwarded to
+# generate_bigstitcher_xml(orientation=...). "default" (normal cameras)
+# and "rotated" are empirically verified; both assume the R_X(-90) pose
+# the pipeline bakes onto VW90 (the -90 X cancels it). "none" exports the
+# views as the pipeline situates them, no added transform.
+_STITCHER_ORIENT_PRESETS: dict[str, list] = {
+    "none": [],
+    "default": [["rot", "X", -90], ["rot", "Z", -90]],
+    "rotated": [["rot", "X", -90]],
+}
+
+# Forced output-dir prefix per pipeline step. The Output-options field is the
+# optional *variant*: empty -> "<raw><prefix>", text -> "<raw><prefix>_<text>"
+# (a leading underscore is added if missing). Mirrors isoview's
+# config.derive_output_name. Consolidate is excluded (it names a .zarr file).
+_MODE_PREFIX = {
+    _MODE_CORRECT: ".corrected",
+    _MODE_FUSE: ".fused",
+    _MODE_STITCHER: ".stitcher",
+}
+
+
+def _norm_variant(text: str) -> str:
+    """Normalize a user variant: '' -> '' ; 'x' or '_x' -> '_x'."""
+    s = (text or "").lstrip("_")
+    return f"_{s}" if s else ""
+
 # "Look at these first" — labels rendered in a thin rounded box (bold
 # when self.parent._bold_font is available) inside the Parameters popup.
 # Mirrors Suite2p's _IMPORTANT_FIELDS treatment.
@@ -192,6 +219,54 @@ def _isoview_pkg_available() -> bool:
     Correct and Fuse modes; Consolidate works without it.
     """
     return importlib.util.find_spec("isoview") is not None
+
+
+def maybe_spawn_raw_projections(parent: Any) -> None:
+    """Precompute raw XY projections in a background worker when a raw
+    isoview dataset is loaded, so the segmentation / dead-pixel previews
+    have images to show.
+
+    Idempotent per (session, dataset): spawns at most once per raw dir and
+    not while a worker for that dir is already running. The worker itself
+    skips projections already on disk, so re-runs are cheap. Does not need
+    the upstream ``isoview`` package.
+    """
+    iw = getattr(parent, "image_widget", None)
+    if iw is None or not getattr(iw, "data", None):
+        return
+    arr = _unwrap_array(iw.data[0])
+    from mbo_utilities.arrays.isoview import IsoviewArray
+    if not isinstance(arr, IsoviewArray) or arr.kind != "raw":
+        return
+    raw_dir = str(arr.scan_root)
+
+    spawned = getattr(parent, "_iso_raw_proj_spawned", None)
+    if spawned is None:
+        spawned = parent._iso_raw_proj_spawned = set()
+    if raw_dir in spawned:
+        return
+
+    from mbo_utilities.gui.widgets.process_manager import get_process_manager
+    pm = get_process_manager()
+    for p in pm.get_all():
+        if (
+            p.task_type == "isoview_raw_projections"
+            and (p.args or {}).get("raw_dir") == raw_dir
+            and p.is_alive()
+        ):
+            spawned.add(raw_dir)
+            return
+
+    pid = pm.spawn(
+        task_type="isoview_raw_projections",
+        args={"raw_dir": raw_dir},
+        description=f"Raw projections: {Path(raw_dir).name}",
+        output_path=raw_dir,
+    )
+    if pid:
+        spawned.add(raw_dir)
+        if hasattr(parent, "logger"):
+            parent.logger.info(f"raw projections worker spawned PID {pid}")
 
 
 def _available_modes(arr: Any) -> list[str]:
@@ -270,23 +345,18 @@ class IsoviewPipelineWidget(PipelineWidget):
         # (sibling of the raw root, suffix=".stitcher") so we only show
         # the suffix + a filename preview.
         self._stitcher_output_path: str = ""
-        self._stitcher_suffix: str = ".stitcher"
+        self._stitcher_suffix: str = ""
         # Opt-in feature-based coarse alignment (3D blob detection +
         # pairwise-difference histogram). When False, only the
         # calibration affines are emitted; the user runs BigStitcher's
         # interest-point registration after opening the XML.
         self._stitcher_coarse_align: bool = True
 
-        # Reorientation applied to the VW00 (angle-0) view in the exported
-        # XML, mirroring BigStitcher's manual transform (bring VW00 into
-        # VW90's frame, VW90 stays the reference). A 90° rotation about any
-        # of X/Y/Z (composed X→Y→Z) plus a flip — orthogonal views can
-        # differ about any axis, so all three are exposed. Defaults
-        # (0 / none) write no transform, so views appear exactly as fused.
-        self._stitcher_rot_x: int = 0          # 0 / 90 / -90 / 180
-        self._stitcher_rot_y: int = 0
-        self._stitcher_rot_z: int = 0
-        self._stitcher_flip: str = "none"      # none / X / Y / Z
+        # VW00 orientation preset for the BigStitcher export (one of
+        # _STITCHER_ORIENT_PRESETS). "none" adds no transform; "default"
+        # and "rotated" are the verified combos for the two camera
+        # orientations. Applied to VW00 only; VW90 keeps its pipeline pose.
+        self._stitcher_orientation_preset: str = "none"
 
         # bigstitcher-spark registration step (opt-in via separate "Run
         # registration" button — mutates the exported dataset.xml).
@@ -566,22 +636,15 @@ class IsoviewPipelineWidget(PipelineWidget):
         return ""
 
     def _iso_stitcher_dest(self, arr: Any) -> "Path | None":
-        """BigStitcher output dir, matching how isoview derives
-        ``config.stitcher_dir``. An explicit ``_stitcher_suffix`` (the
-        Output-options Suffix field, e.g. ``.stitcher_default``) names the
-        dir independently; otherwise it tracks the loaded tree's variant
-        (``.fused_v2`` -> ``.stitcher_v2``). Works without the raw root."""
+        """BigStitcher output dir = ``<rawstem>.stitcher[_<variant>]``, where
+        the variant is the Output-options field (empty -> bare ``.stitcher``).
+        Matches isoview's ``derive_output_name(raw, ".stitcher", variant)``.
+        Works without the raw root."""
         tree = self._iso_input_tree(arr)
         if tree is None:
             return None
         stem = self._iso_raw_stem(tree)
-        sfx = self._stitcher_suffix or ".stitcher"
-        if sfx != ".stitcher":
-            name = f"{stem}{sfx}"
-        else:
-            variant = self._iso_tree_suffix(tree)
-            name = f"{stem}.stitcher" + (f"_{variant}" if variant else "")
-        return tree.parent / name
+        return tree.parent / f"{stem}.stitcher{_norm_variant(self._stitcher_suffix)}"
 
     def _current_output_path(self) -> str:
         # STITCHER has no user path field — its destination is always
@@ -603,8 +666,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             arr = self._get_array()
             sr = getattr(arr, "scan_root", None) if arr is not None else None
             if sr is not None:
-                s = (self._correct_output_suffix or "").lstrip("_")
-                tail = f".corrected_{s}" if s else ".corrected"
+                tail = ".corrected" + _norm_variant(self._correct_output_suffix)
                 return f"{Path(sr).resolve()}{tail}"
         return ""
 
@@ -966,15 +1028,11 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_stitcher_popup_rows(self) -> None:
         """BigStitcher Parameters popup, laid out in Suite2p-style boxes.
 
-        Row 1: Orientation (its own full-width row so the button grid
-        breathes). Row 2 (open): View transforms · Microscope. Row 3-4
+        Row 1 (open): Orientation · View transforms · Microscope. Row 2-3
         (collapsing, advanced): detection / runtime / matching / solver.
         """
         self._draw_popup_columns([
-            ("Orientation (align VW00)", self._draw_stitcher_orientation_box),
-        ])
-        imgui.spacing()
-        self._draw_popup_columns([
+            ("Orientation", self._draw_stitcher_orientation_box),
             ("View transforms", self._draw_stitcher_transforms_box),
             ("Microscope (override XML)",
              self._draw_microscope_overrides_box, True),
@@ -1027,37 +1085,27 @@ class IsoviewPipelineWidget(PipelineWidget):
                 imgui.pop_style_color(3)
 
     def _draw_stitcher_orientation_box(self) -> None:
-        """VW00 reorientation — a 90° rotation about any of X/Y/Z (composed
-        in that order) plus a flip, applied to the VW00 (angle-0) view
-        only. "On its side vs standing" is a 90° rotation about a
-        HORIZONTAL axis (X or Z); rotating about Y only spins it within the
-        horizontal plane and never stands it up. A flip is a mirror (fixes
-        handedness, not standing-vs-lying). Defaults write nothing → views
-        shown as fused.
+        """VW00 orientation preset for the export. Applied to VW00 only;
+        VW90 keeps its pipeline pose.
+
+        None    — no added transform; export the views as currently
+                  situated (align them in BigStitcher yourself).
+        Default — normal camera orientation (−90 X, −90 Z on VW00).
+        Rotated — rotated camera orientation (−90 X on VW00). [testing]
         """
-        _hint(
-            "Bring VW00 onto VW90. Try one axis at a time: 'on its side vs "
-            "standing' needs X or Z (not Y). Flip only fixes a mirror. "
-            "Applied to VW00 only; default writes nothing."
-        )
+        _hint("Preset (applied to VW00)")
         imgui.spacing()
-        rot_opts = [("None", 0), ("+90°", 90), ("−90°", -90), ("180°", 180)]
-        self._draw_orient_button_row("Rotate X", "_stitcher_rot_x", rot_opts)
-        self._draw_orient_button_row("Rotate Y", "_stitcher_rot_y", rot_opts)
-        self._draw_orient_button_row("Rotate Z", "_stitcher_rot_z", rot_opts)
         self._draw_orient_button_row(
-            "Flip", "_stitcher_flip",
-            [("None", "none"), ("X", "X"), ("Y", "Y"), ("Z", "Z")],
+            "Mode", "_stitcher_orientation_preset",
+            [("None", "none"), ("Default", "default"), ("Rotated", "rotated")],
         )
         imgui.spacing()
-        parts = []
-        for ax, val in (("X", self._stitcher_rot_x), ("Y", self._stitcher_rot_y),
-                        ("Z", self._stitcher_rot_z)):
-            if val:
-                parts.append(f"{ax}{'+' if val >= 0 else ''}{val}")
-        if self._stitcher_flip != "none":
-            parts.append(f"flip{self._stitcher_flip}")
-        imgui.text_disabled("applied to VW00: " + (", ".join(parts) or "none (as fused)"))
+        desc = {
+            "none": "No transform — export as currently situated.",
+            "default": "Normal cameras: −90 X, −90 Z on VW00.",
+            "rotated": "Rotated cameras: −90 X on VW00 (testing).",
+        }[self._stitcher_orientation_preset]
+        imgui.text_disabled(desc)
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
@@ -1547,11 +1595,6 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_consolidate_io_box(self) -> None:
         """Consolidate I/O options for the Parameters popup."""
         with tooltip_marks_right():
-            _, self._consolidate_overwrite = imgui.checkbox(
-                "Overwrite", self._consolidate_overwrite,
-            )
-            set_tooltip("Replace any existing zarr at the output path.")
-
             _, self._consolidate_pyramid = imgui.checkbox(
                 "Pyramid", self._consolidate_pyramid,
             )
@@ -1638,11 +1681,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Sequential = 1. Bottleneck is RAM, not cores: each "
                 "worker holds a full 3D camera volume in memory. Start "
                 f"at 2–4 and watch RAM before raising (soft cap {_MAX_WORKERS})."
-            )
-
-            _, self._overwrite = imgui.checkbox("Overwrite", self._overwrite)
-            set_tooltip(
-                "Re-process even when an output already exists at the target."
             )
 
             _, self._pyramid = imgui.checkbox("Pyramid", self._pyramid)
@@ -1764,23 +1802,11 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_fuse_io_box(self) -> None:
         """Fuse-mode I/O options for the Parameters popup.
 
-        Dataset-wide: format / codec / workers / pyramid + the
-        output-folder suffix (one fused tree per multi_fuse run).
+        Dataset-wide: format / codec / workers / pyramid. The output-folder
+        variant lives in the Run-tab Output options block.
         """
         self._draw_view_scope_badge("shared")
         with tooltip_marks_right():
-            imgui.set_next_item_width(_input_w())
-            _, self._fuse_output_suffix = imgui.input_text(
-                "Output suffix", self._fuse_output_suffix or "",
-            )
-            set_tooltip(
-                "Appended to the fused output folder name so multiple "
-                "parameter sweeps coexist:\n"
-                "  <raw>.fused/<method>[_<suffix>]/\n"
-                "<method> = the active view's blending method.\n"
-                "Leave blank to use the bare <method>/ folder."
-            )
-
             formats = ["zarr", "tif", "klb"]
             try:
                 idx = formats.index(self._output_format)
@@ -1823,11 +1849,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "camera volumes plus a same-size output. Adaptive "
                 "blending roughly doubles per-worker footprint vs "
                 f"geometric — start at 2–4 with adaptive (soft cap {_MAX_WORKERS})."
-            )
-
-            _, self._overwrite = imgui.checkbox("Overwrite", self._overwrite)
-            set_tooltip(
-                "Re-process even when an output already exists at the target."
             )
 
             _, self._pyramid = imgui.checkbox("Pyramid", self._pyramid)
@@ -2108,25 +2129,25 @@ class IsoviewPipelineWidget(PipelineWidget):
         meta = arr.metadata if hasattr(arr, "metadata") else {}
         specimen = meta.get("specimen", 0)
 
-        # Export the method the user actually loaded. For a fused tree
-        # (kind="fused") scan_root IS the method dir (…/geometric,
-        # …/adaptive), so its name is the method. Without this, the export
-        # falls back to config.blending_method (default "geometric") and
-        # ignores which method was loaded. For corrected input there's no
-        # single loaded method — leave None and let isoview resolve it.
+        # Old multi-method fused layout: scan_root IS the method dir
+        # (…/geometric, …/adaptive), so pass its name. New single-method
+        # layout: scan_root is the .fused root (no method dir) → None, and
+        # isoview resolves the one method present. Corrected input also → None.
+        from mbo_utilities.arrays.isoview.array import _is_method_dir
         method = None
         if getattr(arr, "kind", None) == "fused":
-            method = Path(arr.scan_root).name
+            sr = Path(arr.scan_root)
+            if _is_method_dir(sr):
+                method = sr.name
 
-        # VW00 reorientation ops: X→Y→Z rotations then a flip (composed in
-        # that order). Empty list = no transform.
-        orientation: list = []
-        for ax, deg in (("X", self._stitcher_rot_x), ("Y", self._stitcher_rot_y),
-                        ("Z", self._stitcher_rot_z)):
-            if deg:
-                orientation.append(["rot", ax, int(deg)])
-        if self._stitcher_flip != "none":
-            orientation.append(["flip", self._stitcher_flip])
+        # VW00 reorientation ops from the selected preset (None / Default /
+        # Rotated). Empty list = no transform.
+        orientation: list = [
+            list(op)
+            for op in _STITCHER_ORIENT_PRESETS.get(
+                self._stitcher_orientation_preset, []
+            )
+        ]
 
         # output_suffix must match the loaded tree's variant: isoview
         # derives config.fused_dir from input_dir.name stripped + ".fused"
@@ -2141,6 +2162,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             "stitcher_suffix": self._stitcher_suffix,
             "coarse_align": self._stitcher_coarse_align,
             "orientation": orientation,
+            "overwrite": self._overwrite,
             "specimens": [int(specimen)],
             "timepoints": list(getattr(arr, "_timepoints", []) or []),
         }
@@ -2171,7 +2193,11 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
             return
 
-        xml_candidates = sorted(stitcher_root.glob("*/dataset.xml"))
+        # New export writes <stitcher_root>/dataset.xml directly; legacy
+        # exports nested it under a <method>/ subfolder.
+        xml_candidates = sorted(stitcher_root.glob("dataset.xml")) or sorted(
+            stitcher_root.glob("*/dataset.xml")
+        )
         if not xml_candidates:
             self._last_status = (
                 f"No dataset.xml under {stitcher_root}. Run Export first."
@@ -2647,16 +2673,59 @@ class IsoviewPipelineWidget(PipelineWidget):
         raw = _sibling_raw_root(arr)
         return raw.name if raw is not None else sr.name
 
+    def _overwrite_attr_for_mode(self) -> str | None:
+        """Instance attr holding the active mode's overwrite flag."""
+        return {
+            _MODE_CORRECT: "_overwrite",
+            _MODE_FUSE: "_overwrite",
+            _MODE_STITCHER: "_overwrite",
+            _MODE_CONSOLIDATE: "_consolidate_overwrite",
+        }.get(self._selected_mode)
+
+    def _resolved_output_dir(self, arr: Any) -> "Path | None":
+        """Absolute path the current mode will write to (for the exists check).
+
+        Mirrors the per-mode output naming so the Output-options block can
+        warn + offer Overwrite only when something is actually there.
+        """
+        mode = self._selected_mode
+        if mode == _MODE_CONSOLIDATE:
+            return (
+                Path(self._consolidate_output_path)
+                if self._consolidate_output_path else None
+            )
+        if mode == _MODE_STITCHER:
+            return self._iso_stitcher_dest(arr)
+        prefix = _MODE_PREFIX.get(mode)
+        if prefix is None:
+            return None
+        attr = self._suffix_attr_for_mode()
+        variant = _norm_variant(getattr(self, attr, "") if attr else "")
+        basename = self._output_basename_for_mode(arr)
+        if mode == _MODE_CORRECT:
+            parent = Path(arr.scan_root).parent
+        else:  # FUSE — output sits next to the loaded .corrected tree
+            tree = self._iso_input_tree(arr)
+            parent = tree.parent if tree is not None else Path(arr.scan_root).parent
+        return parent / f"{basename}{prefix}{variant}"
+
     def _draw_iso_output_options(self, arr: Any) -> None:
-        """Universal Output options block: one suffix input + a
+        """Universal Output options block: one variant input + a
         filename preview. Every other I/O knob (codec / workers /
         pyramid / overwrite / format) lives in the Parameters popup.
+
+        For the tree-producing steps the prefix (.corrected/.fused/
+        .stitcher) is forced; the field is just the optional variant,
+        with a leading underscore added automatically.
         """
         imgui.text_colored(_SUBSECTION_COLOR, "Output options")
+        prefix = _MODE_PREFIX.get(self._selected_mode)
         set_tooltip(
-            "Folder / filename suffix appended to the source name. "
-            "All other I/O knobs (codec, workers, pyramid, overwrite, "
-            "format) live in the Parameters popup.",
+            f"Output folder = <dataset>{prefix or ''}[_<suffix>]. The "
+            f"{prefix} prefix is automatic; type only a suffix (blank = "
+            f"bare {prefix}). A leading underscore is added for you."
+            if prefix else
+            "Filename suffix appended to the source name.",
             align="right",
         )
         imgui.spacing()
@@ -2671,11 +2740,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         setattr(self, attr, new_val)
 
         basename = self._output_basename_for_mode(arr)
-        # Consolidate writes a single file; the suffix already carries
-        # the extension. Folder modes get a trailing slash so it's
-        # obvious the suffix names a directory.
-        is_file = self._selected_mode == _MODE_CONSOLIDATE
-        preview = f"{basename}{new_val}" + ("" if is_file else "/")
+        if prefix:
+            # forced prefix + optional variant (auto underscore); dir.
+            preview = f"{basename}{prefix}{_norm_variant(new_val)}/"
+        else:
+            # consolidate: field is the full trailing filename component.
+            preview = f"{basename}{new_val}"
         # wrap the result line — basename can be long and would otherwise
         # blow past the right edge of the side panel.
         imgui.push_style_color(
@@ -2687,6 +2757,24 @@ class IsoviewPipelineWidget(PipelineWidget):
         finally:
             imgui.pop_text_wrap_pos()
             imgui.pop_style_color()
+
+        # Overwrite — shown only when the output already exists (yellow
+        # warning), bound to the per-mode flag. When nothing's there the
+        # flag is forced off so a fresh path never carries a stale True.
+        ow_attr = self._overwrite_attr_for_mode()
+        if ow_attr is not None:
+            out_dir = self._resolved_output_dir(arr)
+            if out_dir is not None and out_dir.exists():
+                imgui.spacing()
+                imgui.text_colored(
+                    imgui.ImVec4(1.0, 0.8, 0.2, 1.0), "Directory already exists"
+                )
+                _, ow = imgui.checkbox(
+                    "Overwrite##iso_overwrite", bool(getattr(self, ow_attr))
+                )
+                setattr(self, ow_attr, ow)
+            else:
+                setattr(self, ow_attr, False)
         imgui.spacing()
         imgui.spacing()
 

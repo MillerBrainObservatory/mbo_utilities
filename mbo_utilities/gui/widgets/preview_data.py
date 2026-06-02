@@ -617,6 +617,13 @@ class PreviewDataWidget(EdgeWindow):
         self.set_context_info()
         self._update_window_funcs()
         rebind_space_to_playback(self)
+        try:
+            from mbo_utilities.gui.widgets.pipelines.isoview import (
+                maybe_spawn_raw_projections,
+            )
+            maybe_spawn_raw_projections(self)
+        except Exception:
+            self.logger.debug("raw projection prefetch skipped", exc_info=True)
 
     def set_context_info(self):
         """Update app title with dataset name."""
