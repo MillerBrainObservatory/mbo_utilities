@@ -1107,6 +1107,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
             config,
             method=args.get("method"),
             coarse_align=args.get("coarse_align", False),
+            orientation=args.get("orientation"),
         )
         logger.info(f"  wrote: {xml_path}")
         monitor.finish(f"generate_bigstitcher_xml complete: {xml_path}")

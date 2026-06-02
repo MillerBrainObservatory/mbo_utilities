@@ -277,6 +277,15 @@ class IsoviewPipelineWidget(PipelineWidget):
         # interest-point registration after opening the XML.
         self._stitcher_coarse_align: bool = True
 
+        # Reorientation applied to the VW00 (angle-0) view in the exported
+        # XML, mirroring BigStitcher's manual transform (bring VW00 into
+        # VW90's frame, VW90 stays the reference). Two coplanar orthogonal
+        # cameras differ by an in-plane Z rotation plus a chirality flip,
+        # so the control is one Z-rotation + one flip. Defaults (0 / none)
+        # write no transform, so the views appear exactly as fused.
+        self._stitcher_rot_z: int = 0          # 0 / 90 / -90 / 180
+        self._stitcher_flip: str = "none"      # none / X / Y / Z
+
         # bigstitcher-spark registration step (opt-in via separate "Run
         # registration" button — mutates the exported dataset.xml).
         # ``spark_root`` is either the executables directory produced
@@ -556,16 +565,20 @@ class IsoviewPipelineWidget(PipelineWidget):
 
     def _iso_stitcher_dest(self, arr: Any) -> "Path | None":
         """BigStitcher output dir, matching how isoview derives
-        ``config.stitcher_dir``: ``<rawstem>.stitcher[_<variant>]/`` where
-        the variant comes from the loaded fused/corrected tree
-        (``.fused_v2`` -> ``.stitcher_v2``). isoview couples the stitcher
-        suffix to the fused-read suffix, so it tracks the loaded tree and
-        isn't independently settable. Works without the raw root on disk."""
+        ``config.stitcher_dir``. An explicit ``_stitcher_suffix`` (the
+        Output-options Suffix field, e.g. ``.stitcher_default``) names the
+        dir independently; otherwise it tracks the loaded tree's variant
+        (``.fused_v2`` -> ``.stitcher_v2``). Works without the raw root."""
         tree = self._iso_input_tree(arr)
         if tree is None:
             return None
-        variant = self._iso_tree_suffix(tree)
-        name = f"{self._iso_raw_stem(tree)}.stitcher" + (f"_{variant}" if variant else "")
+        stem = self._iso_raw_stem(tree)
+        sfx = self._stitcher_suffix or ".stitcher"
+        if sfx != ".stitcher":
+            name = f"{stem}{sfx}"
+        else:
+            variant = self._iso_tree_suffix(tree)
+            name = f"{stem}.stitcher" + (f"_{variant}" if variant else "")
         return tree.parent / name
 
     def _current_output_path(self) -> str:
@@ -949,47 +962,95 @@ class IsoviewPipelineWidget(PipelineWidget):
         return int(lo_new), int(hi_new)
 
     def _draw_stitcher_popup_rows(self) -> None:
-        """BigStitcher Parameters popup.
+        """BigStitcher Parameters popup, laid out in Suite2p-style boxes.
 
-        Single row, two columns:
-        - Column 1: a "BigStitcher / Spark registration" box that
-          stacks every registration-related subgroup as a collapsing
-          header (View transforms + Interest point detection open by
-          default, Spark runtime + Matching & solver collapsed).
-        - Column 2: Microscope (override XML), unrelated to BigStitcher
-          but reused across isoview pipelines.
+        Row 1: Orientation (its own full-width row so the button grid
+        breathes). Row 2 (open): View transforms · Microscope. Row 3-4
+        (collapsing, advanced): detection / runtime / matching / solver.
         """
         self._draw_popup_columns([
-            ("BigStitcher / Spark registration",
-             self._draw_stitcher_grouped_box),
+            ("Orientation (align VW00)", self._draw_stitcher_orientation_box),
+        ])
+        imgui.spacing()
+        self._draw_popup_columns([
+            ("View transforms", self._draw_stitcher_transforms_box),
             ("Microscope (override XML)",
-             self._draw_microscope_overrides_box),
+             self._draw_microscope_overrides_box, True),
+        ])
+        imgui.spacing()
+        self._draw_popup_columns([
+            ("Interest point detection",
+             self._draw_stitcher_spark_detect_box, True),
+            ("Spark runtime", self._draw_stitcher_spark_runtime_box, True),
+            ("Coarse match (descriptor)",
+             self._draw_stitcher_spark_match_box, True),
+        ])
+        imgui.spacing()
+        self._draw_popup_columns([
+            ("Fine match (ICP)", self._draw_stitcher_spark_icp_box, True),
+            ("Global solver", self._draw_stitcher_spark_solver_box, True),
         ])
 
-    def _draw_stitcher_grouped_box(self) -> None:
-        """Render all BigStitcher / Spark subgroups in a single column
-        as colored subsection headers (always visible — no collapsing).
+    def _draw_orient_button_row(
+        self, label: str, attr: str,
+        opts: "list[tuple[str, Any]]",
+    ) -> None:
+        """One labeled row of mutually-exclusive buttons bound to ``attr``.
+
+        The button whose value equals the current ``attr`` value is
+        highlighted blue. Buttons share the row width after the label.
         """
-        subgroups = [
-            ("View transforms", self._draw_stitcher_transforms_box),
-            ("Interest point detection",
-             self._draw_stitcher_spark_detect_box),
-            ("Spark runtime", self._draw_stitcher_spark_runtime_box),
-            ("Coarse match (descriptor)",
-             self._draw_stitcher_spark_match_box),
-            ("Fine match (ICP)",
-             self._draw_stitcher_spark_icp_box),
-            ("Global solver",
-             self._draw_stitcher_spark_solver_box),
-        ]
-        for i, (title, draw_fn) in enumerate(subgroups):
+        style = imgui.get_style()
+        cur = getattr(self, attr)
+        imgui.align_text_to_frame_padding()
+        imgui.text(label)
+        imgui.same_line(hello_imgui.em_size(6))
+        avail = imgui.get_content_region_avail().x
+        n = len(opts)
+        btn_w = max(54.0, (avail - style.item_spacing.x * (n - 1)) / n)
+        for i, (text, val) in enumerate(opts):
             if i > 0:
-                imgui.spacing()
-                imgui.spacing()
-            imgui.text_colored(_SUBSECTION_COLOR, title)
-            imgui.separator()
-            imgui.spacing()
-            draw_fn()
+                imgui.same_line()
+            active = cur == val
+            if active:
+                imgui.push_style_color(
+                    imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
+                imgui.push_style_color(
+                    imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
+                imgui.push_style_color(
+                    imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
+            if imgui.button(f"{text}##{attr}_{val}", imgui.ImVec2(btn_w, 0)):
+                setattr(self, attr, val)
+            if active:
+                imgui.pop_style_color(3)
+
+    def _draw_stitcher_orientation_box(self) -> None:
+        """VW00 reorientation — one in-plane Z rotation + one flip, applied
+        to the VW00 (angle-0) view only (like BigStitcher's manual
+        transform). Two coplanar orthogonal cameras differ by a Z rotation
+        plus a chirality flip, so this is the full alignment toolkit.
+        Defaults (None / None) write no transform → views shown as fused.
+        """
+        _hint(
+            "Bring VW00 onto VW90: an in-plane Z rotation, then a flip to "
+            "match chirality. Applied to VW00 only; default writes nothing."
+        )
+        imgui.spacing()
+        self._draw_orient_button_row(
+            "Rotate Z", "_stitcher_rot_z",
+            [("None", 0), ("+90°", 90), ("−90°", -90), ("180°", 180)],
+        )
+        self._draw_orient_button_row(
+            "Flip", "_stitcher_flip",
+            [("None", "none"), ("X", "X"), ("Y", "Y"), ("Z", "Z")],
+        )
+        imgui.spacing()
+        parts = []
+        if self._stitcher_rot_z:
+            parts.append(f"Z{'+' if self._stitcher_rot_z >= 0 else ''}{self._stitcher_rot_z}")
+        if self._stitcher_flip != "none":
+            parts.append(f"flip{self._stitcher_flip}")
+        imgui.text_disabled("applied to VW00: " + (", ".join(parts) or "none (as fused)"))
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
@@ -2040,15 +2101,37 @@ class IsoviewPipelineWidget(PipelineWidget):
         meta = arr.metadata if hasattr(arr, "metadata") else {}
         specimen = meta.get("specimen", 0)
 
+        # Export the method the user actually loaded. For a fused tree
+        # (kind="fused") scan_root IS the method dir (…/geometric,
+        # …/adaptive), so its name is the method. Without this, the export
+        # falls back to config.blending_method (default "geometric") and
+        # ignores which method was loaded. For corrected input there's no
+        # single loaded method — leave None and let isoview resolve it.
+        method = None
+        if getattr(arr, "kind", None) == "fused":
+            method = Path(arr.scan_root).name
+
+        # VW00 reorientation ops: in-plane Z rotation then a chirality
+        # flip (composed in that order). Empty list = no transform.
+        orientation: list = []
+        if self._stitcher_rot_z:
+            orientation.append(["rot", "Z", int(self._stitcher_rot_z)])
+        if self._stitcher_flip != "none":
+            orientation.append(["flip", self._stitcher_flip])
+
         # output_suffix must match the loaded tree's variant: isoview
         # derives config.fused_dir from input_dir.name stripped + ".fused"
         # + output_suffix, so passing the wrong (or empty) suffix makes it
         # scan bare ".fused" instead of e.g. ".fused_v2" and find nothing.
+        # stitcher_suffix names the output dir independently (so it can be
+        # ".stitcher_default" while reading from ".fused").
         args = {
             "input_path": str(input_dir),
+            "method": method,
             "output_suffix": self._iso_tree_suffix(input_dir),
             "stitcher_suffix": self._stitcher_suffix,
             "coarse_align": self._stitcher_coarse_align,
+            "orientation": orientation,
             "specimens": [int(specimen)],
             "timepoints": list(getattr(arr, "_timepoints", []) or []),
         }
