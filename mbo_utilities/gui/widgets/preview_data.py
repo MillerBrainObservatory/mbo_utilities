@@ -510,7 +510,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zarr_compression_level = 1
         self._zarr_pyramid = False
         self._zarr_pyramid_max_layers = 4
-        self._zarr_pyramid_method = "mean"
+        self._zarr_pyramid_method = "median"
 
         # H5 options
         # dataset name inside the .h5 file. suite2p reads from "mov" by
