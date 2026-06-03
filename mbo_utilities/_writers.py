@@ -1248,7 +1248,7 @@ def _write_volumetric_zarr(
     shuffle: str | None = None,
     pyramid: bool = False,
     pyramid_max_layers: int = 4,
-    pyramid_method: str = "mean",
+    pyramid_method: str = "median",
 ):
     """
     Write volumetric TZYX data as single OME-NGFF zarr.
@@ -1298,10 +1298,11 @@ def _write_volumetric_zarr(
         enables napari multiscale viewing and faster navigation.
     pyramid_max_layers : int
         max additional resolution levels (default 4 = levels 0-4).
-        only spatial dims (Y, X) are downsampled by 2x per level.
+        per-level factors follow the webknossos anisotropic-mag algorithm
+        (Z is downsampled at deep levels for anisotropic volumes).
     pyramid_method : str
-        downsampling method: "mean" (default), "nearest", "gaussian".
-        use "nearest" for label/mask data.
+        downsampling reducer: "median" (default, webknossos intensity),
+        "mode" (webknossos labels/masks), "mean", "nearest", "gaussian".
     """
     import zarr
     from zarr.codecs import BytesCodec, GzipCodec, ShardingCodec, Crc32cCodec
@@ -1342,11 +1343,8 @@ def _write_volumetric_zarr(
         read_chunk,
         get_dims,
     )
-    from mbo_utilities.arrays.features._pyramid import (
-        PyramidConfig,
-        compute_pyramid_shapes,
-        downsample_block,
-    )
+    from mbo_utilities.arrays.features._pyramid import downsample_block
+    from mbo_utilities.arrays.isoview.consolidate import _compute_anisotropic_mags
     from mbo_utilities.metadata import OutputMetadata
 
     if metadata is None:
@@ -1489,23 +1487,6 @@ def _write_volumetric_zarr(
     # create zarr v3 group with OME-NGFF structure
     root = zarr.open_group(str(filename), mode="w", zarr_format=3)
 
-    # compute pyramid levels if enabled. PyramidConfig.get_scale_factors_for_ndim
-    # picks (1,1,2,2) for 4D and (1,1,1,2,2) for 5D, so leave scale_factors at
-    # the default and let it adapt to target_shape's ndim.
-    if pyramid:
-        pyramid_config = PyramidConfig(
-            max_layers=pyramid_max_layers,
-            method=pyramid_method,
-            min_size=64,
-        )
-        pyramid_levels = compute_pyramid_shapes(target_shape, pyramid_config)
-        if debug:
-            logger.info(f"  Pyramid: {len(pyramid_levels)} levels")
-            for lvl in pyramid_levels:
-                logger.info(f"    Level {lvl.level}: {lvl.shape}")
-    else:
-        pyramid_levels = None
-
     # OME-NGFF axes order: TZYX for 4D, TCZYX for 5D
     output_dims = ("T", "C", "Z", "Y", "X") if output_5d else ("T", "Z", "Y", "X")
     ome_meta = out_meta.to_ome_ngff(dims=output_dims)
@@ -1514,6 +1495,27 @@ def _write_volumetric_zarr(
 
     # store dims in metadata for readers
     md["dims"] = output_dims
+
+    # pyramid factors via the webknossos anisotropic-mag algorithm: each step
+    # doubles the axis with the smallest physical size (mag * voxel), so
+    # anisotropic volumes converge toward isotropy before downsampling. Z is
+    # downsampled at deep levels, unlike a fixed YX-only scheme. base_scale's
+    # last three entries are the (z, y, x) voxel size for both 4D and 5D.
+    if pyramid:
+        nz_p, ny_p, nx_p = (int(s) for s in target_shape[-3:])
+        voxel_zyx = tuple(float(v) for v in base_scale[-3:])
+        pyramid_mags = _compute_anisotropic_mags(
+            voxel_zyx, (nz_p, ny_p, nx_p), pyramid_max_layers, min_size=64
+        )
+        level_spatial = [
+            (max(1, nz_p // mz), max(1, ny_p // my), max(1, nx_p // mx))
+            for mz, my, mx in pyramid_mags
+        ]
+        if debug:
+            logger.info(f"  Pyramid: {len(pyramid_mags)} levels, mags {pyramid_mags}")
+    else:
+        pyramid_mags = None
+        level_spatial = None
 
     # create the array as "0" (full resolution level). dimension_names is a
     # top-level zarr v3 array metadata field (not an attribute) per the
@@ -1536,21 +1538,22 @@ def _write_volumetric_zarr(
         "method": pyramid_method,
         "description": (
             f"Downsampled with mbo_utilities using {pyramid_method} method"
-            if pyramid_levels
+            if pyramid_mags
             else "Single resolution level (no pyramid)"
         ),
     }
 
-    if pyramid_levels:
+    if pyramid_mags:
         datasets = []
-        for lvl in pyramid_levels:
-            # pyramid scale is relative (e.g., 1, 2, 4), multiply with base
-            physical_scale = [
-                base_scale[i] * lvl.scale[i] for i in range(len(base_scale))
-            ]
+        for lvl_idx, (mz, my, mx) in enumerate(pyramid_mags):
+            # level scale = level-0 voxel size * cumulative mag on (z, y, x)
+            physical_scale = list(base_scale)
+            physical_scale[-3] = base_scale[-3] * mz
+            physical_scale[-2] = base_scale[-2] * my
+            physical_scale[-1] = base_scale[-1] * mx
             datasets.append(
                 {
-                    "path": lvl.path,
+                    "path": str(lvl_idx),
                     "coordinateTransformations": [
                         {"type": "scale", "scale": physical_scale}
                     ],
@@ -1655,7 +1658,7 @@ def _write_volumetric_zarr(
 
     # write data in chunks
     pbar = None
-    total_work = n_frames * (len(pyramid_levels) if pyramid_levels else 1)
+    total_work = n_frames * (len(pyramid_mags) if pyramid_mags else 1)
     if show_progress:
         pbar = tqdm(total=total_work, desc="Writing Zarr", unit="frames")
 
@@ -1686,45 +1689,46 @@ def _write_volumetric_zarr(
 
             if progress_callback:
                 progress_callback(
-                    chunk_info.progress / (len(pyramid_levels) if pyramid_levels else 1)
+                    chunk_info.progress / (len(pyramid_mags) if pyramid_mags else 1)
                 )
     finally:
         if pbar:
             pbar.close()
 
     # generate pyramid levels from level 0 data
-    if pyramid_levels and len(pyramid_levels) > 1:
+    if pyramid_mags and len(pyramid_mags) > 1:
         if show_progress:
             pbar = tqdm(
-                total=len(pyramid_levels) - 1,
+                total=len(pyramid_mags) - 1,
                 desc="Building pyramid",
                 unit="levels",
             )
 
-        scale_factors = pyramid_config.get_scale_factors_for_ndim(len(target_shape))
-
-        for lvl in pyramid_levels[1:]:
-            prev_level = lvl.level - 1
-            prev_path = str(prev_level)
+        for lvl_idx in range(1, len(pyramid_mags)):
+            prev_path = str(lvl_idx - 1)
 
             # read previous level data
             prev_z = root[prev_path]
             prev_data = prev_z[:]
 
-            # downsample
-            level_data = downsample_block(prev_data, scale_factors, pyramid_method)
+            # per-level factor from realized parent/child spatial shapes,
+            # clamped to >=1 so a singleton axis is never reduced to 0. T
+            # (and C) are never downsampled.
+            pz, py, px = level_spatial[lvl_idx - 1]
+            cz, cy, cx = level_spatial[lvl_idx]
+            zf, yf, xf = max(1, pz // cz), max(1, py // cy), max(1, px // cx)
+            factor = (1, 1, zf, yf, xf) if output_5d else (1, zf, yf, xf)
+
+            level_data = downsample_block(prev_data, factor, pyramid_method)
 
             # compute chunk + shard shapes for this level using the SAME
-            # recipe as level 0: one Y×X plane per chunk, all T per
-            # (c, z) shard. Y and X come from the downsampled level
-            # shape — pyramid scale factors only touch the spatial
-            # axes (1,1,2,2) for 4D and (1,1,1,2,2) for 5D, so T (and
-            # C, Z) match level 0. Without this fix, lower-resolution
-            # levels were stored as a single huge chunk (the level-0
-            # shard shape clamped to the level shape, used as plain
-            # chunks), forcing a full-volume decompress to view any
-            # frame at that level — fine for thumbnails, but it broke
-            # T-scrub the moment a viewer fell back to a pyramid level.
+            # recipe as level 0: one Y×X plane per chunk (T, C, Z pinned to
+            # 1), all T per (c, z) shard. Y and X come from the downsampled
+            # level shape; Z may shrink at deep levels but the chunk still
+            # pins one plane. Without this, lower-resolution levels were
+            # stored as a single huge chunk, forcing a full-volume decompress
+            # to view any frame and breaking T-scrub when a viewer fell back
+            # to a pyramid level.
             lvl_shape = level_data.shape
             lvl_Y = lvl_shape[-2]
             lvl_X = lvl_shape[-1]
@@ -1761,7 +1765,7 @@ def _write_volumetric_zarr(
 
             lvl_z = zarr.create(
                 store=root.store,
-                path=lvl.path,
+                path=str(lvl_idx),
                 shape=lvl_shape,
                 chunks=lvl_chunks,
                 dtype=data.dtype,
@@ -1773,14 +1777,16 @@ def _write_volumetric_zarr(
             # write data
             lvl_z[:] = level_data
 
-            # set napari-compatible scale on this level's array
-            physical_scale = [
-                base_scale[i] * lvl.scale[i] for i in range(len(base_scale))
-            ]
+            # napari-compatible scale: level-0 voxel size * cumulative mag
+            mz, my, mx = pyramid_mags[lvl_idx]
+            physical_scale = list(base_scale)
+            physical_scale[-3] = base_scale[-3] * mz
+            physical_scale[-2] = base_scale[-2] * my
+            physical_scale[-1] = base_scale[-1] * mx
             lvl_z.attrs["scale"] = physical_scale
 
             if debug:
-                logger.info(f"  Wrote level {lvl.level}: {lvl_shape}")
+                logger.info(f"  Wrote level {lvl_idx}: {lvl_shape}")
 
             if pbar:
                 pbar.update(1)
