@@ -156,15 +156,16 @@ _RUN_LABELS = {
     _MODE_STITCHER: "Export XML",
 }
 
-# VW00 orientation presets for the BigStitcher export → ops forwarded to
-# generate_bigstitcher_xml(orientation=...). "default" (normal cameras)
-# and "rotated" are empirically verified; both assume the R_X(-90) pose
-# the pipeline bakes onto VW90 (the -90 X cancels it). "none" exports the
-# views as the pipeline situates them, no added transform.
-_STITCHER_ORIENT_PRESETS: dict[str, list] = {
-    "none": [],
-    "default": [["rot", "X", -90], ["rot", "Z", -90]],
-    "rotated": [["rot", "X", -90]],
+# VW00 orientation profiles for the BigStitcher export. A Profile seeds the
+# editable rotations + flips in the Orientation box; the resulting ops are
+# forwarded to generate_bigstitcher_xml(orientation=...). "default" (normal
+# cameras) and "rotated" are empirically verified; both assume the R_X(-90)
+# pose the pipeline bakes onto VW90 (the -90 X cancels it). "none" = no
+# transform. Rotations are (sign, axis, magnitude-degrees); flips are axes.
+_STITCHER_ORIENT_PROFILES: dict[str, dict] = {
+    "none": {"rotations": [], "flips": []},
+    "default": {"rotations": [("-", "X", 90), ("-", "Z", 90)], "flips": []},
+    "rotated": {"rotations": [("-", "X", 90)], "flips": []},
 }
 
 # Forced output-dir prefix per pipeline step. The Output-options field is the
@@ -349,14 +350,20 @@ class IsoviewPipelineWidget(PipelineWidget):
         # Opt-in feature-based coarse alignment (3D blob detection +
         # pairwise-difference histogram). When False, only the
         # calibration affines are emitted; the user runs BigStitcher's
-        # interest-point registration after opening the XML.
-        self._stitcher_coarse_align: bool = True
+        # interest-point registration after opening the XML. Off by
+        # default: with orientation "none" the views are still orthogonal,
+        # so the blob clouds don't correspond and the histogram peak is a
+        # near-arbitrary offset that flings VW00 far from VW90.
+        self._stitcher_coarse_align: bool = False
 
-        # VW00 orientation preset for the BigStitcher export (one of
-        # _STITCHER_ORIENT_PRESETS). "none" adds no transform; "default"
-        # and "rotated" are the verified combos for the two camera
-        # orientations. Applied to VW00 only; VW90 keeps its pipeline pose.
-        self._stitcher_orientation_preset: str = "none"
+        # VW00 reorientation for the BigStitcher export (applied to VW00
+        # only; VW90 keeps its pipeline pose). An editable op list: a
+        # Profile (None/Normal/Rotated) seeds these, then they can be
+        # tweaked for one-offs. Rotations are {"sign","axis","deg"} dicts
+        # applied in row order (innermost first); flips (axis letters)
+        # applied after.
+        self._stitcher_rotations: list[dict] = []
+        self._stitcher_flips: list[str] = []
 
         # bigstitcher-spark registration step (opt-in via separate "Run
         # registration" button — mutates the exported dataset.xml).
@@ -1049,61 +1056,149 @@ class IsoviewPipelineWidget(PipelineWidget):
             ("Global solver", self._draw_stitcher_spark_solver_box, True),
         ])
 
-    def _draw_orient_button_row(
-        self, label: str, attr: str,
-        opts: "list[tuple[str, Any]]",
-    ) -> None:
-        """One labeled row of mutually-exclusive buttons bound to ``attr``.
+    def _orient_toggle(self, label: str, active: bool, width: float = 0.0) -> bool:
+        """Highlighted selection button; returns True when clicked."""
+        if active:
+            imgui.push_style_color(
+                imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
+            imgui.push_style_color(
+                imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
+            imgui.push_style_color(
+                imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
+        clicked = imgui.button(label, imgui.ImVec2(width, 0))
+        if active:
+            imgui.pop_style_color(3)
+        return clicked
 
-        The button whose value equals the current ``attr`` value is
-        highlighted blue. Buttons share the row width after the label.
+    def _load_orient_profile(self, name: str) -> None:
+        """Seed the editable rotations + flips from a profile."""
+        prof = _STITCHER_ORIENT_PROFILES.get(name, {"rotations": [], "flips": []})
+        self._stitcher_rotations = [
+            {"sign": s, "axis": a, "deg": int(d)} for (s, a, d) in prof["rotations"]
+        ]
+        self._stitcher_flips = list(prof["flips"])
+
+    def _orient_profile_match(self) -> "str | None":
+        """Name of the profile matching the current edits, or None."""
+        cur_rot = [
+            (r["sign"], r["axis"], int(r["deg"])) for r in self._stitcher_rotations
+        ]
+        cur_flip = list(self._stitcher_flips)
+        for name, prof in _STITCHER_ORIENT_PROFILES.items():
+            if cur_rot == [tuple(x) for x in prof["rotations"]] and (
+                cur_flip == list(prof["flips"])
+            ):
+                return name
+        return None
+
+    def _compose_orientation_ops(self) -> list:
+        """VW00 orientation op list for generate_bigstitcher_xml.
+
+        Rotations (row order, innermost first) then flips. Rotation ->
+        ["rot", axis, signed degrees]; flip -> ["flip", axis].
         """
-        style = imgui.get_style()
-        cur = getattr(self, attr)
-        imgui.align_text_to_frame_padding()
-        imgui.text(label)
-        imgui.same_line(hello_imgui.em_size(6))
-        avail = imgui.get_content_region_avail().x
-        n = len(opts)
-        btn_w = max(54.0, (avail - style.item_spacing.x * (n - 1)) / n)
-        for i, (text, val) in enumerate(opts):
-            if i > 0:
-                imgui.same_line()
-            active = cur == val
-            if active:
-                imgui.push_style_color(
-                    imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
-                imgui.push_style_color(
-                    imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
-                imgui.push_style_color(
-                    imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
-            if imgui.button(f"{text}##{attr}_{val}", imgui.ImVec2(btn_w, 0)):
-                setattr(self, attr, val)
-            if active:
-                imgui.pop_style_color(3)
+        ops: list = []
+        for rot in self._stitcher_rotations:
+            deg = int(rot["deg"])
+            if rot["sign"] == "-":
+                deg = -deg
+            ops.append(["rot", rot["axis"], deg])
+        for axis in self._stitcher_flips:
+            ops.append(["flip", axis])
+        return ops
 
     def _draw_stitcher_orientation_box(self) -> None:
-        """VW00 orientation preset for the export. Applied to VW00 only;
-        VW90 keeps its pipeline pose.
+        """VW00 reorientation for the export (applied to VW00 only).
 
-        None    — no added transform; export the views as currently
-                  situated (align them in BigStitcher yourself).
-        Default — normal camera orientation (−90 X, −90 Z on VW00).
-        Rotated — rotated camera orientation (−90 X on VW00). [testing]
+        A Profile seeds the editable rotations + flips below; tweak them
+        for one-offs. None = no transform. VW90 keeps its pipeline pose.
         """
-        _hint("Preset (applied to VW00)")
+        _hint("Applied to VW00")
         imgui.spacing()
-        self._draw_orient_button_row(
-            "Mode", "_stitcher_orientation_preset",
-            [("None", "none"), ("Default", "default"), ("Rotated", "rotated")],
-        )
+
+        # Profile: load a preset into the editable controls below.
+        match = self._orient_profile_match()
+        imgui.align_text_to_frame_padding()
+        imgui.text("Profile")
+        imgui.same_line(hello_imgui.em_size(7))
+        for k, (name, label) in enumerate(
+            (("none", "None"), ("default", "Normal"), ("rotated", "Rotated"))
+        ):
+            if k > 0:
+                imgui.same_line()
+            if self._orient_toggle(f"{label}##orient_profile_{name}", match == name):
+                self._load_orient_profile(name)
         imgui.spacing()
-        desc = {
-            "none": "No transform — export as currently situated.",
-            "default": "Normal cameras: −90 X, −90 Z on VW00.",
-            "rotated": "Rotated cameras: −90 X on VW00 (testing).",
-        }[self._stitcher_orientation_preset]
-        imgui.text_disabled(desc)
+
+        # Rotations — editable list seeded by the profile.
+        imgui.text("Rotations")
+        axes = ["X", "Y", "Z"]
+        degs = ["90", "180", "270"]
+        remove_idx = -1
+        for i, rot in enumerate(self._stitcher_rotations):
+            imgui.push_id(i)
+            if imgui.button(
+                f"{rot['sign']}##sign", imgui.ImVec2(hello_imgui.em_size(2.2), 0)
+            ):
+                rot["sign"] = "-" if rot["sign"] == "+" else "+"
+            imgui.same_line()
+            imgui.set_next_item_width(hello_imgui.em_size(3.6))
+            ai = axes.index(rot["axis"]) if rot["axis"] in axes else 0
+            changed, ai = imgui.combo("##axis", ai, axes)
+            if changed:
+                rot["axis"] = axes[ai]
+            imgui.same_line()
+            imgui.set_next_item_width(hello_imgui.em_size(5.0))
+            cur_deg = str(int(rot["deg"]))
+            di = degs.index(cur_deg) if cur_deg in degs else 0
+            changed, di = imgui.combo("##deg", di, degs)
+            if changed:
+                rot["deg"] = int(degs[di])
+            imgui.same_line()
+            imgui.text("deg")
+            imgui.same_line()
+            if imgui.small_button("x##rm"):
+                remove_idx = i
+            imgui.pop_id()
+        if remove_idx >= 0:
+            del self._stitcher_rotations[remove_idx]
+        if imgui.small_button("+ add##orient_add_rot"):
+            self._stitcher_rotations.append({"sign": "-", "axis": "X", "deg": 90})
+        imgui.same_line()
+        if imgui.small_button("clear##orient_clear_rot"):
+            self._stitcher_rotations = []
+        imgui.spacing()
+
+        # Flip — Horizontal/Vertical/Depth toggle = flip X/Y/Z.
+        imgui.align_text_to_frame_padding()
+        imgui.text("Flip")
+        imgui.same_line(hello_imgui.em_size(7))
+        for k, (label, axis) in enumerate(
+            (("Horizontal (X)", "X"), ("Vertical (Y)", "Y"), ("Depth (Z)", "Z"))
+        ):
+            if k > 0:
+                imgui.same_line()
+            if self._orient_toggle(
+                f"{label}##orient_flip_{axis}", axis in self._stitcher_flips
+            ):
+                if axis in self._stitcher_flips:
+                    self._stitcher_flips.remove(axis)
+                else:
+                    self._stitcher_flips.append(axis)
+        imgui.spacing()
+
+        # Live summary of the composed VW00 transform.
+        ops = self._compose_orientation_ops()
+        if ops:
+            parts = []
+            for op in ops:
+                if op[0] == "rot":
+                    parts.append(f"{op[2]:+d} {op[1]}")
+                else:
+                    parts.append(f"flip {op[1]}")
+            imgui.text_disabled("VW00: " + ", ".join(parts))
+        else:
+            imgui.text_disabled("VW00: no transform")
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
@@ -2138,14 +2233,9 @@ class IsoviewPipelineWidget(PipelineWidget):
             if _is_method_dir(sr):
                 method = sr.name
 
-        # VW00 reorientation ops from the selected preset (None / Default /
-        # Rotated). Empty list = no transform.
-        orientation: list = [
-            list(op)
-            for op in _STITCHER_ORIENT_PRESETS.get(
-                self._stitcher_orientation_preset, []
-            )
-        ]
+        # VW00 reorientation: editable rotations + flips seeded by the
+        # Profile. Empty list = no transform.
+        orientation: list = self._compose_orientation_ops()
 
         # output_suffix must match the loaded tree's variant: isoview
         # derives config.fused_dir from input_dir.name stripped + ".fused"

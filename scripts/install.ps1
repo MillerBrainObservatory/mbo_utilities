@@ -12,7 +12,6 @@
 $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
-$DEFAULT_ENV_PATH = Join-Path $env:USERPROFILE "mbo\envs\mbo_utilities"
 
 # System dependency URLs (informational only)
 $FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/"
@@ -275,79 +274,116 @@ function Test-NvidiaGpu {
     if (-not (Test-Path $nvidiaSmi)) { $nvidiaSmi = "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe" }
     if (-not (Test-Path $nvidiaSmi)) {
         try { $nvidiaSmi = (Get-Command nvidia-smi -ErrorAction Stop).Source }
-        catch { return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false } }
+        catch { return @{ Available = $false; GpuName = $null; CudaVersion = $null; DriverCudaVersion = $null; ToolkitInstalled = $false } }
     }
 
     try {
         $gpuName = & $nvidiaSmi --query-gpu=name --format=csv,noheader 2>$null
         if ($gpuName) {
+            # the nvidia-smi header reports the max CUDA version the
+            # installed DRIVER supports. this is what pytorch GPU wheels
+            # need — they bundle their own CUDA runtime, so no system
+            # toolkit (nvcc) is required.
+            $driverCuda = $null
+            try {
+                $smiText = & $nvidiaSmi 2>$null | Out-String
+                if ($smiText -match 'CUDA Version:\s*(\d+\.\d+)') { $driverCuda = $matches[1] }
+            }
+            catch {}
+
             $toolkitVersion = Test-CudaToolkit
             return @{
                 Available = $true
                 GpuName = $gpuName.Trim()
                 CudaVersion = $toolkitVersion
+                DriverCudaVersion = $driverCuda
                 ToolkitInstalled = ($null -ne $toolkitVersion)
             }
         }
     }
     catch {}
-    return @{ Available = $false; GpuName = $null; CudaVersion = $null; ToolkitInstalled = $false }
+    return @{ Available = $false; GpuName = $null; CudaVersion = $null; DriverCudaVersion = $null; ToolkitInstalled = $false }
 }
 
-function Get-CupyPackage {
+function Get-CupyPackages {
     <#
     .SYNOPSIS
-    Returns the correct cupy package name for the detected CUDA toolkit version.
-    Returns $null if no compatible CUDA toolkit is found.
+    Returns the cupy wheel + matching NVRTC/runtime wheels for the detected
+    GPU/driver, as an array ready to install. CuPy is the optional GPU
+    backend for axial registration; the NVRTC + runtime wheels supply
+    pip-managed CUDA so cupy's JIT kernels compile without a system CUDA
+    toolkit. Returns an empty array when there is no NVIDIA GPU. Mirrors
+    mbo_utilities.install.recommended_cupy_package.
     #>
     param([hashtable]$GpuInfo)
 
-    if (-not $GpuInfo.ToolkitInstalled -or -not $GpuInfo.CudaVersion) {
-        return $null
+    if (-not $GpuInfo.Available) {
+        return @()
     }
 
-    $cudaVersion = $GpuInfo.CudaVersion
+    $cudaVersion = $GpuInfo.DriverCudaVersion
+    if (-not $cudaVersion) { $cudaVersion = $GpuInfo.CudaVersion }
+
+    # cupy ships one wheel per CUDA major (cupy-cuda11x/12x/13x). default to
+    # 12x (broadest coverage) when the version can't be read.
+    $major = "12"
     if ($cudaVersion -match '^(\d+)') {
-        $major = [int]$matches[1]
-        if ($major -ge 12) { return "cupy-cuda12x" }
-        if ($major -eq 11) { return "cupy-cuda11x" }
+        $m = [int]$matches[1]
+        if ($m -ge 13)     { $major = "13" }
+        elseif ($m -ge 12) { $major = "12" }
+        else               { $major = "11" }
     }
 
-    return $null
+    return @("cupy-cuda${major}x",
+             "nvidia-cuda-nvrtc-cu${major}",
+             "nvidia-cuda-runtime-cu${major}")
 }
 
 function Get-PytorchIndexUrl {
     <#
     .SYNOPSIS
-    Returns the pytorch wheel index URL matching the detected CUDA toolkit.
-    Pytorch doesn't publish GPU wheels to PyPI — they live on its own
-    index. Without `--index-url` pointing there, the main install pulls
-    the CPU `torch` package and cellpose/suite2p run on CPU regardless
-    of whether cuda + cupy are available. Returns $null if no suitable
-    mapping (no GPU, no toolkit, or CUDA version outside the supported
-    set).
+    Returns the pytorch wheel index URL matching the GPU/driver.
+
+    PyTorch doesn't publish GPU wheels to PyPI — they live on its own
+    index. Without `--index-url` pointing there, the install pulls the
+    CPU `torch` and suite2p/cellpose run on CPU. PyTorch CUDA wheels
+    bundle their own CUDA runtime, so only an NVIDIA DRIVER is required,
+    NOT a system CUDA toolkit (nvcc). Pick the wheel from the driver's
+    max supported CUDA version (nvidia-smi), falling back to the toolkit
+    version. Returns $null only when there is no NVIDIA GPU.
     #>
     param([hashtable]$GpuInfo)
 
-    if (-not $GpuInfo.ToolkitInstalled -or -not $GpuInfo.CudaVersion) {
+    if (-not $GpuInfo.Available) {
         return $null
     }
 
-    if ($GpuInfo.CudaVersion -match '^(\d+)\.(\d+)') {
+    $cudaVersion = $GpuInfo.DriverCudaVersion
+    if (-not $cudaVersion) { $cudaVersion = $GpuInfo.CudaVersion }
+
+    # GPU present but CUDA version undetectable — use a broadly compatible
+    # default rather than silently falling back to the CPU build.
+    if (-not $cudaVersion) {
+        return "https://download.pytorch.org/whl/cu121"
+    }
+
+    if ($cudaVersion -match '^(\d+)\.(\d+)') {
         $major = [int]$matches[1]
         $minor = [int]$matches[2]
-        # pick the highest pytorch-published cu12X that's <= installed
-        # toolkit. wheels are driver-backward-compatible within a major,
-        # so a cu126 wheel works fine on a 12.8 toolkit machine.
+        # pick the highest pytorch-published cuXXX that's <= the driver's
+        # supported CUDA. wheels are backward-compatible, so a cu126 wheel
+        # runs fine on a 12.8-capable driver.
+        if ($major -ge 13) { return "https://download.pytorch.org/whl/cu128" }
         if ($major -eq 12) {
-            if ($minor -ge 6)     { return "https://download.pytorch.org/whl/cu126" }
+            if ($minor -ge 8)     { return "https://download.pytorch.org/whl/cu128" }
+            elseif ($minor -ge 6) { return "https://download.pytorch.org/whl/cu126" }
             elseif ($minor -ge 4) { return "https://download.pytorch.org/whl/cu124" }
             elseif ($minor -ge 1) { return "https://download.pytorch.org/whl/cu121" }
             else                  { return "https://download.pytorch.org/whl/cu118" }
         }
         if ($major -eq 11) { return "https://download.pytorch.org/whl/cu118" }
     }
-    return $null
+    return "https://download.pytorch.org/whl/cu121"
 }
 
 function Get-UvToolPythonPath {
@@ -384,30 +420,31 @@ function Show-OptionalDependencies {
     if ($GpuInfo.Available) {
         Write-Host "  GPU detected: " -NoNewline -ForegroundColor Green
         Write-Host $GpuInfo.GpuName -ForegroundColor White
-        if ($GpuInfo.ToolkitInstalled) {
-            Write-Host "  CUDA Toolkit: " -NoNewline -ForegroundColor Green
-            Write-Host $GpuInfo.CudaVersion -ForegroundColor White
+        if ($GpuInfo.DriverCudaVersion) {
+            Write-Host "  Driver CUDA:  " -NoNewline -ForegroundColor Green
+            Write-Host "$($GpuInfo.DriverCudaVersion) (GPU torch + CuPy will be installed)" -ForegroundColor White
         }
         else {
-            Write-Host "  CUDA Toolkit: " -NoNewline -ForegroundColor Yellow
-            Write-Host "Not installed (GPU packages will use CPU)" -ForegroundColor Yellow
+            Write-Host "  Driver CUDA:  " -NoNewline -ForegroundColor Yellow
+            Write-Host "unknown (default CUDA torch + CuPy build will be used)" -ForegroundColor Yellow
         }
     }
     else {
-        Write-Host "  No NVIDIA GPU detected (GPU features will be slower)" -ForegroundColor Yellow
+        Write-Host "  No NVIDIA GPU detected (CPU torch will be installed)" -ForegroundColor Yellow
     }
     Write-Host ""
 
-    Write-Host "  [1] Suite2p   - 2D cell extraction (PyTorch + CUDA)" -ForegroundColor Cyan
-    Write-Host "  [2] Rastermap - Dimensionality reduction" -ForegroundColor Cyan
-    Write-Host "  [3] All       - Install all processing pipelines" -ForegroundColor Cyan
-    Write-Host "  [4] None      - Base installation only (fastest)" -ForegroundColor Cyan
+    Write-Host "  Suite2p and the GUI are always installed." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [1] Rastermap - Dimensionality reduction" -ForegroundColor Cyan
+    Write-Host "  [2] All       - Rastermap + isoview" -ForegroundColor Cyan
+    Write-Host "  [3] None      - Base installation only" -ForegroundColor Cyan
     Write-Host ""
 
     do {
-        $choice = Read-Host "Select option (1-4, or comma-separated like 1,2)"
-        $valid = $choice -match '^[1-4](,[1-4])*$'
-        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-4 or comma-separated." }
+        $choice = Read-Host "Select option (1-3, or comma-separated like 1,2)"
+        $valid = $choice -match '^[1-3](,[1-3])*$'
+        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-3 or comma-separated." }
     } while (-not $valid)
 
     $extras = @()
@@ -415,46 +452,9 @@ function Show-OptionalDependencies {
 
     :parseLoop foreach ($c in $choices) {
         switch ($c) {
-            "1" { $extras += "suite2p" }
-            "2" { $extras += "rastermap" }
-            "3" { $extras = @("all"); break parseLoop }
-            "4" { $extras = @(); break parseLoop }
-        }
-    }
-
-    # warn if GPU packages selected without toolkit
-    if ($extras.Count -gt 0) {
-        $gpuPackages = @("suite2p", "all")
-        $hasGpuPackage = ($extras | Where-Object { $gpuPackages -contains $_ }).Count -gt 0
-        $needsCupy = $false  # cupy is now a pure-optional accelerator, not tied to an extra
-
-        if ($hasGpuPackage -and $GpuInfo.Available -and -not $GpuInfo.ToolkitInstalled) {
-            Write-Host ""
-            Write-Warn "CUDA Toolkit not installed. GPU packages will use CPU (slower)."
-            Write-Warn "Install CUDA Toolkit for GPU acceleration."
-        }
-        elseif ($hasGpuPackage -and -not $GpuInfo.Available) {
-            Write-Host ""
-            Write-Warn "No NVIDIA GPU detected. These packages will run in CPU-only mode."
-            if ($needsCupy) {
-                Write-Warn "Suite3D requires CuPy + NVIDIA GPU. CuPy will NOT be installed."
-            }
-            $continue = Read-Host "Continue anyway? (y/n)"
-            if ($continue -ne "y") {
-                $extras = $extras | Where-Object { $gpuPackages -notcontains $_ }
-            }
-        }
-        elseif ($needsCupy -and $GpuInfo.ToolkitInstalled) {
-            $cupyPkg = Get-CupyPackage -GpuInfo $GpuInfo
-            if ($cupyPkg) {
-                Write-Host ""
-                Write-Info "CuPy will be installed for CUDA $($GpuInfo.CudaVersion): $cupyPkg"
-            }
-            else {
-                Write-Host ""
-                Write-Warn "Unsupported CUDA version $($GpuInfo.CudaVersion). CuPy will NOT be installed."
-                Write-Warn "Suite3D requires CUDA 11.x or 12.x."
-            }
+            "1" { $extras += "rastermap" }
+            "2" { $extras = @("all"); break parseLoop }
+            "3" { $extras = @(); break parseLoop }
         }
     }
 
@@ -465,7 +465,7 @@ function Install-MboTool {
     param(
         [string]$Spec,
         [string[]]$Extras = @(),
-        [string]$CupyPackage = $null,
+        [string[]]$CupyPackages = @(),
         [string]$PytorchIndexUrl = $null
     )
 
@@ -488,19 +488,6 @@ function Install-MboTool {
     }
     else {
         $fullSpec = $Spec
-    }
-
-    # add cupy + NVRTC helpers as --with when the caller asks for gpu
-    # acceleration. the nvrtc/runtime wheels isolate cupy from the user's
-    # system CUDA toolkit so a driver > toolkit version skew can't break
-    # kernel compilation (fixes the "__nv_fp8_e8m0 incomplete type" class
-    # of bug). mirrors the dev-env install so both paths behave the same.
-    $withArgs = @()
-    if ($CupyPackage) {
-        $withArgs += @("--with", $CupyPackage,
-                       "--with", "nvidia-cuda-nvrtc-cu12",
-                       "--with", "nvidia-cuda-runtime-cu12")
-        Write-Info "  CuPy: $CupyPackage + bundled NVRTC (via --with)"
     }
 
     Write-Info "  Spec: $fullSpec"
@@ -548,12 +535,12 @@ function Install-MboTool {
             }
         }
 
-        # install tool (with cupy if gpu acceleration is wanted)
+        # install tool.
         # --reinstall forces uv to re-fetch and rebuild even if the same
         # branch name is already cached. without it, pushing fixes to a
         # branch and re-running the script would silently keep the stale
         # version in the tool environment.
-        $installArgs = @($fullSpec, "--python", "3.12", "--reinstall") + $withArgs
+        $installArgs = @($fullSpec, "--python", "3.12", "--reinstall")
         uv tool install @installArgs 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {
@@ -600,6 +587,27 @@ function Install-MboTool {
             }
         }
 
+        # install cupy + its NVRTC/runtime wheels into the tool's venv: the
+        # optional GPU backend for axial registration. done as a post-install
+        # step (not --with) so a cupy resolution hiccup only warns instead of
+        # aborting the whole tool install.
+        if ($CupyPackages.Count -gt 0) {
+            $toolPy = Get-UvToolPythonPath -ToolName "mbo_utilities"
+            if ($toolPy) {
+                Write-Info "Installing CuPy for GPU axial registration: $($CupyPackages -join ', ')..."
+                uv pip install --python $toolPy --reinstall @CupyPackages 2>&1 | ForEach-Object { Write-Host $_ }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "CuPy install failed. Axial registration will use CPU."
+                }
+                else {
+                    Write-Success "CuPy installed in tool env: $($CupyPackages[0])"
+                }
+            }
+            else {
+                Write-Warn "Could not locate tool's python; CuPy not installed."
+            }
+        }
+
         Write-Success "mbo CLI tool installed successfully"
         return $true
     }
@@ -616,15 +624,18 @@ function Show-InstallTypePrompt {
     Write-Host ""
     Write-Host "Installation Type" -ForegroundColor White
     Write-Host ""
-    Write-Host "  CLI             - global 'mbo' command on your PATH, just runs the GUI." -ForegroundColor DarkGray
-    Write-Host "                    Self-contained; no activation, no imports, no notebooks." -ForegroundColor DarkGray
-    Write-Host "  Local env       - project-local venv you 'cd' into and run 'uv run ...' or" -ForegroundColor DarkGray
-    Write-Host "                    import from. Use this for scripts, notebooks, development." -ForegroundColor DarkGray
-    Write-Host "  Both            - pick this if you want the GUI anywhere AND a local env to code in." -ForegroundColor DarkGray
+    Write-Host "  CLI - one global 'mbo' command that works in any terminal." -ForegroundColor DarkGray
+    Write-Host "        Opens the GUI viewer. Nothing to activate. Choose this to just use the app." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [1] Environment + CLI - Create Python venv with mbo_utilities + global CLI (Recommended)" -ForegroundColor Cyan
-    Write-Host "  [2] Environment       - Create Python venv only (for library use)" -ForegroundColor Cyan
-    Write-Host "  [3] CLI               - Install global CLI only (mbo command)" -ForegroundColor Cyan
+    Write-Host "  Environment - a Python venv you install into and work from." -ForegroundColor DarkGray
+    Write-Host "        For writing scripts, running notebooks, 'import mbo_utilities', or development." -ForegroundColor DarkGray
+    Write-Host "        You 'cd' into its folder and run things with 'uv run ...'." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  Both - the 'mbo' command everywhere, plus an environment to write code in." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [1] Both        - mbo command + Python environment (Recommended)" -ForegroundColor Cyan
+    Write-Host "  [2] Environment - Python environment only (scripts, notebooks, imports)" -ForegroundColor Cyan
+    Write-Host "  [3] CLI         - mbo command only (just the GUI)" -ForegroundColor Cyan
     Write-Host ""
 
     do {
@@ -640,22 +651,36 @@ function Show-InstallTypePrompt {
     }
 }
 
+function Get-DefaultEnvPath {
+    # put the env next to the user's code: first existing of these common
+    # parent dirs, else suggest ~/projects.
+    foreach ($base in @("repos", "code", "software", "projects")) {
+        $candidate = Join-Path $env:USERPROFILE $base
+        if (Test-Path $candidate) {
+            return Join-Path $candidate "mbo_utilities"
+        }
+    }
+    return Join-Path $env:USERPROFILE "projects\mbo_utilities"
+}
+
 function Show-EnvLocationPrompt {
     if ($env:MBO_ENV_PATH) {
         Write-Info "Environment location: $($env:MBO_ENV_PATH) (from MBO_ENV_PATH)"
         return $env:MBO_ENV_PATH
     }
 
+    $defaultPath = Get-DefaultEnvPath
+
     Write-Host ""
     Write-Host "Environment Location" -ForegroundColor White
     Write-Host ""
     Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-    Write-Host $DEFAULT_ENV_PATH -ForegroundColor Cyan
+    Write-Host $defaultPath -ForegroundColor Cyan
     Write-Host ""
     $userInput = Read-Host "Press Enter for default, or enter custom path"
 
     if ([string]::IsNullOrWhiteSpace($userInput)) {
-        return $DEFAULT_ENV_PATH
+        return $defaultPath
     }
 
     $customPath = $userInput.Trim()
@@ -731,7 +756,7 @@ function Install-DevEnvironment {
         [string]$Spec,
         [string[]]$Extras = @(),
         [hashtable]$GpuInfo = @{},
-        [string]$CupyPackage = $null,
+        [string[]]$CupyPackages = @(),
         [string]$PytorchIndexUrl = $null
     )
 
@@ -968,27 +993,25 @@ function Install-DevEnvironment {
             throw "uv pip install failed"
         }
 
-        # install cupy separately when gpu acceleration is wanted. --reinstall
-        # here too so an existing cupy-cuda12x install doesn't mask the version
-        # we want. also pull in the NVRTC/runtime wheels so cupy uses
-        # pip-managed CUDA headers instead of whatever system toolkit is on PATH
-        # — fixes the "cuda_fp8.h missing __nv_fp8_e8m0" class of bug on
-        # machines where driver > toolkit.
-        if ($CupyPackage) {
-            Write-Info "Installing $CupyPackage + bundled NVRTC (enables GPU axial registration)..."
-            uv pip install --python $pythonPath --reinstall $CupyPackage nvidia-cuda-nvrtc-cu12 nvidia-cuda-runtime-cu12 2>&1 | ForEach-Object { Write-Host $_ }
+        # install cupy + its NVRTC/runtime wheels: the optional GPU backend
+        # for axial registration. --reinstall so an existing cupy build
+        # doesn't mask the wanted one; the nvrtc/runtime wheels give cupy
+        # pip-managed CUDA so its jit kernels compile without a system toolkit.
+        if ($CupyPackages.Count -gt 0) {
+            Write-Info "Installing CuPy for GPU axial registration: $($CupyPackages -join ', ')..."
+            uv pip install --python $pythonPath --reinstall @CupyPackages 2>&1 | ForEach-Object { Write-Host $_ }
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "CuPy installation failed. Axial registration will fall back to CPU."
+                Write-Warn "CuPy installation failed. Axial registration will use CPU."
             }
             else {
-                Write-Success "CuPy + NVRTC installed: $CupyPackage"
+                Write-Success "CuPy installed: $($CupyPackages[0])"
             }
         }
 
         # replace the CPU torch that came from PyPI with the GPU build
         # from pytorch's own index. pytorch only publishes GPU wheels to
         # its dedicated index, so without this step cellpose / suite2p
-        # run on CPU despite cuda + cupy being present.
+        # run on CPU.
         if ($PytorchIndexUrl) {
             Write-Info "Replacing CPU torch with CUDA build ($PytorchIndexUrl)..."
             uv pip install --python $pythonPath --reinstall torch torchvision --index-url $PytorchIndexUrl 2>&1 | ForEach-Object { Write-Host $_ }
@@ -1208,26 +1231,18 @@ function Main {
     # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4.5: cupy is no longer tied to a specific extra — it's a pure
-    # optional accelerator for axial registration. user can install it
-    # manually if they want GPU; the installer doesn't pull it in.
-    $needsCupy = $false
-    $cupyPackage = $null
-    if ($needsCupy) {
-        $cupyPackage = Get-CupyPackage -GpuInfo $gpuInfo
+    # step 4.5: pick GPU packages. torch (core dep via suite2p) and cupy
+    # (optional accelerator for axial registration) both get the CUDA build
+    # whenever an NVIDIA GPU is present — the wheels bundle their own CUDA
+    # runtime, so only a driver is needed, independent of the chosen extras.
+    $cupyPackages = Get-CupyPackages -GpuInfo $gpuInfo
+    if ($cupyPackages.Count -gt 0) {
+        Write-Info "GPU CuPy will be installed: $($cupyPackages[0])"
     }
 
-    # step 4.6: determine pytorch wheel index based on CUDA version.
-    # torch is pulled in by suite2p/all, and PyPI only ships the CPU
-    # build — GPU wheels live on pytorch's own index. fire this whenever
-    # an extras value brings torch along AND we've got a CUDA toolkit.
-    $needsTorch = ($extras | Where-Object { @("suite2p", "all", "processing") -contains $_ }).Count -gt 0
-    $pytorchIndexUrl = $null
-    if ($needsTorch) {
-        $pytorchIndexUrl = Get-PytorchIndexUrl -GpuInfo $gpuInfo
-        if ($pytorchIndexUrl) {
-            Write-Info "GPU torch will be installed from $pytorchIndexUrl"
-        }
+    $pytorchIndexUrl = Get-PytorchIndexUrl -GpuInfo $gpuInfo
+    if ($pytorchIndexUrl) {
+        Write-Info "GPU torch will be installed from $pytorchIndexUrl"
     }
 
     # step 5: get environment location if needed
@@ -1239,7 +1254,7 @@ function Main {
 
     # step 6: install CLI tool if requested
     if ($installType.InstallCli) {
-        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackage $cupyPackage -PytorchIndexUrl $pytorchIndexUrl
+        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackages $cupyPackages -PytorchIndexUrl $pytorchIndexUrl
         if (-not $toolInstalled) {
             Write-Err "CLI installation failed."
             exit 1
@@ -1248,7 +1263,7 @@ function Main {
 
     # step 7: create dev environment if requested
     if ($installType.InstallEnv -and $envLocation) {
-        $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -CupyPackage $cupyPackage -PytorchIndexUrl $pytorchIndexUrl
+        $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -CupyPackages $cupyPackages -PytorchIndexUrl $pytorchIndexUrl
     }
 
     # step 8: create desktop shortcut (only if CLI was installed)

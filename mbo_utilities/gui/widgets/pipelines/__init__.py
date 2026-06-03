@@ -221,6 +221,11 @@ def draw_run_tab(parent: Any) -> None:
         else:
             not_applicable.append(cls)
 
+    # Isoview before Suite2p in the selector when both apply (Suite2p
+    # applies to any array, so it would otherwise lead by registration
+    # order). Stable: only Isoview is hoisted; the rest keep their order.
+    applicable.sort(key=lambda c: 0 if c.name == "Isoview" else 1)
+
     if not applicable:
         imgui.text_colored(
             imgui.ImVec4(1.0, 0.7, 0.2, 1.0),

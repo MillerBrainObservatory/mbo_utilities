@@ -190,3 +190,7 @@ _backup_images/
 # local uv source overrides
 uv.toml
 dev/
+
+# webknossos comparison scratch
+.wk-venv/
+demos/_wk_compare/
