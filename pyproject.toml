@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.0.6"
+version = "3.0.7"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -49,7 +49,7 @@ dependencies = [
 	"napari-animation",
 	"numba>=0.60.0",
 	"suite2p>=1.0.0.1",
-	"lbm_suite2p_python>=3.0.6",
+	"lbm_suite2p_python>=3.0.7",
 ]
 
 [project.scripts]
@@ -64,19 +64,12 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-# Rastermap for activity sorting
 rastermap = [
     "rastermap",
 ]
 isoview = [
-    "isoview ; python_full_version == '3.12.9'",
+    "isoview",
 ]
-# PyTorch for neural network operations
-# torch = [
-#     "torch",
-#     "torchvision",
-# ]
-# Documentation build
 docs = [
     "sphinx>=6.1.3",
     "docutils>=0.19",
@@ -97,8 +90,7 @@ docs = [
     "myst_nb",
     "pygfx>=0.14.0",
 ]
-# Everything
-all = ["mbo_utilities[rastermap,docs]"]
+all = ["mbo_utilities[rastermap,isoview]"]
 
 [tool.uv]
 default-groups = ["dev", "isoview"]
@@ -109,17 +101,6 @@ default-groups = ["dev", "isoview"]
 isoview = { path = "../isoview", editable = true }
 lbm_suite2p_python = { path = "../LBM-Suite2p-Python", editable = true }
 
-# [[tool.uv.index]]
-# name = "pytorch-cu126"
-# url = "https://download.pytorch.org/whl/cu126"
-# explicit = true
-#
-# torch = [
-#   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-# ]
-# torchvision = [
-#   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-# ]
 
 [tool.ruff]
 line-length = 88
@@ -140,7 +121,6 @@ extend-exclude = [
 pydocstyle = { convention = "numpy" }
 select = ["ALL"]
 ignore = [
-# Complexity rules - not useful for scientific code
     "EM101",  # Exception must not use string literal
     "EM102",  # Exception must not use f-string literal
     "TRY003", # Long exception messages
@@ -196,5 +176,5 @@ dev = [
 ]
 # Local-only; auto-synced via default-groups so `uv run mbo` uses ../isoview.
 isoview = [
-    "isoview ; python_full_version == '3.12.9'",
+    "isoview",
 ]
