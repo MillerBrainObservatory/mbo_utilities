@@ -45,6 +45,7 @@ _DISPLAY_DRAG_W = 110
 _MAX_FILTER_CACHE = 8       # (view, tp, sigma, kernel) entries
 _MAX_GPU_TEXTURES = 4       # one per view typically, headroom for switches
 _SUBSAMPLE_FACTOR = 100     # matches isoview's percentile subsample
+_TARGET_PROJ_PX = 512       # preview math runs at <= this longest side
 
 
 def _camera_view_map(arr: Any) -> dict[int, int]:
@@ -159,10 +160,29 @@ def _gauss_2d(proj: np.ndarray, sigma: float, size: int) -> np.ndarray:
     """Separable 2D gaussian filter — XY only, matches
     :func:`segment_foreground` reduced to a single Z-slice.
     """
-    k = _make_gauss_kernel(sigma, size)
-    f = convolve1d(proj.astype(np.float64), k, axis=0, mode="nearest")
+    k = _make_gauss_kernel(sigma, size).astype(np.float32)
+    f = convolve1d(proj.astype(np.float32), k, axis=0, mode="nearest")
     f = convolve1d(f, k, axis=1, mode="nearest")
     return np.round(f).astype(np.uint16)
+
+
+def _downsample_mean(proj: np.ndarray, cap: int = _TARGET_PROJ_PX) -> tuple[np.ndarray, int]:
+    """Box-mean downsample so the longest side is <= ``cap``.
+
+    Mean pooling is itself a low-pass, so it is consistent with the
+    gaussian-smoothed field the segmentation thresholds on. Returns
+    ``(downsampled float32, factor)``; factor 1 means no downsampling.
+    """
+    h, w = proj.shape
+    longest = max(h, w)
+    if longest <= cap:
+        return np.ascontiguousarray(proj, dtype=np.float32), 1
+    factor = int(np.ceil(longest / cap))
+    hh = (h // factor) * factor
+    ww = (w // factor) * factor
+    blocks = proj[:hh, :ww].reshape(hh // factor, factor, ww // factor, factor)
+    ds = blocks.mean(axis=(1, 3), dtype=np.float32)
+    return np.ascontiguousarray(ds, dtype=np.float32), factor
 
 
 def _adaptive_level(
@@ -217,6 +237,15 @@ class _GpuRGBA:
         self.ref = None
         self._upload(rgba)
 
+    def _write(self, rgba: np.ndarray) -> None:
+        device = self.backend._device
+        device.queue.write_texture(
+            {"texture": self._texture, "mip_level": 0, "origin": (0, 0, 0)},
+            np.ascontiguousarray(rgba).tobytes(),
+            {"offset": 0, "bytes_per_row": self.w * 4, "rows_per_image": self.h},
+            (self.w, self.h, 1),
+        )
+
     def _upload(self, rgba: np.ndarray) -> None:
         wgpu = self._wgpu
         device = self.backend._device
@@ -225,12 +254,7 @@ class _GpuRGBA:
             format=wgpu.TextureFormat.rgba8unorm,
             usage=wgpu.TextureUsage.TEXTURE_BINDING | wgpu.TextureUsage.COPY_DST,
         )
-        device.queue.write_texture(
-            {"texture": self._texture, "mip_level": 0, "origin": (0, 0, 0)},
-            np.ascontiguousarray(rgba).tobytes(),
-            {"offset": 0, "bytes_per_row": self.w * 4, "rows_per_image": self.h},
-            (self.w, self.h, 1),
-        )
+        self._write(rgba)
         self._view = self._texture.create_view()
         self.ref = self.backend.register_texture(self._view)
 
@@ -241,8 +265,10 @@ class _GpuRGBA:
             self.h, self.w = int(rgba.shape[0]), int(rgba.shape[1])
             self._upload(rgba)
             return
-        self.destroy()
-        self._upload(rgba)
+        # Same size: write into the existing texture, keeping the view and
+        # backend registration so we don't churn a GPU alloc + re-register
+        # every frame a slider moves.
+        self._write(rgba)
 
     def destroy(self) -> None:
         if self.ref is not None:
@@ -293,6 +319,13 @@ def _ensure_state(parent: Any) -> None:
         parent._iso_seg_vmax = 1.0
     if not hasattr(parent, "_iso_seg_display_inited"):
         parent._iso_seg_display_inited = False
+    if not hasattr(parent, "_iso_seg_dragging"):
+        parent._iso_seg_dragging = False
+    if not hasattr(parent, "_iso_seg_shown"):
+        # view -> last computed {tp, sigma, kernel, threshold, mask_pct,
+        # min_i, mean_i, level, mask}; held while a slider is dragged so
+        # the expensive gaussian/level recompute defers to release.
+        parent._iso_seg_shown: dict[int, dict] = {}
 
 
 def _get_iso_array(parent: Any) -> Any | None:
@@ -353,26 +386,46 @@ def _initial_display_range(parent: Any) -> tuple[float, float]:
     return 0.0, 1000.0
 
 
-def _get_projection(parent: Any, view: int, tp: int) -> np.ndarray | None:
+def _get_working(parent: Any, view: int, tp: int):
+    """Return ``(downsampled projection float32, factor)`` or ``None``.
+
+    The projection is mean-pooled once to ``_TARGET_PROJ_PX`` so every
+    per-frame op (gaussian, level, compose, upload) runs on the small
+    working image instead of the full sensor resolution.
+    """
     key = (view, tp)
-    proj = parent._iso_seg_proj_cache.get(key)
-    if proj is not None:
-        return proj
+    cached = parent._iso_seg_proj_cache.get(key)
+    if cached is not None:
+        return cached
     path = (parent._iso_seg_proj_index.get(view) or {}).get(tp)
     if path is None:
         return None
     proj = _load_projection(path)
     if proj is None:
         return None
-    parent._iso_seg_proj_cache[key] = proj
-    return proj
+    work = _downsample_mean(proj)
+    parent._iso_seg_proj_cache[key] = work
+    return work
+
+
+def _get_projection(parent: Any, view: int, tp: int) -> np.ndarray | None:
+    work = _get_working(parent, view, tp)
+    return None if work is None else work[0]
 
 
 def _get_filtered(
     parent: Any, view: int, tp: int, sigma: float, kernel: int,
 ) -> np.ndarray | None:
-    """Cached 2D gaussian. Re-runs when sigma or kernel changes."""
-    key = (int(view), int(tp), round(float(sigma), 3), int(kernel))
+    """Cached 2D gaussian. Re-runs when sigma or kernel changes.
+
+    sigma/kernel are scaled by the projection's downsample factor so the
+    smoothing still matches the full-resolution pipeline footprint.
+    """
+    work = _get_working(parent, view, tp)
+    if work is None:
+        return None
+    proj, factor = work
+    key = (int(view), int(tp), round(float(sigma), 3), int(kernel), factor)
     cache = parent._iso_seg_filtered_cache
     if key in cache:
         try:
@@ -381,10 +434,9 @@ def _get_filtered(
             pass
         parent._iso_seg_filtered_lru.append(key)
         return cache[key]
-    proj = _get_projection(parent, view, tp)
-    if proj is None:
-        return None
-    filtered = _gauss_2d(proj, float(sigma), int(kernel))
+    s = max(0.3, float(sigma) / factor)
+    k = max(1, int(round(int(kernel) / factor)))
+    filtered = _gauss_2d(proj, s, k)
     cache[key] = filtered
     parent._iso_seg_filtered_lru.append(key)
     while len(parent._iso_seg_filtered_lru) > _MAX_FILTER_CACHE:
@@ -405,6 +457,7 @@ def _ensure_loaded_for(parent: Any, arr: Any) -> None:
     parent._iso_seg_proj_cache = {}
     parent._iso_seg_filtered_cache = {}
     parent._iso_seg_filtered_lru = []
+    parent._iso_seg_shown = {}
     parent._iso_seg_display_inited = False
     _destroy_gpu(parent)
 
@@ -527,7 +580,7 @@ def draw_window(parent: Any) -> None:
         imgui.spacing()
         _draw_display_controls(parent)
         imgui.separator()
-        _draw_param_controls(iso)
+        _draw_param_controls(parent, iso)
         imgui.separator()
         imgui.spacing()
         _draw_view_previews(parent, iso)
@@ -597,18 +650,21 @@ def _draw_display_controls(parent: Any) -> None:
         parent._iso_seg_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
-def _draw_param_controls(iso: Any) -> None:
+def _draw_param_controls(parent: Any, iso: Any) -> None:
     """Four sliders that write directly to the iso widget's _correct_*
-    fields, so the popup form stays in sync.
+    fields, so the popup form stays in sync. Sets ``_iso_seg_dragging``
+    so the per-view recompute can defer to slider release.
     """
     imgui.text_colored(imgui.ImVec4(1.0, 0.85, 0.4, 1.0), "Segmentation params")
     imgui.spacing()
+    dragging = False
 
     imgui.set_next_item_width(_SLIDER_W)
     _, iso._correct_segment_threshold = imgui.slider_float(
         "threshold##iso_seg",
         float(iso._correct_segment_threshold), 0.0, 1.0, "%.3f",
     )
+    dragging |= imgui.is_item_active()
     imgui.same_line()
     imgui.text_colored(
         imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
@@ -620,6 +676,7 @@ def _draw_param_controls(iso: Any) -> None:
         "mask percentile##iso_seg",
         float(iso._correct_mask_percentile), 0.0, 100.0, "%.2f",
     )
+    dragging |= imgui.is_item_active()
     imgui.same_line()
     imgui.text_colored(
         imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
@@ -631,6 +688,7 @@ def _draw_param_controls(iso: Any) -> None:
         "gauss sigma##iso_seg",
         float(iso._correct_gauss_sigma), 0.5, 10.0, "%.2f",
     )
+    dragging |= imgui.is_item_active()
     imgui.same_line()
     imgui.text_colored(
         imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
@@ -642,11 +700,13 @@ def _draw_param_controls(iso: Any) -> None:
         "gauss kernel##iso_seg",
         int(iso._correct_gauss_kernel), 1, 31, "%d",
     )
+    dragging |= imgui.is_item_active()
     imgui.same_line()
     imgui.text_colored(
         imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
         "  XY gaussian kernel size (odd values preferred)",
     )
+    parent._iso_seg_dragging = dragging
 
 
 def _draw_view_previews(parent: Any, iso: Any) -> None:
@@ -703,17 +763,44 @@ def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float, raw_mode: bo
         imgui.dummy(imgui.ImVec2(cell_w, cell_w * 0.6))
         return
 
-    filtered = _get_filtered(parent, view, tp, sigma, kernel)
-    if filtered is None:
-        return
+    # While a param slider is dragged, reuse the last computed mask/level
+    # instead of re-running the gaussian + level every frame; recompute on
+    # release. A timepoint change always recomputes (different image).
+    dragging = bool(getattr(parent, "_iso_seg_dragging", False))
+    shown = parent._iso_seg_shown.get(view)
+    stale = (
+        shown is None
+        or shown.get("tp") != tp
+        or (
+            not dragging
+            and (
+                shown.get("sigma") != sigma
+                or shown.get("kernel") != kernel
+                or shown.get("threshold") != threshold
+                or shown.get("mask_pct") != mask_pct
+            )
+        )
+    )
+    if stale:
+        filtered = _get_filtered(parent, view, tp, sigma, kernel)
+        if filtered is None:
+            return
+        min_i, mean_i, level = _adaptive_level(filtered, mask_pct, threshold)
+        mask = filtered > level
+        shown = {
+            "tp": tp, "sigma": sigma, "kernel": kernel,
+            "threshold": threshold, "mask_pct": mask_pct,
+            "min_i": min_i, "mean_i": mean_i, "level": level, "mask": mask,
+        }
+        parent._iso_seg_shown[view] = shown
 
-    min_i, mean_i, level = _adaptive_level(filtered, mask_pct, threshold)
-    mask = filtered > level
+    mask = shown["mask"]
+    min_i, mean_i, level = shown["min_i"], shown["mean_i"], shown["level"]
     kept_pct = 100.0 * mask.sum() / mask.size if mask.size else 0.0
 
     compose_key = (
-        view, tp, sigma, kernel,
-        round(threshold, 5), round(mask_pct, 4),
+        view, shown["tp"], shown["sigma"], shown["kernel"],
+        round(shown["threshold"], 5), round(shown["mask_pct"], 4),
         round(float(parent._iso_seg_vmin), 4),
         round(float(parent._iso_seg_vmax), 4),
     )

@@ -37,6 +37,21 @@ from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 logger = _get_logger("arrays.isoview")
 
 
+ISOVIEW_ZARR_CHUNK_ZYX: tuple[int, int, int] = (1, -1, -1)
+"""Per-plane zarr chunk policy for isoview volumes, ``(z, y, x)``: one Z-plane
+per chunk, full Y, full X. ``-1`` = full extent of that axis. Single source of
+truth for isoview chunking; resolve against a real shape with
+:func:`isoview_zarr_chunks`. ``~/repos/isoview`` imports this."""
+
+
+def isoview_zarr_chunks(shape_zyx: tuple[int, ...]) -> tuple[int, ...]:
+    """Resolve :data:`ISOVIEW_ZARR_CHUNK_ZYX` against a ``(z, y, x)`` shape."""
+    return tuple(
+        dim if chunk < 0 else min(chunk, dim)
+        for chunk, dim in zip(ISOVIEW_ZARR_CHUNK_ZYX, shape_zyx)
+    )
+
+
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 _SPM_PATTERN = re.compile(r"^SPM\d+$")
 _FUSED_SUFFIX = ".fused"
@@ -721,8 +736,15 @@ def _is_fused_root(p: Path) -> bool:
 
 
 def _is_method_dir(p: Path) -> bool:
-    """A method dir is any directory whose parent ends in ``.fused``."""
-    return p.parent is not None and _is_fused_root(p.parent)
+    """A method dir is a directory whose parent ends in ``.fused`` and whose
+    own name is NOT an SPM##/TM###### tile. (New layout drops the method
+    level — SPM## sits directly under ``.fused`` — so those aren't methods.)
+    """
+    return (
+        p.parent is not None
+        and _is_fused_root(p.parent)
+        and not (_SPM_PATTERN.match(p.name) or _has_tm_pattern(p.name))
+    )
 
 
 def _resolve_fused_method_dir(p: Path) -> Path | None:
@@ -764,17 +786,27 @@ def _resolve_fused_method_dir(p: Path) -> Path | None:
 
 
 def _first_method_dir(fused_root: Path) -> Path | None:
-    """Pick a method dir under a ``<raw>.fused/`` root.
+    """Pick the fused scan root under a ``<raw>.fused/`` tree.
 
-    Prefers ``geometric`` when present; otherwise the alphabetically
-    first subdirectory. Returns ``None`` when the root has no method
-    dirs yet.
+    New layout (SPM##/TM###### directly under ``.fused``, no method dir):
+    the ``.fused`` root itself is the scan root. Old layout (method-named
+    subdirs): prefer ``geometric``, else the alphabetically first method.
+    Returns ``None`` when nothing scannable is present.
     """
     if not fused_root.is_dir():
         return None
-    candidates = sorted(d for d in fused_root.iterdir() if d.is_dir())
+    candidates = sorted(
+        d for d in fused_root.iterdir()
+        if d.is_dir() and d.name != "projections"
+    )
     if not candidates:
         return None
+    # New layout: tiles sit directly under .fused — scan the root itself.
+    if any(
+        _SPM_PATTERN.match(d.name) or _has_tm_pattern(d.name)
+        for d in candidates
+    ):
+        return fused_root
     for c in candidates:
         if c.name == "geometric":
             return c
@@ -794,7 +826,8 @@ _RAW_STACK_RE = re.compile(
 _KLB_TM_RE = re.compile(r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)\.klb$")
 
 _PROJ_FLAT_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)\.(xy|xz|yz)Projection\.tif$", re.IGNORECASE
+    r"^SPM(\d+)_TM(\d+)_CM(\d+)(?:_CHN\d+)?\.(xy|xz|yz)Projection\.tif$",
+    re.IGNORECASE,
 )
 _PROJ_FUSED_RE = re.compile(
     r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
@@ -846,59 +879,94 @@ def _scan_flat_projections(proj_dir: Path) -> dict | None:
     return _finalize_projections(axes, views, files)
 
 
-def _iter_fused_leaf_dirs(method_dir: Path):
-    """Yield (timepoint, leaf_dir) for both timelapse and tiled fused layouts.
+def _iter_fused_leaf_dirs(root: Path):
+    """Yield ``(timepoint_or_None, leaf_dir)`` for every dir directly holding
+    fused volume files, under either layout:
 
-    Timelapse: ``method_dir/TM######/`` — one entry per TM, t comes
-    from the TM number.
-    Tiled: ``method_dir/SPM##/`` — files share a single TM (extracted
-    from filenames at scan time). Yields ``(None, spm_dir)`` so callers
-    derive t from each file's name.
+      new: ``<.fused>/SPM##/[TM######/]``  (mirrors corrected; no method dir)
+      old: ``<.fused>/<method>/<SPM##|TM######>/``
+
+    ``timepoint`` comes from a ``TM######`` dir name, else ``None`` (the
+    timepoint is then read from the filename at scan time). ``projections/``
+    and ``.zarr`` volume dirs are not descended into.
     """
-    if not method_dir.is_dir():
+    if not root.is_dir():
         return
-    for sub in sorted(method_dir.iterdir()):
-        if not sub.is_dir():
+
+    def _has_fused(d: Path) -> bool:
+        try:
+            return any(_FUSED_RE.match(c.name) for c in d.iterdir())
+        except OSError:
+            return False
+
+    def _walk(d: Path):
+        if _has_fused(d):
+            tm = _extract_timepoint(d.name) if _has_tm_pattern(d.name) else None
+            yield tm, d
+            return
+        for sub in sorted(d.iterdir()):
+            if (
+                sub.is_dir()
+                and sub.name != "projections"
+                and sub.suffix.lower() != ".zarr"
+            ):
+                yield from _walk(sub)
+
+    yield from _walk(root)
+
+
+def _collect_fused_proj_files(
+    d: Path, tm_from_dir: int | None, axes: set, views: set, files: dict
+) -> None:
+    """Match fused projection TIFFs in one flat dir, accumulating results.
+
+    ``tm_from_dir`` overrides the timepoint when the enclosing dir names it
+    (legacy per-leaf layout); ``None`` reads it from the filename.
+    """
+    if not d.is_dir():
+        return
+    for f in d.iterdir():
+        if not f.is_file() or "Projection" not in f.name:
             continue
-        if _has_tm_pattern(sub.name):
-            yield _extract_timepoint(sub.name), sub
-        elif _SPM_PATTERN.match(sub.name):
-            yield None, sub
+        m = _PROJ_FUSED_RE.match(f.name)
+        vw_only = False
+        if not m:
+            m = _PROJ_VW_ONLY_RE.match(f.name)
+            vw_only = m is not None
+        if not m:
+            continue
+        if vw_only:
+            _, tm_str, vw, axis = m.groups()
+        else:
+            _, tm_str, _cm0, _cm1, vw, _chn, axis = m.groups()
+        axis = axis.lower()
+        view = f"VW{int(vw):02d}"
+        t = tm_from_dir if tm_from_dir is not None else int(tm_str)
+        axes.add(axis)
+        views.add(view)
+        files[(axis, view, t)] = f
 
 
 def _scan_fused_projections(method_dir: Path) -> dict | None:
     """Scan a fused method tree for projection TIFFs.
 
-    Walks ``method_dir/{SPM##|TM######}/*.{xy,xz,yz}Projection.tif`` —
-    both the ``CM##_CM##_VW##`` and the ``VW##``-only naming variants.
-    View is labeled by the fused VW number (``VW00``, ``VW90``).
+    Prefers the shared ``method_dir/projections/`` dir (alongside the
+    SPM##/TM###### leaves); falls back to the legacy per-leaf layout
+    ``method_dir/{SPM##|TM######}/*.Projection.tif``. Both ``CM##_CM##_VW##``
+    and ``VW##``-only naming variants are matched; view is labeled by the
+    fused VW number.
     """
     if not method_dir.is_dir():
         return None
     axes: set[str] = set()
     views: set[str] = set()
     files: dict[tuple[str, str, int], Path] = {}
-    for tm_from_dir, leaf in _iter_fused_leaf_dirs(method_dir):
-        for f in leaf.iterdir():
-            if not f.is_file() or "Projection" not in f.name:
-                continue
-            m = _PROJ_FUSED_RE.match(f.name)
-            vw_only = False
-            if not m:
-                m = _PROJ_VW_ONLY_RE.match(f.name)
-                vw_only = m is not None
-            if not m:
-                continue
-            if vw_only:
-                _, tm_str, vw, axis = m.groups()
-            else:
-                _, tm_str, _cm0, _cm1, vw, _chn, axis = m.groups()
-            axis = axis.lower()
-            view = f"VW{int(vw):02d}"
-            t = tm_from_dir if tm_from_dir is not None else int(tm_str)
-            axes.add(axis)
-            views.add(view)
-            files[(axis, view, t)] = f
+    flat = method_dir / "projections"
+    if flat.is_dir():
+        _collect_fused_proj_files(flat, None, axes, views, files)
+    else:
+        for tm_from_dir, leaf in _iter_fused_leaf_dirs(method_dir):
+            _collect_fused_proj_files(leaf, tm_from_dir, axes, views, files)
     return _finalize_projections(axes, views, files)
 
 
@@ -1099,6 +1167,10 @@ _PIPELINE_INFOS = (
         name="isoview-fused",
         description="IsoView fused output",
         input_patterns=[
+            # new layout: <.fused>/SPM##/[TM######/] (no method dir)
+            "**/*.fused*/SPM??/TM??????/SPM??_TM??????_CM??_CM??_VW??.*",
+            "**/*.fused*/SPM??/SPM??_TM??????_CM??_CM??_VW??.*",
+            # old layout: <.fused>/<method>/<SPM##|TM######>/
             "**/*.fused*/*/TM??????/*.fusedStack.*",
             "**/*.fused*/*/TM??????/SPM??_TM??????_CM??_CM??_VW??.*",
             "**/*.fused*/*/SPM??/*.fusedStack.*",
@@ -1198,8 +1270,15 @@ def _corrected_projections(arr: "IsoviewArray") -> dict | None:
     corrected_root = arr.scan_root.parent
     if not _CORRECTED_TAIL_RE.search(corrected_root.name):
         return None
-    return _scan_flat_projections(
-        corrected_root.parent / f"{corrected_root.name}.projections"
+    # Projections live alongside the SPM## tiles, in <.corrected>/projections/.
+    # Fall back to the legacy sibling <root>.corrected.projections/ and the
+    # old per-SPM <.corrected>/SPM##/projections/ for existing datasets.
+    return (
+        _scan_flat_projections(corrected_root / "projections")
+        or _scan_flat_projections(arr.scan_root / "projections")
+        or _scan_flat_projections(
+            corrected_root.parent / f"{corrected_root.name}.projections"
+        )
     )
 
 
@@ -1211,6 +1290,76 @@ def _raw_projections(arr: "IsoviewArray") -> dict | None:
     return _scan_flat_projections(
         arr.scan_root.parent / f"{arr.scan_root.name}.raw.projections"
     )
+
+
+def make_raw_projections(
+    raw_dir: str | Path,
+    *,
+    overwrite: bool = False,
+    progress_callback=None,
+) -> dict:
+    """Write per-camera XY max-projections for a raw isoview acquisition.
+
+    For each ``(specimen, timepoint, camera)`` raw ``.stack`` the volume
+    is read and reduced with ``np.max(axis=0)`` (XY MIP), then written as
+    ``SPM##_TM######_CM##.xyProjection.tif`` into the flat sibling
+    ``<raw_dir>.raw.projections/`` directory — the same location and name
+    :func:`_raw_projections` (and the GUI segmentation / dead-pixel
+    previews) read. Existing files are skipped unless ``overwrite``.
+
+    CHN in a raw filename marks the camera's view, not a color channel,
+    so views collapse to one projection per camera (lowest CHN wins).
+
+    Returns ``{"dir": Path, "written": int, "skipped": int, "total": int}``.
+    """
+    import tifffile
+
+    raw_dir = Path(raw_dir)
+    if raw_dir.is_file():
+        raw_dir = raw_dir.parent
+
+    xml_path = _find_isoview_xml(raw_dir)
+    if xml_path is None:
+        raise ValueError(f"no isoview XML sidecar with dimensions under {raw_dir}")
+    xml_meta = _parse_isoview_xml(xml_path)
+    if "dimensions" not in xml_meta:
+        raise ValueError(f"isoview XML at {xml_path} has no dimensions field")
+    w, h, _d = xml_meta["dimensions"][0]
+    w, h = int(w), int(h)
+
+    best: dict[tuple[int, int, int], tuple[int, Path]] = {}
+    for f in sorted(raw_dir.iterdir()):
+        if not f.is_file():
+            continue
+        m = _RAW_STACK_RE.match(f.name)
+        if not m:
+            continue
+        spc, tm, cam, chn = (int(g) for g in m.groups())
+        key = (spc, tm, cam)
+        prev = best.get(key)
+        if prev is None or chn < prev[0]:
+            best[key] = (chn, f)
+
+    proj_dir = raw_dir.parent / f"{raw_dir.name}.raw.projections"
+    total = len(best)
+    written = skipped = 0
+    if total:
+        proj_dir.mkdir(parents=True, exist_ok=True)
+
+    for i, ((spc, tm, cam), (_chn, path)) in enumerate(sorted(best.items())):
+        out_name = f"SPM{spc:02d}_TM{tm:06d}_CM{cam:02d}.xyProjection.tif"
+        out_path = proj_dir / out_name
+        if out_path.exists() and not overwrite:
+            skipped += 1
+        else:
+            vol = LazyVolume(path, dimensions=(w, h, 0))
+            mip = np.max(np.asarray(vol[:]), axis=0)
+            tifffile.imwrite(out_path, mip)
+            written += 1
+        if progress_callback is not None:
+            progress_callback(i + 1, total, out_name)
+
+    return {"dir": proj_dir, "written": written, "skipped": skipped, "total": total}
 
 
 _KINDS: dict[str, dict] = {

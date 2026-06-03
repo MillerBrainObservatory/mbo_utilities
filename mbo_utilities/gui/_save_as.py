@@ -482,17 +482,13 @@ def _draw_options_popup(parent: Any):
 
             _, parent._zarr_pyramid = imgui.checkbox("Generate Pyramid", parent._zarr_pyramid)
             set_tooltip(
-                "Generate multi-resolution pyramid for faster navigation in napari. "
-                "Creates additional downsampled copies (2x per level) of Y and X dimensions. "
-                "Increases file size by ~33% but enables smooth zooming in large datasets.",
+                "Write multi-resolution OME-Zarr pyramid.",
             )
 
             if parent._zarr_pyramid:
                 imgui.text("Max Levels")
                 set_tooltip(
-                    "Maximum pyramid levels (0 = full resolution only). "
-                    "Each level is 2x smaller in Y and X. "
-                    "Default 4 = up to 5 levels (1x, 2x, 4x, 8x, 16x).",
+                    "Levels beyond full-res. Factors set by voxel anisotropy.",
                 )
                 imgui.set_next_item_width(hello_imgui.em_size(8))
                 _, parent._zarr_pyramid_max_layers = imgui.slider_int(
@@ -501,10 +497,10 @@ def _draw_options_popup(parent: Any):
 
                 imgui.text("Method")
                 set_tooltip(
-                    "Downsampling method. 'mean' averages pixels (best for intensity data). "
-                    "'nearest' uses nearest neighbor (best for labels/masks).",
+                    "median/mode = webknossos (intensity/labels). "
+                    "mean/nearest/gaussian also available.",
                 )
-                methods = ["mean", "nearest", "gaussian"]
+                methods = ["median", "mode", "mean", "nearest", "gaussian"]
                 current_idx = methods.index(parent._zarr_pyramid_method) if parent._zarr_pyramid_method in methods else 0
                 imgui.set_next_item_width(hello_imgui.em_size(10))
                 if imgui.begin_combo("##pyramid_method", parent._zarr_pyramid_method):
@@ -1426,7 +1422,7 @@ def _draw_save_button(parent: Any):
                             "output_suffix": output_suffix,
                             "pyramid": parent._zarr_pyramid if parent._ext == ".zarr" else False,
                             "pyramid_max_layers": parent._zarr_pyramid_max_layers if parent._ext == ".zarr" and parent._zarr_pyramid else 4,
-                            "pyramid_method": parent._zarr_pyramid_method if parent._ext == ".zarr" and parent._zarr_pyramid else "mean",
+                            "pyramid_method": parent._zarr_pyramid_method if parent._ext == ".zarr" and parent._zarr_pyramid else "median",
                             # h5: dataset name inside the .h5 file (default "mov")
                             **({"dataset_name": parent._h5_dataset_name} if parent._ext == ".h5" else {}),
                             **video_kwargs,

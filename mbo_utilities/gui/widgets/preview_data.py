@@ -510,7 +510,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zarr_compression_level = 1
         self._zarr_pyramid = False
         self._zarr_pyramid_max_layers = 4
-        self._zarr_pyramid_method = "mean"
+        self._zarr_pyramid_method = "median"
 
         # H5 options
         # dataset name inside the .h5 file. suite2p reads from "mov" by
@@ -617,6 +617,13 @@ class PreviewDataWidget(EdgeWindow):
         self.set_context_info()
         self._update_window_funcs()
         rebind_space_to_playback(self)
+        try:
+            from mbo_utilities.gui.widgets.pipelines.isoview import (
+                maybe_spawn_raw_projections,
+            )
+            maybe_spawn_raw_projections(self)
+        except Exception:
+            self.logger.debug("raw projection prefetch skipped", exc_info=True)
 
     def set_context_info(self):
         """Update app title with dataset name."""

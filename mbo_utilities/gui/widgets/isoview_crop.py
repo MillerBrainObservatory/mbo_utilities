@@ -31,8 +31,13 @@ from mbo_utilities.gui import _isoview_crop_state as crop_state
 
 
 _DEFAULT_CAMERA_VIEW_MAP = {0: 0, 1: 0, 2: 90, 3: 90}
-# View colors mirror the napari widget so the two tools feel related.
-_VIEW_COLORS = {0: (1.0, 0.35, 0.35, 1.0), 90: (1.0, 0.95, 0.4, 1.0)}
+# Per-camera colors (match the segmentation / dead-pixel widgets).
+_CAMERA_COLORS = {
+    0: (1.0, 0.35, 0.35, 1.0),
+    1: (1.0, 0.85, 0.4, 1.0),
+    2: (0.4, 0.9, 0.6, 1.0),
+    3: (0.5, 0.75, 1.0, 1.0),
+}
 
 # Compact drag widths — replaces the wide slider_int from the v1 layout.
 _DRAG_W = 78
@@ -52,26 +57,27 @@ def _camera_view_map(arr: Any) -> dict[int, int]:
     return dict(_DEFAULT_CAMERA_VIEW_MAP)
 
 
-def _channel_to_view(arr: Any) -> dict[int, int]:
-    cv = _camera_view_map(arr)
-    out: dict[int, int] = {}
-    for ci, vk in enumerate(getattr(arr, "views", []) or []):
-        if isinstance(vk, tuple) and len(vk) == 3:
-            out[ci] = int(vk[2])
-        elif isinstance(vk, tuple) and len(vk) >= 1:
-            out[ci] = cv.get(int(vk[0]), int(vk[0]))
+def cameras_for_crop(arr: Any) -> list[int]:
+    """Camera ints (CM##) present in the loaded array.
+
+    Uses the array's actual ``views`` (a corrected tree's C axis is the
+    cameras), since the XML-synthesized ``camera_view_map`` is often
+    incomplete (e.g. only ``{0, 1}`` when stack_direction lists one arm).
+    Falls back to the map, then to 4 cameras.
+    """
+    out: list[int] = []
+    for v in (getattr(arr, "views", None) or []):
+        if isinstance(v, tuple) and v:
+            out.append(int(v[0]))
         else:
-            out[ci] = cv.get(int(vk), int(vk))
-    return out
-
-
-def _representative_channel_per_view(arr: Any) -> dict[int, int]:
-    mapping = _channel_to_view(arr)
-    out: dict[int, int] = {}
-    for ci, view in mapping.items():
-        if view not in out:
-            out[view] = ci
-    return out
+            try:
+                out.append(int(v))
+            except (TypeError, ValueError):
+                pass
+    if out:
+        return sorted(set(out))
+    cv = _camera_view_map(arr)
+    return sorted(cv.keys()) if cv else [0, 1, 2, 3]
 
 
 def _view_shape(arr: Any) -> tuple[int, int, int] | None:
@@ -99,38 +105,32 @@ def _view_int_from_label(label: str) -> int | None:
 def _build_projection_index(
     arr: Any, projections: dict | None,
 ) -> dict[int, dict[int, Path]]:
-    """Return ``{view_int: {timepoint: xy_projection_path}}``.
+    """Return ``{camera_int: {timepoint: xy_projection_path}}``.
 
-    For each view, picks the lowest-numbered camera that maps to it (or
-    the VW## directly for fused) and harvests every timepoint that
-    camera produced. The timepoint slider walks the intersection of
-    these per-view timepoint sets so every view stays in sync.
+    Keyed by the camera (CM##) directly — no view collapsing — so each
+    of the cameras gets its own preview. The timepoint slider walks the
+    intersection of the per-camera timepoint sets.
     """
     if not projections:
         return {}
     if "xy" not in (projections.get("axes") or []):
         return {}
-    cv = _camera_view_map(arr)
 
-    # First pass: collect {view_int: {source_label: {t: path}}} so we
-    # can deterministically pick one source per view below.
-    per_view_by_label: dict[int, dict[str, dict[int, Path]]] = {}
+    per_cam_by_label: dict[int, dict[str, dict[int, Path]]] = {}
     for (axis, label, t), path in (projections.get("files") or {}).items():
         if axis != "xy":
             continue
-        raw_int = _view_int_from_label(label)
-        if raw_int is None:
+        cam_int = _view_int_from_label(label)
+        if cam_int is None:
             continue
-        view_int = cv.get(raw_int, raw_int) if label.startswith("CM") else raw_int
-        per_view_by_label.setdefault(view_int, {}).setdefault(label, {})[int(t)] = Path(path)
+        per_cam_by_label.setdefault(cam_int, {}).setdefault(label, {})[int(t)] = Path(path)
 
-    # Pick the source whose label sorts first (CM00 over CM01, etc.).
     out: dict[int, dict[int, Path]] = {}
-    for view_int, by_label in per_view_by_label.items():
+    for cam_int, by_label in per_cam_by_label.items():
         if not by_label:
             continue
         chosen = sorted(by_label.keys())[0]
-        out[view_int] = dict(by_label[chosen])
+        out[cam_int] = dict(by_label[chosen])
     return out
 
 
@@ -310,20 +310,20 @@ def _ensure_loaded_for(parent: Any, arr: Any) -> None:
     shp = _view_shape(arr)
     if shp is None:
         return
-    rep = _representative_channel_per_view(arr)
+    cameras = cameras_for_crop(arr)
     parent._iso_crop_pending = {}
     nz, ny, nx = shp
-    for view in rep.keys():
-        parent._iso_crop_shapes[view] = shp
-        existing = crop_state.get_crops(arr).get(view)
+    for cam in cameras:
+        parent._iso_crop_shapes[cam] = shp
+        existing = crop_state.get_crops(arr).get(cam)
         if existing is not None and existing.get("shape") == shp:
-            parent._iso_crop_pending[view] = {
+            parent._iso_crop_pending[cam] = {
                 "z": tuple(existing["z"]),
                 "y": tuple(existing["y"]),
                 "x": tuple(existing["x"]),
             }
         else:
-            parent._iso_crop_pending[view] = {
+            parent._iso_crop_pending[cam] = {
                 "z": (0, nz), "y": (0, ny), "x": (0, nx),
             }
 
@@ -428,16 +428,16 @@ def draw_window(parent: Any) -> None:
         _draw_display_controls(parent, arr)
         imgui.separator()
 
-        sorted_views = sorted(parent._iso_crop_shapes)
-        for i, view in enumerate(sorted_views):
-            _draw_view_section(parent, arr, view, is_first=(i == 0))
+        sorted_cams = sorted(parent._iso_crop_shapes)
+        for i, cam in enumerate(sorted_cams):
+            _draw_camera_section(parent, arr, cam, is_first=(i == 0))
             imgui.spacing()
 
         imgui.separator()
         if imgui.button("Reset all", imgui.ImVec2(120, 0)):
-            for view, shp in parent._iso_crop_shapes.items():
+            for cam, shp in parent._iso_crop_shapes.items():
                 nz, ny, nx = shp
-                parent._iso_crop_pending[view] = {
+                parent._iso_crop_pending[cam] = {
                     "z": (0, nz), "y": (0, ny), "x": (0, nx),
                 }
         imgui.same_line()
@@ -446,18 +446,18 @@ def draw_window(parent: Any) -> None:
             # open seeds from crop_state again.
             parent._iso_crop_window_open = False
         imgui.same_line()
-        # Apply: commit every pending view bound to the store + close.
+        # Apply: commit every pending camera bound to the store + close.
         # The Run-tab submits read from crop_state, so this is the
         # explicit "make this run's crop" gesture.
         with _apply_button_style():
             if imgui.button("Apply", imgui.ImVec2(160, 0)):
-                for view, shp in parent._iso_crop_shapes.items():
-                    pending = parent._iso_crop_pending.get(view)
+                for cam, shp in parent._iso_crop_shapes.items():
+                    pending = parent._iso_crop_pending.get(cam)
                     if pending is None:
                         continue
                     nz, ny, nx = shp
-                    crop_state.set_view_bounds(
-                        arr, view,
+                    crop_state.set_camera_bounds(
+                        arr, cam,
                         z=pending["z"], y=pending["y"], x=pending["x"],
                         shape=(nz, ny, nx),
                     )
@@ -523,21 +523,21 @@ def _draw_display_controls(parent: Any, arr: Any) -> None:
         parent._iso_crop_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
-def _draw_view_section(parent: Any, arr: Any, view: int, *, is_first: bool = False) -> None:
-    nz, ny, nx = parent._iso_crop_shapes[view]
+def _draw_camera_section(parent: Any, arr: Any, camera: int, *, is_first: bool = False) -> None:
+    nz, ny, nx = parent._iso_crop_shapes[camera]
 
     # All edits go through pending state so the user can Cancel cleanly.
-    pending = parent._iso_crop_pending.setdefault(view, {
+    pending = parent._iso_crop_pending.setdefault(camera, {
         "z": (0, nz), "y": (0, ny), "x": (0, nx),
     })
     z0, z1 = pending["z"]
     y0, y1 = pending["y"]
     x0, x1 = pending["x"]
 
-    color = _VIEW_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
-    imgui.text_colored(imgui.ImVec4(*color), f"VW{view:02d}   shape=(Z={nz}, Y={ny}, X={nx})")
+    color = _CAMERA_COLORS.get(camera, (0.6, 0.8, 1.0, 1.0))
+    imgui.text_colored(imgui.ImVec4(*color), f"CM{camera:02d}   shape=(Z={nz}, Y={ny}, X={nx})")
 
-    imgui.push_id(f"iso_crop_vw_{view}")
+    imgui.push_id(f"iso_crop_cm_{camera}")
     try:
         avail_x = imgui.get_content_region_avail().x
         # Compact drag column on the left; preview eats whatever's left.
@@ -561,11 +561,11 @@ def _draw_view_section(parent: Any, arr: Any, view: int, *, is_first: bool = Fal
             )
             if is_first and len(parent._iso_crop_shapes) > 1:
                 if imgui.button("Apply to all", imgui.ImVec2(120, 0)):
-                    for other_view, shp in parent._iso_crop_shapes.items():
-                        if other_view == view:
+                    for other_cam, shp in parent._iso_crop_shapes.items():
+                        if other_cam == camera:
                             continue
                         o_nz, o_ny, o_nx = shp
-                        parent._iso_crop_pending[other_view] = {
+                        parent._iso_crop_pending[other_cam] = {
                             "z": (min(z0, o_nz - 1), min(z1, o_nz)),
                             "y": (min(y0, o_ny - 1), min(y1, o_ny)),
                             "x": (min(x0, o_nx - 1), min(x1, o_nx)),
@@ -577,7 +577,7 @@ def _draw_view_section(parent: Any, arr: Any, view: int, *, is_first: bool = Fal
         imgui.begin_group()
         try:
             _draw_view_preview(
-                parent, view, preview_w,
+                parent, camera, preview_w,
                 ny=ny, nx=nx,
                 y0=y0, y1=y1, x0=x0, x1=x1,
                 color=color,
@@ -585,7 +585,7 @@ def _draw_view_section(parent: Any, arr: Any, view: int, *, is_first: bool = Fal
         finally:
             imgui.end_group()
 
-        parent._iso_crop_pending[view] = {
+        parent._iso_crop_pending[camera] = {
             "z": (z0, z1), "y": (y0, y1), "x": (x0, x1),
         }
     finally:

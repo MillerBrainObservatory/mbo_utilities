@@ -29,9 +29,12 @@ OME-Zarr layout.
 from __future__ import annotations
 
 from mbo_utilities.arrays.isoview.array import (
+    ISOVIEW_ZARR_CHUNK_ZYX,
     IsoviewArray,
     detect_isoview_kind,
     isoview_to_ome_zarr,
+    isoview_zarr_chunks,
+    make_raw_projections,
 )
 from mbo_utilities.arrays.isoview.consolidate import (
     consolidate_isoview,
@@ -39,9 +42,12 @@ from mbo_utilities.arrays.isoview.consolidate import (
 )
 
 __all__ = [
+    "ISOVIEW_ZARR_CHUNK_ZYX",
     "IsoviewArray",
     "consolidate_isoview",
     "detect_isoview_kind",
     "isoview_to_ome_zarr",
+    "isoview_zarr_chunks",
+    "make_raw_projections",
     "to_bigstitcher",
 ]

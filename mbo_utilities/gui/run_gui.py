@@ -556,6 +556,14 @@ class _ScrubTimingProxy:
 
     def __getitem__(self, key):
         import logging
+        np = self._np
+        # fastplotlib's subsample_array probes the histogram range with a
+        # bare `arr[0]`. On a >3D lazy array that pulls every non-leading
+        # dim into memory (IsoviewArray TCZYX `arr[0]` = all cameras x all
+        # Z-planes, several GB). Collapse a bare-int probe to one
+        # representative 2D frame so it reads a single plane.
+        if isinstance(key, (int, np.integer)) and self._wrapped.ndim > 3:
+            key = (int(key),) + (0,) * (self._wrapped.ndim - 3) + (slice(None), slice(None))
         if not self._logger.isEnabledFor(logging.DEBUG):
             return self._wrapped[key]
         import time
@@ -563,7 +571,6 @@ class _ScrubTimingProxy:
         out = self._wrapped[key]
         dt_ms = (time.perf_counter() - t0) * 1000.0
         type_name = type(self._arr).__name__
-        np = self._np
         if isinstance(key, tuple) and key and isinstance(key[0], (int, np.integer)):
             key_str = f"t={int(key[0])}"
         elif isinstance(key, (int, np.integer)):

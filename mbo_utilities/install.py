@@ -148,9 +148,18 @@ def recommended_cupy_package(driver_cuda: str | None = None) -> str:
 
 
 def cupy_install_hint(driver_cuda: str | None = None) -> str:
-    """Human-readable install hint, e.g. 'uv pip install cupy-cuda12x'."""
+    """Human-readable install hint including the NVRTC + runtime wheels, e.g.
+    'uv pip install cupy-cuda12x nvidia-cuda-nvrtc-cu12 nvidia-cuda-runtime-cu12'.
+
+    The NVRTC + runtime wheels supply pip-managed CUDA so cupy's JIT kernels
+    compile without a system CUDA toolkit.
+    """
     pkg = recommended_cupy_package(driver_cuda)
-    return f"uv pip install {pkg}"
+    major = pkg.removeprefix("cupy-cuda").removesuffix("x")
+    return (
+        f"uv pip install {pkg} "
+        f"nvidia-cuda-nvrtc-cu{major} nvidia-cuda-runtime-cu{major}"
+    )
 
 
 def _get_nvcc_version() -> str | None:

@@ -898,6 +898,14 @@ def _build_isoview_processing_config(args: dict):
         if d is not None:
             config_kwargs[key] = {int(v): tuple(off) for v, off in d.items()}
 
+    # crop_* dicts are keyed by camera index; JSON round-trips int keys to
+    # strings, so coerce back to int or get_crop(camera) misses every entry.
+    for key in ("crop_left", "crop_top", "crop_front",
+                "crop_width", "crop_height", "crop_depth"):
+        d = config_kwargs.get(key)
+        if isinstance(d, dict):
+            config_kwargs[key] = {int(k): int(v) for k, v in d.items()}
+
     return ProcessingConfig(**config_kwargs)
 
 
@@ -934,8 +942,8 @@ def _bridge_isoview_logging(worker_logger: logging.Logger) -> None:
     WARNING+ flows to stderr and INFO/DEBUG lands in
     ``<fused_dir>/<method>/fusion.log`` — which the GUI user can't see
     in real time. This helper attaches a forwarding
-    handler that mirrors INFO+ records to whatever handlers are on
-    the worker logger (stdout + per-task file), sets ``isoview``'s
+    handler that mirrors INFO+ records to the worker logger's handlers
+    (the per-task file), sets ``isoview``'s
     propagation to ``False`` so nothing double-prints, and is idempotent
     — only one bridge is installed per process even if both isoview
     tasks fire (the second call refreshes its target list to pick up
@@ -945,14 +953,17 @@ def _bridge_isoview_logging(worker_logger: logging.Logger) -> None:
     iso_logger.setLevel(logging.INFO)
     iso_logger.propagate = False
 
-    # The worker's file handler lives on `mbo.worker`; the stdout sink
-    # lives on the package root `mbo`. Walk both, plus any direct
-    # handlers on the worker logger itself.
-    targets: list[logging.Handler] = []
-    for src in (worker_logger, logging.getLogger("mbo")):
-        for h in src.handlers:
-            if h not in targets:
-                targets.append(h)
+    # Mirror isoview records onto the worker logger's own handlers (the
+    # per-task file, plus any GUI panel handler). Do NOT also add the root
+    # `mbo` StreamHandler: the worker's stderr is already redirected to that
+    # same per-task file (ProcessManager.spawn), so routing isoview through
+    # the stream handler too writes every line to the file a second time.
+    # mbo.* logs avoid this because propagate=False keeps them off the root
+    # stream handler. Fall back to the root handlers only when the worker
+    # logger has none (standalone invocation with no per-task file).
+    targets: list[logging.Handler] = list(worker_logger.handlers)
+    if not targets:
+        targets = list(logging.getLogger("mbo").handlers)
 
     existing = getattr(iso_logger, _ISOVIEW_BRIDGE_ATTR, None)
     if isinstance(existing, _ForwardingHandler):
@@ -991,10 +1002,7 @@ def task_correct_stack(args: dict, logger: logging.Logger) -> None:
             f"output={config.output_dir}, format={config.output_format}, "
             f"workers={config.workers}, segment_mode={config.segment_mode}"
         )
-        logger.info(
-            f"isoview per-run log: {config.output_dir}/correct.log "
-            "(fine-grained DEBUG records)"
-        )
+        logger.info(f"isoview per-run log: {config.output_dir}/correct.log")
         monitor.update(0.05, "Running correct_stack (see log file for details)...")
         correct_stack(config)
         monitor.finish("correct_stack pipeline complete.")
@@ -1002,6 +1010,49 @@ def task_correct_stack(args: dict, logger: logging.Logger) -> None:
     except Exception as e:
         monitor.fail(str(e), details={"traceback": traceback.format_exc()})
         logger.exception(f"correct_stack failed: {e}")
+        raise
+
+
+def task_isoview_raw_projections(args: dict, logger: logging.Logger) -> None:
+    """Precompute raw XY max-projections for the segmentation / dead-pixel
+    previews.
+
+    Writes ``SPM##_TM######_CM##.xyProjection.tif`` into the flat sibling
+    ``<raw_dir>.raw.projections/`` directory. Existing files are skipped
+    so re-running (and the later ``correct_stack``) only fills gaps. No
+    dependency on the upstream ``isoview`` package.
+
+    Args: ``raw_dir`` (required), ``overwrite`` (optional, default False).
+    """
+    from mbo_utilities.arrays.isoview import make_raw_projections
+
+    raw_dir = args.get("raw_dir")
+    if not raw_dir:
+        raise ValueError("raw_dir is required")
+    overwrite = bool(args.get("overwrite", False))
+
+    monitor = TaskMonitor(raw_dir, uuid=args.get("_uuid"))
+    monitor.update(0.01, "Scanning raw stacks...")
+
+    def cb(current: int, total: int, name: str) -> None:
+        frac = current / total if total else 1.0
+        monitor.update(min(0.99, frac), f"projection {current}/{total}: {name}")
+
+    try:
+        result = make_raw_projections(
+            raw_dir, overwrite=overwrite, progress_callback=cb,
+        )
+        monitor.finish(
+            f"raw projections: {result['written']} written, "
+            f"{result['skipped']} existing -> {result['dir']}"
+        )
+        logger.info(
+            f"raw projections: {result['written']} written, "
+            f"{result['skipped']} skipped in {result['dir']}"
+        )
+    except Exception as e:
+        monitor.fail(str(e), details={"traceback": traceback.format_exc()})
+        logger.exception(f"raw projections failed: {e}")
         raise
 
 
@@ -1024,7 +1075,7 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
     try:
         config = _build_isoview_processing_config(args)
         fused_dir = Path(config.fused_dir)
-        fusion_log_path = fused_dir / config.blending_method / "fusion.log"
+        fusion_log_path = fused_dir / "fusion.log"
         logger.info(
             f"multi_fuse: input={config.input_dir}, "
             f"fused_dir={fused_dir}, blending={config.blending_method}, "
@@ -1039,7 +1090,6 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
         # thread and heartbeat from the count of fused timepoint dirs: the
         # count advances as each timepoint completes (keeping the watchdog
         # alive) and freezes if fusion genuinely hangs (so it still fires).
-        method_dir = fused_dir / config.blending_method
         total = max(len(config.timepoints), 1)
         result: dict = {}
 
@@ -1054,7 +1104,11 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
         while worker.is_alive():
             worker.join(timeout=30)
             try:
-                done = sum(1 for p in method_dir.glob("TM*") if p.is_dir())
+                # new fused layout: <fused>/SPM##/TM######/ (timelapse) or
+                # <fused>/SPM##/ (tiled) — count whichever advances.
+                done = sum(
+                    1 for p in fused_dir.glob("SPM*/TM*") if p.is_dir()
+                ) or sum(1 for p in fused_dir.glob("SPM*") if p.is_dir())
             except OSError:
                 done = 0
             frac = 0.05 + 0.9 * min(done / total, 1.0)
@@ -1107,6 +1161,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
             config,
             method=args.get("method"),
             coarse_align=args.get("coarse_align", False),
+            orientation=args.get("orientation"),
         )
         logger.info(f"  wrote: {xml_path}")
         monitor.finish(f"generate_bigstitcher_xml complete: {xml_path}")
@@ -1273,6 +1328,7 @@ TASKS = {
     "suite2p": task_suite2p,
     "isoview": task_isoview,
     "isoview_correct": task_correct_stack,
+    "isoview_raw_projections": task_isoview_raw_projections,
     "isoview_fuse": task_multi_fuse,
     "isoview_bigstitcher": task_generate_bigstitcher,
     "isoview_bigstitcher_register": task_bigstitcher_register,

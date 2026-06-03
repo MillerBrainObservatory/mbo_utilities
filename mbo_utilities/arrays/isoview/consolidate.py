@@ -472,7 +472,11 @@ def _scale_5d(dt_s, dz, dy, dx, mag_zyx):
 
 
 def _multiscales_block(
-    name: str, axes: list[dict], dataset_paths: list[str], scales: list[list[float]]
+    name: str,
+    axes: list[dict],
+    dataset_paths: list[str],
+    scales: list[list[float]],
+    method: str = "median",
 ) -> dict:
     """Assemble one multiscales entry."""
     datasets = [
@@ -483,10 +487,10 @@ def _multiscales_block(
         "name": name,
         "axes": axes,
         "datasets": datasets,
-        "type": "gaussian",
+        "type": method,
         "metadata": {
             "method": "mbo_utilities.arrays.features._pyramid.downsample_block",
-            "downsample": "gaussian",
+            "downsample": method,
         },
     }
 
@@ -557,7 +561,8 @@ def _write_image_pyramid(
     Level 0 reads each ``(t, c)`` volume from the lazy IsoviewArray
     (already chunked appropriately on disk) and writes into the new
     consolidated zarr. Higher levels read back the previous level's
-    on-disk array and downsample via gaussian blur + subsample.
+    on-disk array and downsample via windowed median (webknossos
+    default for intensity data).
     """
     nt, nc, nz, ny, nx = iso_arr.shape
     dtype = iso_arr.dtype
@@ -595,7 +600,7 @@ def _write_image_pyramid(
             for ti in range(nt):
                 for ci in range(nc):
                     vol = prev_arr[ti, ci, :, :, :]
-                    out = downsample_block(vol, factor, method="gaussian")
+                    out = downsample_block(vol, factor, method="median")
                     # downsample_block may return shape `(out_nz, out_ny, out_nx)`
                     # one larger than what shape said when nz % mz != 0; trim.
                     out = out[:out_nz, :out_ny, :out_nx]
@@ -644,10 +649,10 @@ def _write_segmentation_pyramid(
     """Write /labels/segmentation/{0..N}/ mirroring the image pyramid.
 
     Per the OME spec the labels' datasets list MUST have the same
-    number of entries as the parent image's. Downsampling uses
-    nearest-neighbor because gaussian on a binary mask + threshold
-    produces shrunken regions; nearest preserves the integer-label
-    contract that the spec requires for label pixels.
+    number of entries as the parent image's. Downsampling uses the
+    windowed mode (webknossos default for segmentation): a majority
+    vote that never invents a label value, preserving the integer-label
+    contract the spec requires for label pixels.
     """
     if not scanner:
         return None
@@ -691,7 +696,7 @@ def _write_segmentation_pyramid(
             for ti in range(nt):
                 for ci in range(nc):
                     vol = prev_arr[ti, ci, :, :, :]
-                    out = downsample_block(vol, factor, method="nearest")
+                    out = downsample_block(vol, factor, method="mode")
                     out = out[:out_nz, :out_ny, :out_nx]
                     arr[ti, ci, :, :, :] = out
                     if progress_callback:
@@ -703,7 +708,9 @@ def _write_segmentation_pyramid(
     seg_group.attrs["ome"] = {
         "version": "0.5",
         "multiscales": [
-            _multiscales_block("background_mask", _AXES_5D, paths, scales)
+            _multiscales_block(
+                "background_mask", _AXES_5D, paths, scales, method="mode"
+            )
         ],
         "image-label": {
             "version": "0.5",
@@ -896,7 +903,7 @@ def _write_disk_xy_projections(
             for ti in range(nt):
                 for ci in range(nc):
                     img = prev_arr[ti, ci, 0, :, :]
-                    out = downsample_block(img, factor2, method="gaussian")
+                    out = downsample_block(img, factor2, method="median")
                     out = out[:out_ny, :out_nx]
                     arr[ti, ci, 0, :, :] = out
                     if progress_callback:
@@ -1007,7 +1014,7 @@ def _write_computed_projections(
             if progress_callback:
                 progress_callback("max_proj_l0", ti * nc + ci + 1, nt * nc)
 
-    # Higher levels per axis: read prev level's 2D plane, gaussian-
+    # Higher levels per axis: read prev level's 2D plane, median-
     # downsample 2D, write back. Both arrays have layout (T,C,1,Y',X')
     # so the 2D plane comes from arr[t, c, 0, :, :] directly.
     for axis, state in axis_state.items():
@@ -1026,7 +1033,7 @@ def _write_computed_projections(
                     if all(f == 1 for f in factor):
                         out = prev_2d
                     else:
-                        out = downsample_block(prev_2d, factor, method="gaussian")
+                        out = downsample_block(prev_2d, factor, method="median")
                         out = out[: target[0], : target[1]]
                     arr[ti, ci, 0, :, :] = out
                     if progress_callback:

@@ -16,7 +16,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-DownsampleMethod = Literal["mean", "nearest", "gaussian", "local_mean"]
+DownsampleMethod = Literal[
+    "mean", "nearest", "gaussian", "local_mean", "median", "mode"
+]
 
 
 @dataclass
@@ -147,8 +149,10 @@ def downsample_block(
     factors : tuple[int, ...]
         downsampling factor per axis. must match data.ndim.
     method : DownsampleMethod
-        "mean" - average pooling (default, best for intensity data)
-        "nearest" - nearest neighbor (best for labels/masks)
+        "mean" - average pooling (best for intensity data)
+        "median" - windowed median (webknossos default for intensity)
+        "mode" - windowed mode (webknossos default for labels/masks)
+        "nearest" - nearest neighbor
         "gaussian" - gaussian blur then subsample
         "local_mean" - local mean with antialiasing
 
@@ -171,6 +175,12 @@ def downsample_block(
 
     if method == "mean":
         return _downsample_mean(data, factors)
+
+    if method == "median":
+        return _downsample_median(data, factors)
+
+    if method == "mode":
+        return _downsample_mode(data, factors)
 
     if method == "gaussian":
         return _downsample_gaussian(data, factors)
@@ -201,6 +211,94 @@ def _downsample_mean(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
     # reshape and mean
     reshaped = trimmed.reshape(new_shape)
     return reshaped.mean(axis=axes_to_mean).astype(data.dtype)
+
+
+def _downsample_median(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
+    """Downsample using the windowed median (matches webknossos MEDIAN).
+
+    Same block grouping as ``_downsample_mean``; ``np.median`` reduces over
+    the per-axis factor axes. Median is an order statistic, so the grouping
+    order within a block is irrelevant. Cast back to the source dtype, which
+    truncates toward zero on even-count blocks exactly as webknossos does.
+    """
+    out_shape = tuple(s // f for s, f in zip(data.shape, factors, strict=True))
+    new_shape = []
+    for s, f in zip(out_shape, factors, strict=True):
+        new_shape.extend([s, f])
+    axes_to_reduce = tuple(range(1, 2 * len(factors), 2))
+    slices = tuple(slice(None, s * f) for s, f in zip(out_shape, factors, strict=True))
+    reshaped = data[slices].reshape(new_shape)
+    return np.median(reshaped, axis=axes_to_reduce).astype(data.dtype)
+
+
+def _downsample_mode(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
+    """Downsample using the windowed mode (matches webknossos MODE).
+
+    Best for label/segmentation data: each output voxel is the most frequent
+    value in its block, so no value that is not present in the source is ever
+    produced. Ties go to the value seen first in raster order, identical to
+    webknossos' numba kernel.
+    """
+    out_shape = tuple(s // f for s, f in zip(data.shape, factors, strict=True))
+    new_shape = []
+    for s, f in zip(out_shape, factors, strict=True):
+        new_shape.extend([s, f])
+    slices = tuple(slice(None, s * f) for s, f in zip(out_shape, factors, strict=True))
+    reshaped = data[slices].reshape(new_shape)
+
+    nd = len(factors)
+    data_axes = tuple(range(0, 2 * nd, 2))
+    factor_axes = tuple(range(1, 2 * nd, 2))
+    window = int(np.prod(factors))
+    moved = np.ascontiguousarray(np.transpose(reshaped, data_axes + factor_axes))
+    flat = moved.reshape(-1, window)
+    result = _mode_rows(flat)
+    return result.reshape(out_shape).astype(data.dtype)
+
+
+def _mode_rows_py(flat: np.ndarray) -> np.ndarray:
+    """Row-wise mode over a 2D ``(n_blocks, window)`` array.
+
+    Counts values in first-seen order and returns the value with the highest
+    count, ties kept at the first-seen value (numba-compiled on first use).
+    """
+    m, w = flat.shape
+    out = np.empty(m, dtype=flat.dtype)
+    values = np.empty(w, dtype=flat.dtype)
+    counts = np.empty(w, dtype=np.int64)
+    for r in range(m):
+        n = 0
+        for c in range(w):
+            v = flat[r, c]
+            hit = False
+            for k in range(n):
+                if values[k] == v:
+                    counts[k] += 1
+                    hit = True
+                    break
+            if not hit:
+                values[n] = v
+                counts[n] = 1
+                n += 1
+        best = 0
+        for k in range(1, n):
+            if counts[k] > counts[best]:
+                best = k
+        out[r] = values[best]
+    return out
+
+
+_mode_rows_compiled = None
+
+
+def _mode_rows(flat: np.ndarray) -> np.ndarray:
+    """numba-compiled :func:`_mode_rows_py`, imported lazily on first use."""
+    global _mode_rows_compiled
+    if _mode_rows_compiled is None:
+        import numba
+
+        _mode_rows_compiled = numba.njit(cache=True, nogil=True)(_mode_rows_py)
+    return _mode_rows_compiled(flat)
 
 
 def _downsample_gaussian(data: np.ndarray, factors: tuple[int, ...]) -> np.ndarray:
