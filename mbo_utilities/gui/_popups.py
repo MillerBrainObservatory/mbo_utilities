@@ -7,6 +7,7 @@ metadata viewer, and process console.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -52,18 +53,47 @@ def _log_line_style(line: str) -> tuple[Any, str]:
     return _LOG_INFO, line
 
 
+def _gpu_usage_str(d: dict) -> str:
+    """One-line ``name · util% · used/total GB · tempC`` for a GPU device."""
+    parts = [d.get("name", "?")]
+    util = d.get("util_pct")
+    if util is not None:
+        parts.append(f"{util:.0f}% util")
+    total = d.get("total_mb") or 0
+    used = d.get("used_mb") or 0
+    if total:
+        parts.append(f"{used / 1024:.1f}/{total / 1024:.1f} GB")
+    temp = d.get("temp_c")
+    if temp is not None:
+        parts.append(f"{temp:.0f}C")
+    return " · ".join(parts)
+
+
 def _draw_system_info_header(parent: Any) -> None:
     """Compact system-capacity header for the Process Console.
 
-    Shows: CPU cores, live available/total RAM, selected GPU adapter
-    (from preferences), and the deduplicated list of physical GPUs.
-    Live RAM is cheap to probe each frame (~µs syscall); GPU and CPU
-    counts are cached on first call.
+    Shows: CPU cores, live available/total RAM, the selected render GPU
+    adapter (from preferences), and one live-usage entry per physical GPU.
+    Live RAM is cheap to probe each frame (~µs syscall); per-GPU usage comes
+    from nvidia-smi and is refreshed on a throttle (~1.5s), not every frame.
     """
     if not imgui.collapsing_header("System", imgui.TreeNodeFlags_.default_open):
         return
 
     _ensure_gpu_list(parent)
+
+    # per-GPU live usage from nvidia-smi. throttled — nvidia-smi is a
+    # subprocess, far too costly to run every frame.
+    now = time.monotonic()
+    if (not hasattr(parent, "_sys_gpu_devices")
+            or now - getattr(parent, "_sys_gpu_last_refresh", 0.0) >= 1.5):
+        from mbo_utilities.gpu import gpu_devices
+        try:
+            parent._sys_gpu_devices = gpu_devices()
+        except Exception:
+            parent._sys_gpu_devices = []
+        parent._sys_gpu_last_refresh = now
+    gpu_devices_live = parent._sys_gpu_devices
 
     # CPU + RAM via psutil (live RAM each frame).
     try:
@@ -135,7 +165,11 @@ def _draw_system_info_header(parent: Any) -> None:
         _row("CPU cores:", cpu_str)
         _row("RAM (avail/total):", ram_str)
         _row("GPU (selected):", selected_str, value_color=_SYS_ACCENT)
-        _row("GPU (available):", gpus_str)
+        if gpu_devices_live:
+            for d in gpu_devices_live:
+                _row(f"GPU {d['index']}:", _gpu_usage_str(d))
+        else:
+            _row("GPU (available):", gpus_str)
 
         imgui.end_table()
 

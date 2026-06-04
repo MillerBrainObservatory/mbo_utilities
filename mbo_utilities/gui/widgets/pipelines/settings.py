@@ -3723,7 +3723,7 @@ def _draw_section_suite2p_content(self):
         inner_pad = 2 * frame_pad_x
         # extra breathing room (~a few mm) so right-aligned (?) tooltip
         # markers never clip against the column's right edge.
-        _tooltip_pad = 24
+        _tooltip_pad = 34
         natural = max(body, title_row_w) + inner_pad + 8 + _tooltip_pad
         # Self-titled columns wrap their content in a SECOND nested
         # bordered child (LBM -> ##lsp_box; Registration -> ##s2p_main_box
