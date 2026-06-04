@@ -22,6 +22,7 @@ from mbo_utilities.gui._imgui_helpers import (
     draw_boxed_label,
     set_tooltip,
     settings_row_with_popup,
+    text_wrapped_cell,
     tooltip_marks_right,
     _popup_states,
 )
@@ -193,64 +194,24 @@ def _check_lsp_available() -> bool:
     return found
 
 
-# Rastermap install probe — kicked off in a daemon thread when the user
-# flips the Rastermap stage gate to Run or Force. Cached for the GUI
-# session, but re-checks fire on subsequent clicks until we see a
-# positive result, so a mid-session `pip install rastermap` is picked up.
-# State shape: (status, version_or_none) where status is one of
-# "unknown" / "checking" / "ok" / "missing".
-_rm_install: tuple[str, str | None] = ("unknown", None)
-_rm_install_lock = threading.Lock()
-_rm_install_thread: "threading.Thread | None" = None
+# Rastermap install probe — cheap synchronous find_spec, cached like
+# _check_lsp_available. find_spec does not import rastermap, so it's safe
+# to call every frame. A positive result sticks for the session; a
+# negative answer re-probes so a mid-session `pip install rastermap` is
+# picked up on the next frame.
+_HAS_RASTERMAP: bool | None = None
 
 
-def _do_rastermap_install_check() -> None:
-    """Worker — confirm rastermap is importable and capture its version.
-
-    Version source priority:
-      1. importlib.metadata.version("rastermap") — canonical package
-         metadata (works even when the module doesn't expose __version__,
-         which is the case for current rastermap releases).
-      2. rastermap.__version__ — fallback if metadata lookup fails.
-      3. "unknown" — last resort; module imports but no version found.
-    """
-    global _rm_install
-    try:
-        import importlib
-        importlib.invalidate_caches()  # pick up packages installed mid-session
-        mod = importlib.import_module("rastermap")
-        version: str
-        try:
-            from importlib.metadata import version as _pkg_version
-            version = _pkg_version("rastermap")
-        except Exception:
-            version = str(getattr(mod, "__version__", "unknown"))
-        with _rm_install_lock:
-            _rm_install = ("ok", version)
-    except Exception:
-        with _rm_install_lock:
-            _rm_install = ("missing", None)
-
-
-def _kick_rastermap_install_check() -> None:
-    """Start a background install probe unless we already know it's there.
-
-    Idempotent: returns immediately if a positive result is cached or
-    another probe is already running. A "missing" result does NOT block
-    re-checks — that way the user can install rastermap and click Run
-    again to see the indicator turn green.
-    """
-    global _rm_install, _rm_install_thread
-    with _rm_install_lock:
-        if _rm_install[0] == "ok":
-            return
-        if _rm_install_thread is not None and _rm_install_thread.is_alive():
-            return
-        _rm_install = ("checking", None)
-        _rm_install_thread = threading.Thread(
-            target=_do_rastermap_install_check, daemon=True
-        )
-        _rm_install_thread.start()
+def _check_rastermap_available() -> bool:
+    """True if `rastermap` is importable. Caches a positive result."""
+    global _HAS_RASTERMAP
+    if _HAS_RASTERMAP is True:
+        return True
+    import importlib.util
+    found = importlib.util.find_spec("rastermap") is not None
+    if found:
+        _HAS_RASTERMAP = True
+    return found
 
 
 USER_PIPELINES = ["suite2p"]
@@ -2163,14 +2124,6 @@ def _draw_section_suite2p_content(self):
         set_tooltip(
             "Run as a separate process that continues after closing the GUI."
         )
-        with _hi_extras("save_json", self.s2p_extras.save_json):
-            _, self.s2p_extras.save_json = imgui.checkbox(
-                "Save ops.json", self.s2p_extras.save_json
-            )
-        set_tooltip(
-            "Write a human-readable ops.json sibling next to ops.npy. "
-            "Wired to lbm_suite2p_python.pipeline(save_json=...)."
-        )
         with _hi_extras("accept_all_cells", self.s2p_extras.accept_all_cells):
             _, self.s2p_extras.accept_all_cells = imgui.checkbox(
                 "Accept all cells", self.s2p_extras.accept_all_cells
@@ -2287,18 +2240,10 @@ def _draw_section_suite2p_content(self):
         for _attr, _label, _fmt, _tip in (
             (
                 "baseline_min_F0_abs",
-                "Min F0 (photons)",
+                "Min F0",
                 "%.2f",
                 "Drop cells whose median baseline falls below this absolute "
                 "fluorescence value. Default 1.0; typical 0.5-5.0.",
-            ),
-            (
-                "baseline_min_F0_rel",
-                "Min F0 (frac of median)",
-                "%.3f",
-                "Drop cells whose minimum baseline falls below this fraction "
-                "of the population median. Range 0.0-1.0; typical 0.01-0.1; "
-                "default 0 = off.",
             ),
         ):
             _enabled_attr = f"{_attr}_enabled"
@@ -2395,9 +2340,28 @@ def _draw_section_suite2p_content(self):
         # become editable; their sub-params only render when the parent
         # checkbox is on. build_rastermap_kwargs() composes the unified
         # lsp dict from this state at run time.
-        imgui.text_colored(_SUBSECTION_COLOR, "Rastermap")
+        # When rastermap isn't installed, force Skip and clear the
+        # sub-modes so the stage can't run; the title goes red and the
+        # Skip/Run/Force radios + Planar/Volumetric checkboxes grey out.
+        _rm_available = _check_rastermap_available()
+        if not _rm_available:
+            self.s2p_extras.rastermap_mode = 0
+            self.s2p_extras.rastermap_planar = False
+            self.s2p_extras.rastermap_volumetric = False
+
+        _rm_title_color = (
+            _SUBSECTION_COLOR if _rm_available
+            else imgui.ImVec4(0.95, 0.4, 0.4, 1.0)
+        )
+        imgui.text_colored(_rm_title_color, "Rastermap")
+        if not _rm_available:
+            set_tooltip(
+                "Rastermap not installed. Install with `pip install rastermap`.",
+                show_mark=False,
+            )
         imgui.same_line()
         _rm_mode = self.s2p_extras.rastermap_mode
+        imgui.begin_disabled(not _rm_available)
         if imgui.radio_button("Skip##rastermap_mode", _rm_mode == 0):
             # transitioning to Skip greys out the Planar/Volumetric
             # checkboxes below — also clear them so they don't pop back
@@ -2408,41 +2372,15 @@ def _draw_section_suite2p_content(self):
         imgui.same_line()
         if imgui.radio_button("Run##rastermap_mode", _rm_mode == 1):
             self.s2p_extras.rastermap_mode = 1
-            _kick_rastermap_install_check()
         imgui.same_line()
         if imgui.radio_button("Force##rastermap_mode", _rm_mode == 2):
             self.s2p_extras.rastermap_mode = 2
-            _kick_rastermap_install_check()
+        imgui.end_disabled()
 
         _rm_active = self.s2p_extras.rastermap_mode > 0
 
-        # install indicator — only renders when Run/Force is selected.
-        # green dot = rastermap importable (tooltip shows version).
-        # red dot = ImportError (tooltip shows install instruction).
-        # gray dot = probe in flight.
-        if _rm_active:
-            _kick_rastermap_install_check()  # idempotent; covers state restored from disk
-            imgui.same_line()
-            with _rm_install_lock:
-                _rm_status, _rm_version = _rm_install
-            if _rm_status == "ok":
-                imgui.text_colored(imgui.ImVec4(0.4, 0.85, 0.4, 1.0), "[ok]")
-                set_tooltip(f"rastermap v{_rm_version} installed", show_mark=False)
-            elif _rm_status == "missing":
-                imgui.text_colored(imgui.ImVec4(0.95, 0.4, 0.4, 1.0), "[!]")
-                set_tooltip(
-                    "Rastermap not installed.\n"
-                    "Install with `pip install rastermap` to run activity clustering.",
-                    show_mark=False,
-                )
-            else:
-                imgui.text_colored(imgui.ImVec4(0.6, 0.6, 0.6, 1.0), "[...]")
-                set_tooltip("Checking rastermap installation...", show_mark=False)
-
         # cache-reuse hint as a (?) at the END of the title row so it
         # never displaces the Skip/Run/Force radios in narrow panels.
-        # attaches to whichever item ended the row (last radio or the
-        # install indicator); hovering the (?) shows the tooltip.
         set_tooltip(
             "Sorts cells so similar activity is adjacent in the figure "
             "(bands = ensembles, diagonals = sequences). "
@@ -3255,13 +3193,6 @@ def _draw_section_suite2p_content(self):
                 "Allow Overlap", self.s2p.allow_overlap
             )
         set_tooltip("Allow overlapping ROI pixels during extraction.")
-        with _hi("circular_neuropil", self.s2p.circular_neuropil):
-            _, self.s2p.circular_neuropil = imgui.checkbox(
-                "Circular Neuropil", self.s2p.circular_neuropil
-            )
-        set_tooltip(
-            "Force neuropil masks to be circular instead of square. Slower."
-        )
         imgui.set_next_item_width(INPUT_WIDTH)
         with _hi("min_neuropil_pixels", self.s2p.min_neuropil_pixels):
             _, self.s2p.min_neuropil_pixels = imgui.input_int(
@@ -3572,11 +3503,14 @@ def _draw_section_suite2p_content(self):
                     )
                     imgui.table_next_row()
                     imgui.table_set_column_index(0)
-                    imgui.text_colored(_name_color, _field)
+                    text_wrapped_cell(_field, _name_color)
                     imgui.table_set_column_index(1)
-                    imgui.text(_cur_s)
+                    text_wrapped_cell(_cur_s)
                     imgui.table_set_column_index(2)
-                    imgui.text_disabled(_def_s)
+                    text_wrapped_cell(
+                        _def_s,
+                        imgui.get_style_color_vec4(imgui.Col_.text_disabled),
+                    )
                 imgui.end_table()
         imgui.end_child()
     else:
@@ -3718,7 +3652,7 @@ def _draw_section_suite2p_content(self):
     # holds the Suite2p Main box; its "Sampling Rate (Hz)" label is the
     # widest input across the combined contents.
     _WORST_INPUT_LABEL = {
-        "LBM-Suite2p-Python": "Min F0 (frac of median)",
+        "LBM-Suite2p-Python": "Max diameter (um)",
         "Registration": "Sampling Rate (Hz)",
         "ROI Detection": "Chan2 Detection Threshold",
         "Classification": "Preclassify threshold",
@@ -3730,7 +3664,7 @@ def _draw_section_suite2p_content(self):
         "Registration": "Export Registered TIFF",
         "ROI Detection": "Auto bin size (tau*fs)",
         "Classification": "Use built-in classifier",
-        "Extraction": "Circular Neuropil",
+        "Extraction": "Extract Neuropil",
         "Deconvolution": "",
     }
     # title-line content varies per mode; account for "Title  Skip Run Force"
@@ -3787,7 +3721,10 @@ def _draw_section_suite2p_content(self):
             title_row_w = title_w
         # account for child window's inner padding (borders + frame_padding)
         inner_pad = 2 * frame_pad_x
-        natural = max(body, title_row_w) + inner_pad + 8  # safety margin
+        # extra breathing room (~a few mm) so right-aligned (?) tooltip
+        # markers never clip against the column's right edge.
+        _tooltip_pad = 24
+        natural = max(body, title_row_w) + inner_pad + 8 + _tooltip_pad
         # Self-titled columns wrap their content in a SECOND nested
         # bordered child (LBM -> ##lsp_box; Registration -> ##s2p_main_box
         # and ##s2p_reg_box). That extra box layer eats another round of
@@ -3904,6 +3841,11 @@ def _draw_section_suite2p_content(self):
                             self_titled = title in _SELF_TITLED_COLUMNS
                             if is_row2:
                                 imgui.set_next_item_open(False, imgui.Cond_.appearing)
+                                # let the Skip/Run gate radios drawn (via
+                                # same_line) on top of this full-width header
+                                # receive clicks — without this the header
+                                # captures them and the radios do nothing.
+                                imgui.set_next_item_allow_overlap()
                                 imgui.push_style_color(
                                     imgui.Col_.text, imgui.ImVec4(1.0, 0.85, 0.4, 1.0)
                                 )
@@ -4722,7 +4664,7 @@ def _run_plane_worker_thread(config):
 
     try:
         run_plane(
-            input_path=raw_file,
+            input_data=raw_file,
             save_path=plane_dir,
             db=db_dict,
             settings=settings_dict,
