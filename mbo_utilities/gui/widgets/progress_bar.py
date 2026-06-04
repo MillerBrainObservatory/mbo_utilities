@@ -152,16 +152,16 @@ def _get_active_progress_items(self) -> list[dict]:
     num_graphics = getattr(self, "num_graphics", 1)
     zstats_running = getattr(self, "_zstats_running", [])
     zstats_progress = getattr(self, "_zstats_progress", [])
-    zstats_current_z = getattr(self, "_zstats_current_z", [])
-    nz = getattr(self, "nz", 1)
 
     for i in range(num_graphics):
         running = zstats_running[i] if isinstance(zstats_running, list) and i < len(zstats_running) else False
         progress = zstats_progress[i] if isinstance(zstats_progress, list) and i < len(zstats_progress) else 0.0
-        current_z = zstats_current_z[i] if isinstance(zstats_current_z, list) and i < len(zstats_current_z) else 0
 
         if running or (0.0 < progress < 1.0):
-            text = f"Z-stats {i+1}: starting..." if progress == 0.0 else f"Z-stats: plane {current_z + 1}/{nz}"
+            # report the monotonic overall fraction, not the per-plane
+            # index — the latter resets each channel/camera and reads as
+            # the bar jumping backward.
+            text = f"Z-stats {i+1}: starting..." if progress == 0.0 else f"Z-stats: computing {progress * 100:.0f}%"
             items.append({
                 "key": f"zstats_{i}",
                 "text": text,
