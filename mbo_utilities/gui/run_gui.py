@@ -252,9 +252,14 @@ def _select_file(runner_params: Any | None = None) -> tuple[Any, Any, Any, bool,
         params.app_window_params.window_geometry.size = (340, 720)
         params.app_window_params.window_geometry.size_auto = False
         params.app_window_params.resizable = True
-        params.ini_filename = get_default_ini_path("file_dialog")
     else:
         params = runner_params
+
+    # always route the ini to the mbo settings folder, even when a caller
+    # (e.g. scripts/capture_docs.py) supplies its own runner_params; otherwise
+    # hello_imgui writes <window_title>.ini into the current directory
+    if not params.ini_filename:
+        params.ini_filename = get_default_ini_path("file_dialog")
 
     # always override the gui callback to render our dialog
     params.callbacks.show_gui = dlg.render
