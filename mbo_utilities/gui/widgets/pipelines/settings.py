@@ -1058,6 +1058,10 @@ class MboSuite2pExtras:
     # when True, lbm's run_plane keeps every detected ROI after upstream
     # classification (mirrors the `accept_all_cells` kwarg in lsp.pipeline).
     accept_all_cells: bool = False
+    # normalization written to norm_traces.npy (lsp.pipeline(norm_method=...)).
+    # "dff" = rolling-percentile ΔF/F (dff_window_size / dff_percentile apply);
+    # "zscore" = per-ROI (F - mean) / std. dff_smooth_window applies to both.
+    norm_method: str = "dff"
     dff_window_size: int = 300
     dff_percentile: int = 20
     dff_smooth_window: int = 0
@@ -1094,10 +1098,11 @@ class MboSuite2pExtras:
     baseline_min_F0_rel: float = 0.0
 
     # top-level neuropil-correction toggle (lsp pipeline / run_plane /
-    # run_volume kwarg). when False, dF/F is computed from raw F instead
-    # of F - neuropil_coef * Fneu, and trace-quality metrics skip neuropil
-    # subtraction. mirrors `--no-correct-neuropil` on the lsp cli.
-    correct_neuropil: bool = True
+    # run_volume kwarg). when False, the normalized trace is computed from
+    # raw F instead of F - neuropil_coef * Fneu, and trace-quality metrics
+    # skip neuropil subtraction. mirrors `--no-correct-neuropil` on the lsp
+    # cli. defaults off in the GUI.
+    correct_neuropil: bool = False
 
     # rastermap stage gate (Skip=0, Run=1, Force=2 — matches the
     # pipeline-settings popup convention for tri-state stage radios).
@@ -2321,36 +2326,64 @@ def _draw_section_suite2p_content(self):
         imgui.spacing()
         imgui.spacing()
 
-        # --- dF/F ---
+        # --- Trace Normalization ---
         # mbo-only post-processing (not in upstream suite2p). Forwarded to
-        # lsp.pipeline(dff_window_size=..., dff_percentile=..., dff_smooth_window=...).
-        imgui.text_colored(_SUBSECTION_COLOR, "dF/F")
+        # lsp.pipeline(norm_method=..., dff_window_size=..., dff_percentile=...,
+        # dff_smooth_window=...). norm_method picks dF/F vs z-score for
+        # norm_traces.npy; window/percentile only apply to dF/F.
+        imgui.text_colored(_SUBSECTION_COLOR, "Trace Normalization")
+        _norm_methods = ["dff", "zscore"]
+        _norm_labels = ["dF/F0", "Z-score"]
+        _norm_idx = (
+            _norm_methods.index(self.s2p_extras.norm_method)
+            if self.s2p_extras.norm_method in _norm_methods else 0
+        )
+        imgui.set_next_item_width(INPUT_WIDTH)
+        with _hi_extras("norm_method", self.s2p_extras.norm_method):
+            _nm_changed, _nm_idx = imgui.combo(
+                "Method##norm_method", _norm_idx, _norm_labels
+            )
+            if _nm_changed:
+                self.s2p_extras.norm_method = _norm_methods[_nm_idx]
+        set_tooltip(
+            "Trace saved to norm_traces.npy.\n\n"
+            "dF/F0 = (F - F0) / F0, F0 = rolling-percentile baseline.\n"
+            "  Relative fluorescence change; default choice for transient "
+            "detection and comparing event sizes within a cell.\n\n"
+            "Z-score = (F - mean) / std, per ROI over time.\n"
+            "  Unitless, centered at 0; use to compare activity patterns "
+            "across cells with different brightness or noise."
+        )
+        _is_zscore = self.s2p_extras.norm_method == "zscore"
         with _hi_extras("correct_neuropil", self.s2p_extras.correct_neuropil):
             _, self.s2p_extras.correct_neuropil = imgui.checkbox(
                 "Correct neuropil", self.s2p_extras.correct_neuropil
             )
         set_tooltip(
-            "Use F - coef*Fneu in dF/F (default on). Off uses raw F. "
-            "Shared with the baseline cell filter so both score the same trace."
+            "Use F - coef*Fneu in the normalized trace (default on). Off uses "
+            "raw F. Shared with the baseline cell filter so both score the "
+            "same trace."
         )
+        imgui.begin_disabled(_is_zscore)
         imgui.set_next_item_width(INPUT_WIDTH)
         with _hi_extras("dff_window_size", self.s2p_extras.dff_window_size):
             _, self.s2p_extras.dff_window_size = imgui.input_int(
                 "Window", self.s2p_extras.dff_window_size
             )
-        set_tooltip("Frames for rolling percentile baseline (default: 300).")
+        set_tooltip("Frames for rolling percentile baseline (dF/F only, default: 300).")
         imgui.set_next_item_width(INPUT_WIDTH)
         with _hi_extras("dff_percentile", self.s2p_extras.dff_percentile):
             _, self.s2p_extras.dff_percentile = imgui.input_int(
                 "Percentile", self.s2p_extras.dff_percentile
             )
-        set_tooltip("Percentile for baseline F0 estimation (default: 20).")
+        set_tooltip("Percentile for baseline F0 estimation (dF/F only, default: 20).")
+        imgui.end_disabled()
         imgui.set_next_item_width(INPUT_WIDTH)
         with _hi_extras("dff_smooth_window", self.s2p_extras.dff_smooth_window):
             _, self.s2p_extras.dff_smooth_window = imgui.input_int(
                 "Smooth", self.s2p_extras.dff_smooth_window
             )
-        set_tooltip("Smooth dF/F trace with rolling window (0 = disabled).")
+        set_tooltip("Smooth the normalized trace with a rolling window (0 = disabled).")
 
         imgui.spacing()
         imgui.spacing()
@@ -4243,6 +4276,7 @@ def run_process(self):
                         "force_reg": (self.s2p.do_registration == 2),
                         "force_detect": (self.s2p.do_detection == 2),
                         "accept_all_cells": self.s2p_extras.accept_all_cells,
+                        "norm_method": self.s2p_extras.norm_method,
                         "dff_window_size": self.s2p_extras.dff_window_size,
                         "dff_percentile": self.s2p_extras.dff_percentile,
                         "dff_smooth_window": self.s2p_extras.dff_smooth_window,
@@ -4318,6 +4352,7 @@ def run_process(self):
             force_reg = (self.s2p.do_registration == 2)
             force_detect = (self.s2p.do_detection == 2)
             accept_all_cells = self.s2p_extras.accept_all_cells
+            norm_method = self.s2p_extras.norm_method
             dff_window_size = self.s2p_extras.dff_window_size
             dff_percentile = self.s2p_extras.dff_percentile
             dff_smooth_window = self.s2p_extras.dff_smooth_window
@@ -4408,6 +4443,7 @@ def run_process(self):
                             "force_reg": force_reg,
                             "force_detect": force_detect,
                             "accept_all_cells": accept_all_cells,
+                            "norm_method": norm_method,
                             "dff_window_size": dff_window_size,
                             "dff_percentile": dff_percentile,
                             "dff_smooth_window": dff_smooth_window,
@@ -4696,6 +4732,7 @@ def _run_plane_worker_thread(config):
             force_reg=config["force_reg"],
             force_detect=config["force_detect"],
             accept_all_cells=config.get("accept_all_cells", False),
+            norm_method=config.get("norm_method", "dff"),
             dff_window_size=config["dff_window_size"],
             dff_percentile=config["dff_percentile"],
             dff_smooth_window=config["dff_smooth_window"] if config["dff_smooth_window"] > 0 else None,

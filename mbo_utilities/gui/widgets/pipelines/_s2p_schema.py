@@ -654,6 +654,7 @@ _FLAT_TO_MBO: dict[str, Any] = {
     # outside the suite2p settings schema (so settings.npy stays a
     # record of the suite2p stages only). Listed here so flat-ops
     # loaders pick them up; the hydrator routes them to s2p_extras.
+    "norm_method": "norm_method",
     "dff_window_size": "dff_window_size",
     "dff_percentile": "dff_percentile",
     "dff_smooth_window": "dff_smooth_window",
