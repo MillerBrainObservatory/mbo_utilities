@@ -1880,7 +1880,7 @@ dependencies = [
 requires-dist = [
     { name = "cellpose", marker = "extra == 'cellpose'", specifier = ">=4.0.6" },
     { name = "lbm-suite2p-python", extras = ["rastermap", "cellpose"], marker = "extra == 'all'" },
-    { name = "mbo-utilities", specifier = ">=3.0.3" },
+    { name = "mbo-utilities", specifier = ">=3.0.7" },
     { name = "rastermap", marker = "extra == 'rastermap'" },
     { name = "setuptools", specifier = "<81" },
     { name = "suite2p", specifier = ">=1.0.0.1" },
