@@ -4,8 +4,8 @@ mbo_utilities - Miller Brain Observatory data processing utilities.
 This package uses lazy imports to minimize startup time. Heavy dependencies
 like numpy, dask, and tifffile are only loaded when actually needed.
 
-For fastest CLI startup (e.g., `mbo --download-notebook`), avoid importing
-from this module directly - use `from mbo_utilities.gui.run_gui import _cli_entry`.
+For fastest CLI startup, avoid importing from this module directly -
+use `from mbo_utilities.gui.run_gui import _cli_entry`.
 """
 
 from importlib.metadata import version, PackageNotFoundError
@@ -26,9 +26,6 @@ __all__ = [
     "MBO_SUPPORTED_FTYPES",
     "VoxelSize",
     "add_recent_file",
-    # CLI utilities
-    "download_file",
-    "download_notebook",
     "expand_paths",
     "files_to_dask",
     "get_all_input_patterns",
@@ -129,11 +126,6 @@ def __getattr__(name):
     if name == "to_video":
         from ._writers import to_video
         return to_video
-
-    # CLI utilities (cli -> click, urllib only)
-    if name in ("download_file", "download_notebook"):
-        from . import cli
-        return getattr(cli, name)
 
     # File/folder selection (widgets -> imgui, wgpu)
     if name in ("select_folder", "select_files"):

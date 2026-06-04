@@ -7,14 +7,13 @@
 #   curl -LsSf https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
 #
 # Environment variables:
-#   MBO_ENV_PATH     - custom path for dev environment (default: ~/mbo/envs/mbo_utilities)
+#   MBO_ENV_PATH     - custom path for dev environment (default: ~/<repos|code|software|projects>/mbo_utilities)
 #   MBO_SKIP_ENV     - set to "1" to skip dev environment creation
 #   MBO_OVERWRITE    - set to "1" to overwrite existing installations
 
 set -euo pipefail
 
 GITHUB_REPO="MillerBrainObservatory/mbo_utilities"
-DEFAULT_ENV_PATH="$HOME/mbo/envs/mbo_utilities"
 
 # Installation state
 MBO_ENV_PATH="${MBO_ENV_PATH:-}"
@@ -32,6 +31,7 @@ INSTALL_ENV=true
 GPU_AVAILABLE=false
 GPU_NAME=""
 CUDA_VERSION=""
+DRIVER_CUDA_VERSION=""
 TOOLKIT_INSTALLED=false
 
 # Colors
@@ -368,12 +368,18 @@ check_nvidia_gpu() {
     GPU_AVAILABLE=false
     GPU_NAME=""
     CUDA_VERSION=""
+    DRIVER_CUDA_VERSION=""
     TOOLKIT_INSTALLED=false
 
     if command -v nvidia-smi &> /dev/null; then
         GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "")
         if [[ -n "$GPU_NAME" ]]; then
             GPU_AVAILABLE=true
+
+            # the nvidia-smi header reports the max CUDA version the installed
+            # DRIVER supports — what pytorch/cupy GPU wheels need (they bundle
+            # their own CUDA runtime, so no system toolkit/nvcc is required).
+            DRIVER_CUDA_VERSION=$(nvidia-smi 2>/dev/null | grep -oE 'CUDA Version: *[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
 
             # Check for CUDA toolkit
             if command -v nvcc &> /dev/null; then
@@ -398,28 +404,30 @@ show_optional_dependencies() {
 
     if [[ "$GPU_AVAILABLE" == "true" ]]; then
         echo -e "  ${GREEN}GPU detected:${NC} $GPU_NAME"
-        if [[ "$TOOLKIT_INSTALLED" == "true" ]]; then
-            echo -e "  ${GREEN}CUDA Toolkit:${NC} $CUDA_VERSION"
+        local cuda="${DRIVER_CUDA_VERSION:-$CUDA_VERSION}"
+        if [[ -n "$cuda" ]]; then
+            echo -e "  ${GREEN}Driver CUDA:${NC}  $cuda (GPU torch + CuPy will be installed)"
         else
-            echo -e "  ${YELLOW}CUDA Toolkit: Not installed (GPU packages will use CPU)${NC}"
+            echo -e "  ${YELLOW}Driver CUDA:  unknown (default CUDA torch + CuPy build will be used)${NC}"
         fi
     else
-        echo -e "  ${YELLOW}No NVIDIA GPU detected (GPU features will be slower)${NC}"
+        echo -e "  ${YELLOW}No NVIDIA GPU detected (CPU torch will be installed)${NC}"
     fi
     echo ""
 
-    echo -e "  ${CYAN}[1] Suite2p${NC}   - 2D cell extraction (PyTorch + CUDA)"
-    echo -e "  ${CYAN}[2] Rastermap${NC} - Dimensionality reduction"
-    echo -e "  ${CYAN}[3] All${NC}       - Install all processing pipelines"
-    echo -e "  ${CYAN}[4] None${NC}      - Base installation only (fastest)"
+    echo -e "  ${GRAY}Suite2p and the GUI are always installed.${NC}"
+    echo ""
+    echo -e "  ${CYAN}[1] Rastermap${NC} - Dimensionality reduction"
+    echo -e "  ${CYAN}[2] All${NC}       - Rastermap + isoview"
+    echo -e "  ${CYAN}[3] None${NC}      - Base installation only"
     echo ""
 
     while true; do
-        read -p "Select option (1-4, or comma-separated like 1,2): " choice
-        if [[ "$choice" =~ ^[1-4](,[1-4])*$ ]]; then
+        read -p "Select option (1-3, or comma-separated like 1,2): " choice
+        if [[ "$choice" =~ ^[1-3](,[1-3])*$ ]]; then
             break
         fi
-        warn "Invalid selection. Enter 1-4 or comma-separated."
+        warn "Invalid selection. Enter 1-3 or comma-separated."
     done
 
     EXTRAS=()
@@ -428,41 +436,86 @@ show_optional_dependencies() {
     for c in "${choices[@]}"; do
         c=$(echo "$c" | tr -d ' ')
         case $c in
-            1) EXTRAS+=("suite2p") ;;
-            2) EXTRAS+=("rastermap") ;;
-            3) EXTRAS=("all"); break ;;
-            4) EXTRAS=(); break ;;
+            1) EXTRAS+=("rastermap") ;;
+            2) EXTRAS=("all"); break ;;
+            3) EXTRAS=(); break ;;
         esac
     done
+}
 
-    # Warn if GPU packages selected without toolkit
-    if [[ ${#EXTRAS[@]} -gt 0 ]]; then
-        local has_gpu_package=false
-        for e in "${EXTRAS[@]}"; do
-            if [[ "$e" == "suite2p" || "$e" == "all" ]]; then
-                has_gpu_package=true
-                break
-            fi
-        done
+get_pytorch_index_url() {
+    # echo the pytorch wheel index matching the GPU driver's CUDA, or nothing
+    # when no NVIDIA GPU. wheels are backward-compatible, so pick the highest
+    # pytorch-published cuXXX <= the driver's supported CUDA.
+    [[ "$GPU_AVAILABLE" == "true" ]] || return 0
+    local cuda="${DRIVER_CUDA_VERSION:-$CUDA_VERSION}"
+    if [[ -z "$cuda" ]]; then
+        echo "https://download.pytorch.org/whl/cu121"
+        return 0
+    fi
+    local major="${cuda%%.*}"
+    local minor="${cuda#*.}"
+    if (( major >= 13 )); then
+        echo "https://download.pytorch.org/whl/cu128"
+    elif (( major == 12 )); then
+        if   (( minor >= 8 )); then echo "https://download.pytorch.org/whl/cu128"
+        elif (( minor >= 6 )); then echo "https://download.pytorch.org/whl/cu126"
+        elif (( minor >= 4 )); then echo "https://download.pytorch.org/whl/cu124"
+        elif (( minor >= 1 )); then echo "https://download.pytorch.org/whl/cu121"
+        else echo "https://download.pytorch.org/whl/cu118"
+        fi
+    elif (( major == 11 )); then
+        echo "https://download.pytorch.org/whl/cu118"
+    else
+        echo "https://download.pytorch.org/whl/cu121"
+    fi
+}
 
-        if [[ "$has_gpu_package" == "true" && "$GPU_AVAILABLE" == "true" && "$TOOLKIT_INSTALLED" == "false" ]]; then
-            echo ""
-            warn "CUDA Toolkit not installed. GPU packages will use CPU (slower)."
-            warn "Install CUDA Toolkit for GPU acceleration."
-        elif [[ "$has_gpu_package" == "true" && "$GPU_AVAILABLE" == "false" ]]; then
-            echo ""
-            warn "No NVIDIA GPU detected. These packages will run in CPU-only mode."
-            read -p "Continue anyway? (y/n): " continue_choice
-            if [[ "$continue_choice" != "y" ]]; then
-                EXTRAS=()
-            fi
+get_cupy_packages() {
+    # echo cupy + matching NVRTC/runtime wheels for the GPU driver, or nothing.
+    # the nvrtc/runtime wheels give cupy pip-managed CUDA so its jit kernels
+    # compile without a system toolkit.
+    [[ "$GPU_AVAILABLE" == "true" ]] || return 0
+    local cuda="${DRIVER_CUDA_VERSION:-$CUDA_VERSION}"
+    local major="12"
+    if [[ "$cuda" =~ ^([0-9]+) ]]; then
+        local m="${BASH_REMATCH[1]}"
+        if   (( m >= 13 )); then major="13"
+        elif (( m >= 12 )); then major="12"
+        else major="11"
         fi
     fi
+    echo "cupy-cuda${major}x nvidia-cuda-nvrtc-cu${major} nvidia-cuda-runtime-cu${major}"
+}
+
+get_uv_tool_python_path() {
+    # path to the python inside the mbo_utilities uv tool env (or nothing).
+    local tool_dir name candidate
+    tool_dir=$(uv tool dir 2>/dev/null) || return 0
+    [[ -n "$tool_dir" ]] || return 0
+    for name in mbo_utilities mbo-utilities; do
+        candidate="$tool_dir/$name/bin/python"
+        [[ -x "$candidate" ]] && { echo "$candidate"; return 0; }
+    done
+    return 0
 }
 
 # =============================================================================
 # Environment Location
 # =============================================================================
+
+get_default_env_path() {
+    # put the env next to the user's code: first existing of these common
+    # parent dirs, else default to ~/projects.
+    local base
+    for base in repos code software projects; do
+        if [[ -d "$HOME/$base" ]]; then
+            echo "$HOME/$base/mbo_utilities"
+            return
+        fi
+    done
+    echo "$HOME/projects/mbo_utilities"
+}
 
 show_env_location_prompt() {
     if [[ -n "$MBO_ENV_PATH" ]]; then
@@ -470,15 +523,17 @@ show_env_location_prompt() {
         return
     fi
 
+    local default_path=$(get_default_env_path)
+
     echo ""
     echo -e "${WHITE}Environment Location${NC}"
     echo ""
-    echo -e "  ${GRAY}Default:${NC} ${CYAN}$DEFAULT_ENV_PATH${NC}"
+    echo -e "  ${GRAY}Default:${NC} ${CYAN}$default_path${NC}"
     echo ""
     read -p "Press Enter for default, or enter custom path: " user_input
 
     if [[ -z "$user_input" ]]; then
-        MBO_ENV_PATH="$DEFAULT_ENV_PATH"
+        MBO_ENV_PATH="$default_path"
     else
         # Expand ~ to home directory
         user_input="${user_input/#\~/$HOME}"
@@ -604,8 +659,11 @@ install_mbo_tool() {
         fi
     fi
 
-    # Install tool
-    if uv tool install "$full_spec" --python 3.12; then
+    # Install tool.
+    # --reinstall forces uv to re-fetch and rebuild even when the same branch
+    # name is already cached, so re-running after pushing fixes to a branch
+    # picks them up instead of keeping the stale tool env.
+    if uv tool install "$full_spec" --python 3.12 --reinstall; then
         # ensure the tool bin dir is on the user's shell PATH. uv's own
         # install-time PATH wiring doesn't always fire (locked-down
         # configs, unusual shells). idempotent — safe to run every time.
@@ -616,6 +674,30 @@ install_mbo_tool() {
         local bin_dir=$(get_uv_tool_bin_dir)
         if [[ -n "$bin_dir" && ":$PATH:" != *":$bin_dir:"* ]]; then
             export PATH="$bin_dir:$PATH"
+        fi
+
+        # GPU torch + cupy into the tool's own venv, post-install so a
+        # resolution hiccup only warns instead of aborting. pytorch only
+        # publishes GPU wheels to its own index; without this the tool runs
+        # suite2p/cellpose on CPU.
+        local tool_py=$(get_uv_tool_python_path)
+        local torch_index=$(get_pytorch_index_url)
+        if [[ -n "$tool_py" && -n "$torch_index" ]]; then
+            info "Replacing CPU torch with CUDA build ($torch_index)..."
+            if uv pip install --python "$tool_py" --reinstall torch torchvision --index-url "$torch_index"; then
+                success "GPU torch installed in tool env"
+            else
+                warn "GPU torch install failed. Tool will use CPU torch."
+            fi
+        fi
+        local cupy_pkgs=$(get_cupy_packages)
+        if [[ -n "$tool_py" && -n "$cupy_pkgs" ]]; then
+            info "Installing CuPy for GPU axial registration: $cupy_pkgs..."
+            if uv pip install --python "$tool_py" --reinstall $cupy_pkgs; then
+                success "CuPy installed in tool env"
+            else
+                warn "CuPy install failed. Axial registration will use CPU."
+            fi
         fi
 
         success "mbo CLI tool installed successfully"
@@ -846,7 +928,29 @@ install_dev_environment() {
     info "Installing mbo_utilities into environment..."
     info "  Spec: $full_spec"
 
-    if uv pip install --python "$python_path" "$full_spec"; then
+    # --reinstall rewrites files for all packages in the resolution, clobbering
+    # stale transitive-dep files from prior installs (e.g. the mbo-fpl ->
+    # mbo-fastplotlib rename where two packages owned overlapping modules).
+    if uv pip install --python "$python_path" --reinstall "$full_spec"; then
+        # GPU torch + cupy into the env, post-install (warns on failure).
+        local torch_index=$(get_pytorch_index_url)
+        if [[ -n "$torch_index" ]]; then
+            info "Replacing CPU torch with CUDA build ($torch_index)..."
+            if uv pip install --python "$python_path" --reinstall torch torchvision --index-url "$torch_index"; then
+                success "GPU torch installed from $torch_index"
+            else
+                warn "GPU torch install failed. Environment will use CPU torch."
+            fi
+        fi
+        local cupy_pkgs=$(get_cupy_packages)
+        if [[ -n "$cupy_pkgs" ]]; then
+            info "Installing CuPy for GPU axial registration: $cupy_pkgs..."
+            if uv pip install --python "$python_path" --reinstall $cupy_pkgs; then
+                success "CuPy installed"
+            else
+                warn "CuPy installation failed. Axial registration will use CPU."
+            fi
+        fi
         success "Development environment created successfully"
         return 0
     else
@@ -867,7 +971,7 @@ create_desktop_entry_linux() {
     info "Creating desktop entry..."
 
     local app_dir="$HOME/.local/share/applications"
-    local icon_dir="$HOME/mbo"
+    local icon_dir="$HOME/.mbo"
     local desktop_file="$app_dir/mbo-utilities.desktop"
     local icon_path="$icon_dir/icon.png"
 
@@ -919,7 +1023,7 @@ create_desktop_entry_macos() {
 
     local app_dir="$HOME/Applications"
     local app_path="$app_dir/MBO Utilities.app"
-    local icon_dir="$HOME/mbo"
+    local icon_dir="$HOME/.mbo"
 
     mkdir -p "$app_dir" "$icon_dir"
     mkdir -p "$app_path/Contents/MacOS"

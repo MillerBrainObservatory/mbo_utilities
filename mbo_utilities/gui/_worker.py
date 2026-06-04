@@ -44,9 +44,14 @@ def setup_logging(log_file: str | None = None) -> logging.Logger:
 
     if log_file:
         try:
+            from logging.handlers import RotatingFileHandler
+
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+            # cap a single task's log so a chatty run can't balloon to 100s of MB
+            fh = RotatingFileHandler(
+                log_path, mode="a", maxBytes=5_000_000, backupCount=2, encoding="utf-8"
+            )
             fh.setFormatter(fmt)
             logger.addHandler(fh)
         except Exception as e:
@@ -59,8 +64,8 @@ def _update_status(pid: int, status: str, message: str | None = None, details: s
     """Ensure process status is reported to sidecar file."""
     try:
         # Match location used by TaskMonitor and ProcessManager
-        log_dir = Path.home() / ".mbo" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
+        from mbo_utilities.preferences import get_mbo_dirs
+        log_dir = get_mbo_dirs()["logs"]
         if uuid:
             sidecar = log_dir / f"progress_{uuid}.json"
         else:
@@ -126,7 +131,8 @@ def _atomic_replace(src: Path, dst: Path, attempts: int = 10, delay: float = 0.0
 def _start_watchdog(uuid: str | None, logger: logging.Logger, log_file: str | None = None):
     """daemon thread that kills this process if progress stalls."""
     def _watchdog():
-        log_dir = Path.home() / ".mbo" / "logs"
+        from mbo_utilities.preferences import get_mbo_dirs
+        log_dir = get_mbo_dirs()["logs"]
         last_progress = 0.0
         last_log_mtime = 0.0
         last_change = time.time()

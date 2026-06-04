@@ -1,8 +1,11 @@
-"""Shared Options popup (GPU adapter + debug logging).
+"""Shared Options popup (render GPU adapter + debug logging).
 
-Used by both the launch FileDialog and the main PreviewDataWidget's File menu
-so the same widget configures both. Styled to match the Help / Keybinds /
-Pipeline Settings popups (PopupAutoSize + begin_popup_modal).
+Used by both the launch FileDialog and the main PreviewDataWidget's File
+menu so the same widget configures both. Styled to match the Help /
+Keybinds / Pipeline Settings popups (PopupAutoSize + begin_popup_modal).
+
+Live GPU usage lives in the Process Console's System panel; the compute
+(suite2p / cellpose) device lives in the suite2p settings.
 """
 from __future__ import annotations
 
@@ -25,6 +28,46 @@ _COL_ACCENT = imgui.ImVec4(0.20, 0.50, 0.85, 1.0)
 _COL_DIM = imgui.ImVec4(0.75, 0.75, 0.77, 1.0)
 
 
+def _live_render_adapter(parent: Any) -> Any | None:
+    """The adapter the live figure renders with (ground truth, no enumeration)."""
+    try:
+        iw = getattr(parent, "image_widget", None)
+        if iw is not None and getattr(iw, "figure", None) is not None:
+            return iw.figure.renderer.device.adapter
+    except Exception:
+        pass
+    return None
+
+
+def _refresh_gpu_panel(parent: Any) -> None:
+    """Snapshot the render adapter fastplotlib uses.
+
+    Comes from the live figure if present, else the cached adapter list
+    (NEVER enumerate here — it clobbers the GL context).
+    """
+    from mbo_utilities import gpu as _gpu
+
+    live = _live_render_adapter(parent)
+    if live is not None:
+        parent._options_render_gpu = _gpu.render_gpu(live_adapter=live)
+        return
+    adapters = getattr(parent, "_options_gpu_adapters", None) or []
+    sel = parent._options_gpu_idx
+    if 0 <= sel < len(adapters):
+        idx, source = sel, "preference"
+    else:  # auto -> resolve to the adapter wgpu actually picks
+        idx, source = getattr(parent, "_options_gpu_default_idx", -1), "auto"
+    if 0 <= idx < len(adapters):
+        parent._options_render_gpu = {
+            "summary": _gpu._adapter_summary(adapters[idx]),
+            "source": source, "index": idx,
+        }
+    else:
+        parent._options_render_gpu = {
+            "summary": "wgpu default", "source": "auto", "index": -1,
+        }
+
+
 def _ensure_gpu_list(parent: Any) -> None:
     """Read the pre-warmed adapter cache. NEVER call
     ``fpl.enumerate_adapters()`` from here — it initializes wgpu, which
@@ -34,14 +77,24 @@ def _ensure_gpu_list(parent: Any) -> None:
     """
     if getattr(parent, "_options_gpu_adapters", None) is not None:
         return
-    from mbo_utilities.gui._gpu_cache import get_adapters
+    from mbo_utilities.gui._gpu_cache import get_adapters, get_default_index
     parent._options_gpu_adapters = list(get_adapters())
-    labels = ["auto (default)"]
+    parent._options_gpu_default_idx = get_default_index()
+
+    def _adapter_name(a) -> str:
+        info = getattr(a, "info", {}) or {}
+        return info.get("device", info.get("description", "?"))
+
+    # name the actual GPU behind "auto" instead of a generic label
+    default_idx = parent._options_gpu_default_idx
+    if 0 <= default_idx < len(parent._options_gpu_adapters):
+        labels = [f"auto ({_adapter_name(parent._options_gpu_adapters[default_idx])})"]
+    else:
+        labels = ["auto (default)"]
     for i, a in enumerate(parent._options_gpu_adapters):
         info = getattr(a, "info", {}) or {}
-        name = info.get("device", info.get("description", f"adapter {i}"))
         type_ = info.get("adapter_type", info.get("device_type", "?"))
-        labels.append(f"{i}: {name} [{type_}]")
+        labels.append(f"{i}: {_adapter_name(a)} [{type_}]")
     parent._options_gpu_labels = labels
 
 
@@ -82,12 +135,13 @@ def draw_options_popup(parent: Any) -> None:
             return
 
         _ensure_gpu_list(parent)
+        _refresh_gpu_panel(parent)
 
         imgui.text_colored(_COL_ACCENT, f"{fa.ICON_FA_GEARS}  Options")
         imgui.separator()
         imgui.dummy(imgui.ImVec2(0, 4))
 
-        imgui.text_colored(_COL_DIM, "GPU adapter")
+        imgui.text_colored(_COL_DIM, "GPU adapter (render)")
         if imgui.is_item_hovered():
             imgui.set_tooltip(
                 "Pick which GPU to render with. 'auto' lets wgpu choose "
@@ -101,6 +155,14 @@ def draw_options_popup(parent: Any) -> None:
         if changed:
             parent._options_gpu_idx = new_ui_idx - 1
             set_gpu_index(parent._options_gpu_idx)
+            _refresh_gpu_panel(parent)
+
+        # what fastplotlib actually renders with right now
+        rg = getattr(parent, "_options_render_gpu", None)
+        if rg:
+            note = {"live": "", "preference": "  (selected)",
+                    "auto": "  (auto)"}.get(rg.get("source"), "")
+            imgui.text_colored(_COL_DIM, f"  using: {rg['summary']}{note}")
 
         imgui.dummy(imgui.ImVec2(0, 4))
         imgui.separator()

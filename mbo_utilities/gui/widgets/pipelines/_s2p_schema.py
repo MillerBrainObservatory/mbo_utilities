@@ -48,7 +48,10 @@ _LOAD_TIMEOUT_S = 10.0
 
 def _cache_dir() -> Path:
     override = os.environ.get("MBO_CACHE_DIR")
-    return Path(override) if override else Path.home() / ".mbo" / "cache"
+    if override:
+        return Path(override)
+    from mbo_utilities.preferences import get_mbo_dirs
+    return get_mbo_dirs()["cache"]
 
 
 def _suite2p_version() -> str:
@@ -651,6 +654,7 @@ _FLAT_TO_MBO: dict[str, Any] = {
     # outside the suite2p settings schema (so settings.npy stays a
     # record of the suite2p stages only). Listed here so flat-ops
     # loaders pick them up; the hydrator routes them to s2p_extras.
+    "norm_method": "norm_method",
     "dff_window_size": "dff_window_size",
     "dff_percentile": "dff_percentile",
     "dff_smooth_window": "dff_smooth_window",

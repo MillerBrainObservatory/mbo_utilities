@@ -52,6 +52,38 @@ def isoview_zarr_chunks(shape_zyx: tuple[int, ...]) -> tuple[int, ...]:
     )
 
 
+ISOVIEW_ZARR_SHARD_TARGET_MB: int = 512
+"""Target on-disk shard size for isoview volumes, in MiB.
+
+Shards span a Z-slab (full Y, full X) sized to roughly this budget rather
+than the whole volume. A whole-volume shard forces zarr to allocate the
+entire array to decode *any* chunk from it (the 3.9 GiB transient that
+OOM'd parallel fusion workers reading per-camera masks); a Z-slab shard
+caps that transient to one slab while keeping the file count bounded (a
+handful of shards per array). ``~/repos/isoview`` imports this."""
+
+
+def isoview_zarr_shards(
+    shape_zyx: tuple[int, ...],
+    *,
+    itemsize: int = 2,
+    target_mb: int | None = None,
+) -> tuple[int, ...]:
+    """Resolve a memory-bounded ``(z, y, x)`` shard for an isoview volume.
+
+    The shard is ``(slab_z, Y, X)`` with ``slab_z`` chosen so one shard is
+    ~``target_mb`` MiB (default :data:`ISOVIEW_ZARR_SHARD_TARGET_MB`),
+    clamped to ``[1, Z]``. Because the per-plane chunk has ``z == 1`` (see
+    :data:`ISOVIEW_ZARR_CHUNK_ZYX`) any ``slab_z`` tiles the chunk grid
+    cleanly, so callers can use the result directly as the shard shape.
+    """
+    z, y, x = (int(s) for s in shape_zyx[:3])
+    budget = (target_mb or ISOVIEW_ZARR_SHARD_TARGET_MB) * 1024 * 1024
+    plane_bytes = max(1, y * x * int(itemsize))
+    slab_z = max(1, min(z, budget // plane_bytes))
+    return (slab_z, y, x)
+
+
 _TM_PATTERN = re.compile(r"TM(\d{5,6})")
 _SPM_PATTERN = re.compile(r"^SPM\d+$")
 _FUSED_SUFFIX = ".fused"
@@ -814,10 +846,10 @@ def _first_method_dir(fused_root: Path) -> Path | None:
 
 
 _CORRECTED_RE = re.compile(
-    r"SPM(\d+)_TM(\d+)_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
+    r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _FUSED_RE = re.compile(
-    r"SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
+    r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
     r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _RAW_STACK_RE = re.compile(
@@ -830,11 +862,11 @@ _PROJ_FLAT_RE = re.compile(
     re.IGNORECASE,
 )
 _PROJ_FUSED_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
+    r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_VW_ONLY_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_(?:VW|CHN)(\d+)\.(xy|xz|yz)Projection\.tif$",
+    r"^SPM(\d+)(?:_TM(\d+))?_(?:VW|CHN)(\d+)\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _AXIS_ORDER = ("xy", "xz", "yz")
@@ -936,12 +968,19 @@ def _collect_fused_proj_files(
         if not m:
             continue
         if vw_only:
-            _, tm_str, vw, axis = m.groups()
+            spm_str, tm_str, vw, axis = m.groups()
         else:
-            _, tm_str, _cm0, _cm1, vw, _chn, axis = m.groups()
+            spm_str, tm_str, _cm0, _cm1, vw, _chn, axis = m.groups()
         axis = axis.lower()
         view = f"VW{int(vw):02d}"
-        t = tm_from_dir if tm_from_dir is not None else int(tm_str)
+        # tiled projections (flat dir, no TM in name) key by SPM, matching
+        # _scan_fused's per-tile timepoint slots.
+        if tm_from_dir is not None:
+            t = tm_from_dir
+        elif tm_str is not None:
+            t = int(tm_str)
+        else:
+            t = int(spm_str)
         axes.add(axis)
         views.add(view)
         files[(axis, view, t)] = f
@@ -975,7 +1014,8 @@ def _scan_corrected(spm_dir: Path):
 
     Layout::
 
-        <root>.corrected/SPM##/TM######/SPM##_TM######_CM##(_VW##)?.<ext>
+        timelapse: <root>.corrected/SPM##/TM######/SPM##_TM######_CM##(_VW##)?.<ext>
+        tiled:     <root>.corrected/SPM##/SPM##_CM##(_VW##|_CHN##)?.<ext>
 
     Returns ``(tp_paths, view_keys, channel_names, is_tiled)`` where:
       - tp_paths: dict[int, dict[int, Path]] keyed by timepoint index
@@ -984,27 +1024,23 @@ def _scan_corrected(spm_dir: Path):
       - channel_names: ``["CM00", "CM01", ...]``.
       - is_tiled: True when the .corrected/ root has multiple SPM##
         siblings (tiled acquisition); False otherwise.
+
+    Tiled acquisitions fold every sibling ``SPM##`` tile into the T axis
+    (one tile per timepoint index); timelapse acquisitions keep the
+    single SPM## and fold its ``TM######`` folders into T.
     """
     parent = spm_dir.parent
+    sibling_spms = sorted(
+        d for d in parent.iterdir()
+        if d.is_dir() and _SPM_PATTERN.match(d.name)
+    ) if parent.is_dir() else []
     is_tiled = (
-        parent.is_dir()
-        and _CORRECTED_TAIL_RE.search(parent.name) is not None
-        and sum(
-            1 for d in parent.iterdir() if d.is_dir() and _SPM_PATTERN.match(d.name)
-        ) > 1
+        _CORRECTED_TAIL_RE.search(parent.name) is not None
+        and len(sibling_spms) > 1
     )
-    if _has_tm_pattern(spm_dir.name):
-        tm_dirs = [spm_dir]
-    else:
-        tm_dirs = _find_tm_folders(spm_dir)
-    if not tm_dirs:
-        return {}, [], [], is_tiled
 
-    tp_paths: dict[int, dict[int, Path]] = {}
-    cams: set[int] = set()
-
-    for ti, tm in enumerate(tm_dirs):
-        for f in sorted(tm.iterdir()):
+    def _read_cams(folder: Path, ti: int) -> None:
+        for f in sorted(folder.iterdir()):
             if not (f.is_file() or f.suffix.lower() == ".zarr"):
                 continue
             if _is_aux(f):
@@ -1015,6 +1051,23 @@ def _scan_corrected(spm_dir: Path):
             cam = int(m.group(3))
             tp_paths.setdefault(ti, {})[cam] = f
             cams.add(cam)
+
+    tp_paths: dict[int, dict[int, Path]] = {}
+    cams: set[int] = set()
+
+    if is_tiled:
+        # one timepoint per spatial tile; cameras stay on the C axis.
+        for ti, spm in enumerate(sibling_spms):
+            _read_cams(spm, ti)
+    else:
+        if _has_tm_pattern(spm_dir.name):
+            tm_dirs = [spm_dir]
+        else:
+            # timelapse nests TM######/ under SPM##; a non-tiled SPM with
+            # the camera files directly under it is a single timepoint.
+            tm_dirs = _find_tm_folders(spm_dir) or [spm_dir]
+        for ti, tm in enumerate(tm_dirs):
+            _read_cams(tm, ti)
 
     view_keys = sorted(cams)
     channel_names = [f"CM{c:02d}" for c in view_keys]
@@ -1027,15 +1080,15 @@ def _scan_fused(method_dir: Path):
     Layouts::
 
         timelapse: <method>/TM######/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
-        tiled:     <method>/SPM##/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
+        tiled:     <method>/SPM##/SPM##_CM##_CM##_VW##(_CHN##)?.<ext>   (no TM)
 
     Returns ``(tp_paths, view_keys, channel_names, is_tiled)`` where
     ``view_keys`` are ``(cam0, cam1, vw, chn)`` tuples (``chn=-1`` when
     the filename omits the trailing ``_CHN##``) and channel names are
     ``["VW00_fused", "VW00_CHN01_fused", ...]``. ``is_tiled`` is True
     when leaves are SPM## (tiled) instead of TM###### (timelapse). For
-    tiled mode each file's TM number drives the timepoint index; for
-    timelapse mode the enclosing TM dir does.
+    tiled mode the SPM number drives the timepoint index (one slot per
+    tile); for timelapse mode the enclosing TM dir does.
     """
     leaves = list(_iter_fused_leaf_dirs(method_dir))
     is_tiled = any(tm_from_dir is None for tm_from_dir, _ in leaves)
@@ -1054,10 +1107,12 @@ def _scan_fused(method_dir: Path):
             m = _FUSED_RE.match(f.name)
             if not m:
                 continue
-            tm = tm_from_dir if tm_from_dir is not None else int(m.group(2))
+            # tiled leaves (SPM##, no TM dir) key the slot by SPM so each
+            # tile gets its own timepoint; timelapse keys by the TM dir.
+            slot = tm_from_dir if tm_from_dir is not None else int(m.group(1))
             chn = int(m.group(6)) if m.group(6) is not None else -1
             key = (int(m.group(3)), int(m.group(4)), int(m.group(5)), chn)
-            by_tm.setdefault(tm, {})[key] = f
+            by_tm.setdefault(slot, {})[key] = f
             views.add(key)
 
     if not by_tm:

@@ -9,6 +9,7 @@ from PIL import Image, ImageFilter, ImageOps
 import numpy as np
 
 from mbo_utilities.gui.run_gui import run_gui
+from mbo_utilities.gui._setup import get_default_ini_path
 from imgui_bundle import hello_imgui
 
 # Constants
@@ -237,6 +238,7 @@ def capture_metadata_viewer(data_path: Path):
     params.app_window_params.window_geometry.size = (500, 700)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False
+    params.ini_filename = get_default_ini_path("metadata_viewer")
     params.fps_idling.enable_idling = False
     params.callbacks.show_gui = gui_callback
     params.callbacks.pre_new_frame = post_draw
@@ -309,6 +311,7 @@ def capture_configurable_metadata(data_path: Path):
     params.app_window_params.window_geometry.size = (500, 520)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False
+    params.ini_filename = get_default_ini_path("configurable_metadata")
     params.fps_idling.enable_idling = False
     params.callbacks.show_gui = gui_callback
     params.callbacks.pre_new_frame = post_draw
@@ -359,6 +362,7 @@ def capture_save_options(data_path: Path):
     params.app_window_params.window_geometry.size = (520, 520)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False
+    params.ini_filename = get_default_ini_path("save_options")
     params.fps_idling.enable_idling = False
     params.callbacks.show_gui = gui_callback
     params.callbacks.pre_new_frame = post_draw
@@ -409,6 +413,7 @@ def capture_suite2p_settings():
     params.app_window_params.window_geometry.size = (540, 620)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False
+    params.ini_filename = get_default_ini_path("suite2p_settings")
     params.fps_idling.enable_idling = False
     params.callbacks.show_gui = gui_callback
     params.callbacks.pre_new_frame = post_draw

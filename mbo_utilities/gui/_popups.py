@@ -7,6 +7,7 @@ metadata viewer, and process console.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -52,18 +53,92 @@ def _log_line_style(line: str) -> tuple[Any, str]:
     return _LOG_INFO, line
 
 
+def _meter_color(frac: float) -> Any:
+    """Green / amber / red fill for a usage meter by fill fraction."""
+    if frac >= 0.85:
+        return imgui.ImVec4(0.85, 0.30, 0.30, 1.0)
+    if frac >= 0.60:
+        return imgui.ImVec4(0.90, 0.70, 0.25, 1.0)
+    return imgui.ImVec4(0.32, 0.66, 0.38, 1.0)
+
+
+def _draw_meter(label: str, frac: float, pct: str, caption_s: str = "") -> None:
+    """A slim usage bar: dim label, then bar + percentage + optional caption.
+
+    The bar fills the available width minus the percentage and caption.
+    """
+    imgui.text_colored(_SYS_LABEL, label)
+    frac = min(max(frac, 0.0), 1.0)
+    spacing = imgui.get_style().item_spacing.x
+    pct_w = imgui.calc_text_size(pct).x
+    cap_w = imgui.calc_text_size(caption_s).x if caption_s else 0.0
+    bar_w = max(60.0, imgui.get_content_region_avail().x - pct_w - cap_w - spacing * 2)
+    bar_h = imgui.get_text_line_height() * 0.7
+    imgui.push_style_color(imgui.Col_.plot_histogram, _meter_color(frac))
+    imgui.progress_bar(frac, ImVec2(bar_w, bar_h), "")
+    imgui.pop_style_color()
+    imgui.same_line()
+    imgui.text(pct)
+    if caption_s:
+        imgui.same_line()
+        imgui.text_disabled(caption_s)
+
+
+def _draw_gpu_meter(d: dict) -> None:
+    """One physical GPU as a utilization meter (VRAM fill when util is N/A)."""
+    total = d.get("total_mb") or 0
+    used = d.get("used_mb") or 0
+    util = d.get("util_pct")
+    temp = d.get("temp_c")
+
+    mem_frac = (used / total) if total else 0.0
+    if util is not None:
+        frac, pct = util / 100.0, f"{util:.0f}%"
+    else:
+        frac, pct = mem_frac, f"{mem_frac * 100:.0f}%"
+
+    caption = []
+    if total:
+        caption.append(f"{used / 1024:.1f}/{total / 1024:.1f} GB")
+    if temp is not None:
+        caption.append(f"{temp:.0f}C")
+    caption_s = ("  " + " · ".join(caption)) if caption else ""
+
+    _draw_meter(f"GPU {d.get('index', '?')}: {d.get('name', '?')}", frac, pct, caption_s)
+
+
 def _draw_system_info_header(parent: Any) -> None:
     """Compact system-capacity header for the Process Console.
 
-    Shows: CPU cores, live available/total RAM, selected GPU adapter
-    (from preferences), and the deduplicated list of physical GPUs.
-    Live RAM is cheap to probe each frame (~µs syscall); GPU and CPU
-    counts are cached on first call.
+    Shows: CPU cores, live available/total RAM, the selected render GPU
+    adapter (from preferences), and one live-usage entry per physical GPU.
+    Live RAM is cheap to probe each frame (~µs syscall); per-GPU usage comes
+    from nvidia-smi and is refreshed on a throttle (~1.5s), not every frame.
     """
     if not imgui.collapsing_header("System", imgui.TreeNodeFlags_.default_open):
         return
 
     _ensure_gpu_list(parent)
+
+    # per-GPU usage (nvidia-smi) + total CPU%, throttled. nvidia-smi is a
+    # subprocess; cpu_percent(interval=None) needs a gap between calls to be
+    # meaningful — both want the ~1.5s window, not per-frame.
+    now = time.monotonic()
+    if (not hasattr(parent, "_sys_gpu_devices")
+            or now - getattr(parent, "_sys_gpu_last_refresh", 0.0) >= 1.5):
+        from mbo_utilities.gpu import gpu_devices
+        try:
+            parent._sys_gpu_devices = gpu_devices()
+        except Exception:
+            parent._sys_gpu_devices = []
+        try:
+            import psutil
+            parent._sys_cpu_pct = psutil.cpu_percent(interval=None)
+        except Exception:
+            parent._sys_cpu_pct = None
+        parent._sys_gpu_last_refresh = now
+    gpu_devices_live = parent._sys_gpu_devices
+    cpu_pct = getattr(parent, "_sys_cpu_pct", None)
 
     # CPU + RAM via psutil (live RAM each frame).
     try:
@@ -135,9 +210,17 @@ def _draw_system_info_header(parent: Any) -> None:
         _row("CPU cores:", cpu_str)
         _row("RAM (avail/total):", ram_str)
         _row("GPU (selected):", selected_str, value_color=_SYS_ACCENT)
-        _row("GPU (available):", gpus_str)
+        if not gpu_devices_live:
+            _row("GPU (available):", gpus_str)
 
         imgui.end_table()
+
+    if cpu_pct is not None or gpu_devices_live:
+        imgui.spacing()
+        if cpu_pct is not None:
+            _draw_meter("CPU usage", cpu_pct / 100.0, f"{cpu_pct:.0f}%")
+        for d in gpu_devices_live:
+            _draw_gpu_meter(d)
 
     imgui.spacing()
     imgui.spacing()
@@ -253,7 +336,10 @@ def draw_process_console_popup(parent: Any):
             # recompute available height AFTER the header so the scroll
             # area gets exactly what's left, minus footer space.
             avail = imgui.get_content_region_avail()
-            content_height = avail.y - 35  # space for separator + close button
+            # clamp positive: while resizing, the popup can momentarily have
+            # near-zero client area, which would give begin_child a degenerate
+            # (negative) size and make it clip to false.
+            content_height = max(1.0, avail.y - 35)  # space for separator + close button
 
             # split leftover height evenly among expanded log boxes so they
             # fill the area. uses last frame's non-box height and box count
@@ -266,8 +352,13 @@ def draw_process_console_popup(parent: Any):
             expanded_boxes = 0
             sum_box_h = 0.0
 
-            # scrollable content area
-            if imgui.begin_child("##ProcessContent", ImVec2(0, content_height), imgui.ChildFlags_.none):
+            # scrollable content area. begin_child needs a matching end_child
+            # even when it returns false (clipped/collapsed during resize) —
+            # otherwise the window stack unwinds wrong and end_popup() asserts.
+            content_open = imgui.begin_child(
+                "##ProcessContent", ImVec2(0, content_height), imgui.ChildFlags_.none
+            )
+            if content_open:
                 # active tasks section
                 if progress_items:
                     imgui.text_colored(_SYS_TITLE, f"Active Tasks ({len(progress_items)})")
@@ -312,7 +403,7 @@ def draw_process_console_popup(parent: Any):
 
                 # natural height of everything drawn, for next-frame window grow
                 parent._process_console_content_h = imgui.get_cursor_pos_y()
-                imgui.end_child()
+            imgui.end_child()
 
             # remember the non-box height and box count for next frame's split
             parent._proc_log_fixed_h = parent._process_console_content_h - sum_box_h

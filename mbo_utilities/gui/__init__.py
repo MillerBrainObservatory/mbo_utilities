@@ -4,7 +4,7 @@ GUI module with lazy imports to avoid loading heavy dependencies
 
 The CLI entry point (mbo command) imports this module, so we must keep
 top-level imports minimal for fast startup of light operations like
---download-notebook and --check-install.
+--check-install.
 
 Architecture
 ------------
@@ -22,7 +22,6 @@ __all__ = [
     "GridSearchViewer",
     "PreviewDataWidget",
     # Entry points
-    "download_notebook",
     "get_default_ini_path",
     "run_gui",
     "set_qt_icon",
@@ -37,9 +36,6 @@ def __getattr__(name):
     if name == "run_gui":
         from .run_gui import run_gui
         return run_gui
-    if name == "download_notebook":
-        from .run_gui import download_notebook
-        return download_notebook
     if name == "PreviewDataWidget":
         from . import _setup  # triggers setup on import
         from .widgets.preview_data import PreviewDataWidget

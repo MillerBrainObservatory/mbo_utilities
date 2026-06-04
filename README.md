@@ -116,9 +116,8 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usa
 | `mbo info /path/to/data.tiff` | Show file info and metadata |
 | `mbo convert input.tiff output.zarr` | Convert between formats |
 | `mbo scanphase /path/to/data.tiff` | Run scan-phase analysis |
-| `mbo notebook lsp` | Generate template notebook |
+| `mbo init` | Create starter notebooks (mbo + LBM-Suite2p user guides) |
 | `mbo formats` | List supported formats |
-| `mbo download path/to/notebook.ipynb` | Download a notebook to the current directory |
 | `mbo pollen` | Pollen calibration tool (WIP) |
 | `mbo pollen path/to/data` | Pollen calibration - Skip data collection |
 
@@ -191,13 +190,13 @@ The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the packag
 # Windows
 uv tool uninstall mbo_utilities
 Remove-Item -Recurse -Force "$env:USERPROFILE\.mbo"
-Remove-Item "$env:USERPROFILE\Desktop\Miller Brain Suite.lnk" -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\Desktop\Miller Brain Studio.lnk" -ErrorAction SilentlyContinue
 ```
 
 ```bash
 # Linux/macOS
 uv tool uninstall mbo_utilities
-rm -rf ~/mbo
+rm -rf ~/.mbo
 ```
 
 **If installed in a project venv:**

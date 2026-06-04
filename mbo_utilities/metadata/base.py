@@ -469,8 +469,10 @@ _PER_FRAME_VECTORS = (
     "badframes",
 )
 
+# plane_shifts / plane_shifts_params are intentionally NOT denylisted:
+# register_z writes them so viewers can align planes at render time
+# (see arrays/_registration.py), so they must survive export.
 _MBO_ADDITIONS = (
-    "plane_shifts", "plane_shifts_params",
     "processing_history", "_metadata_provenance",
     "roi_mode",
 )

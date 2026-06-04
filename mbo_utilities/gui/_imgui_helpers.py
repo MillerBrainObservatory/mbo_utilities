@@ -24,6 +24,7 @@ __all__ = [
     "settings_row_with_popup",
     "style_imgui_opaque",
     "style_seaborn_dark",
+    "text_wrapped_cell",
     "tooltip_marks_right",
 ]
 
@@ -378,6 +379,23 @@ def set_tooltip(
         imgui.text_unformatted(tooltip)
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
+
+
+def text_wrapped_cell(text: str, color: "ImVec4 | None" = None) -> None:
+    """Wrapped text that wraps at the current table cell's right edge.
+
+    Inside a table, push_text_wrap_pos(0.0) wraps at the window edge (past
+    the cell), so long cell values clip. Wrap at the cell width instead.
+    """
+    wrap_x = imgui.get_cursor_pos_x() + imgui.get_content_region_avail().x
+    imgui.push_text_wrap_pos(wrap_x)
+    try:
+        if color is None:
+            imgui.text_unformatted(text)
+        else:
+            imgui.text_colored(color, text)
+    finally:
+        imgui.pop_text_wrap_pos()
 
 
 def draw_checkbox_grid(

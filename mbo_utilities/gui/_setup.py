@@ -93,7 +93,7 @@ def get_default_ini_path(name: str = "imgui_settings") -> str:
     Returns
     -------
     str
-        full path to the ini file in ~/mbo/imgui/assets/app_settings/
+        full path to the ini file in ~/.mbo/imgui/assets/app_settings/
     """
     from mbo_utilities.preferences import get_mbo_dirs
 

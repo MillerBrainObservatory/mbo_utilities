@@ -57,72 +57,6 @@ class PathAwareGroup(click.Group):
         return super().resolve_command(ctx, args)
 
 
-def download_file(
-    url: str,
-    output_path: str | Path | None = None,
-) -> Path:
-    """Download a file from a URL to a local path.
-
-    Parameters
-    ----------
-    url : str
-        URL to the file. Supports GitHub blob URLs (automatically converted to raw URLs).
-    output_path : str, Path, optional
-        Directory or file path to save the file. If None or '.', saves to current directory.
-
-    Returns
-    -------
-    Path
-        Path to the downloaded file.
-    """
-    import urllib.request
-
-    # Convert GitHub blob URLs to raw URLs
-    if "github.com" in url and "/blob/" in url:
-        url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
-
-    # Extract filename from URL
-    url_filename = url.split("/")[-1]
-    if "?" in url_filename:
-        url_filename = url_filename.split("?")[0]
-
-    # Determine output file path
-    if output_path is None or output_path == ".":
-        output_file = Path.cwd() / url_filename
-    else:
-        output_file = Path(output_path).expanduser().resolve()
-        if output_file.is_dir() or (not output_file.suffix and not output_file.exists()):
-            output_file.mkdir(parents=True, exist_ok=True)
-            output_file = output_file / url_filename
-
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        click.echo(f"Downloading from:\n  {url}")
-        click.echo(f"Saving to:\n  {output_file.resolve()}")
-        urllib.request.urlretrieve(url, output_file)
-        click.secho(f"\nSuccessfully downloaded: {output_file.resolve()}", fg="green")
-    except Exception as e:
-        click.secho(f"\nFailed to download: {e}", fg="red")
-        click.echo(f"\nYou can manually download from: {url}")
-        sys.exit(1)
-
-    return output_file
-
-
-def download_notebook(
-    output_path: str | Path | None = None,
-    notebook_url: str | None = None,
-) -> Path:
-    """Download a Jupyter notebook from a URL to a local file."""
-    default_url = "https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/demos/user_guide.ipynb"
-    url = notebook_url or default_url
-    output_file = download_file(url, output_path)
-    click.echo("\nTo use the notebook:")
-    click.echo(f"  jupyter lab {output_file.resolve()}")
-    return output_file
-
-
 def _get_marker_path() -> Path:
     """Get path to first-run marker file."""
     from mbo_utilities import get_mbo_dirs
@@ -223,31 +157,6 @@ def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -
     help="Show version and installation info.",
 )
 @click.option(
-    "--download-notebook",
-    is_flag=True,
-    help="Download the user guide notebook and exit.",
-)
-@click.option(
-    "--notebook-url",
-    type=str,
-    default=None,
-    help="URL of notebook to download.",
-)
-@click.option(
-    "--download-file",
-    "download_file_url",
-    type=str,
-    default=None,
-    help="Download a file from URL (e.g. GitHub).",
-)
-@click.option(
-    "-o", "--output",
-    "output_path",
-    type=str,
-    default=None,
-    help="Output path for --download-file or --download-notebook.",
-)
-@click.option(
     "--check-install",
     is_flag=True,
     help="Verify the installation of mbo_utilities and dependencies.",
@@ -273,10 +182,6 @@ def _version_callback(ctx: click.Context, param: click.Parameter, value: bool) -
 @click.pass_context
 def main(
     ctx,
-    download_notebook=False,
-    notebook_url=None,
-    download_file_url=None,
-    output_path=None,
     check_install=False,
     no_cache=False,
     clear_cache=False,
@@ -293,14 +198,13 @@ def main(
 
     \b
     Commands:
+      mbo init [DATA_PATH]           Create starter notebooks
       mbo convert INPUT OUTPUT       Convert between formats
       mbo info INPUT                 Show array information (CLI)
-      mbo download URL               Download file from GitHub
       mbo formats                    List supported formats
 
     \b
     Utilities:
-      mbo --download-notebook             Download user guide notebook
       mbo --check-install                 Verify installation
     """
     # handle --clear-cache early
@@ -311,15 +215,6 @@ def main(
             click.secho(f"Cache cleared: {path}", fg="green")
         else:
             click.secho("No cache to clear.", fg="yellow")
-        return
-
-    if download_file_url:
-        download_file(download_file_url, output_path)
-        return
-
-    if download_notebook:
-        download_notebook_func = globals()["download_notebook"]
-        download_notebook_func(output_path=output_path, notebook_url=notebook_url)
         return
 
     if check_install:
@@ -713,27 +608,6 @@ def info(input_path, metadata):
             other_keys = [k for k in md if k not in important_keys]
             if other_keys:
                 click.echo(f"  ... and {len(other_keys)} more keys")
-
-
-@main.command()
-@click.argument("url", type=str)
-@click.option(
-    "-o", "--output",
-    "output_path",
-    type=click.Path(),
-    default=None,
-    help="Output directory or file path. Default: current directory.",
-)
-def download(url, output_path):
-    r"""
-    Download a file from a URL (supports GitHub).
-
-    \b
-    Examples:
-      mbo download https://github.com/user/repo/blob/main/notebook.ipynb
-      mbo download https://github.com/user/repo/blob/main/data.npy -o ./data/
-    """
-    download_file(url, output_path)
 
 
 @main.command("formats")
@@ -1348,102 +1222,131 @@ def processes(kill_all, kill, cleanup):
         click.echo("\nTip: Run 'mbo processes --cleanup' to remove finished entries.")
 
 
-@main.command("notebook")
-@click.argument("template", required=False, default=None)
+@main.command("gpu")
 @click.option(
-    "-o", "--output",
-    "output_path",
-    type=click.Path(),
+    "--watch",
+    type=float,
     default=None,
-    help="Output directory or file path. Default: current directory.",
+    help="Refresh every N seconds until Ctrl-C.",
 )
 @click.option(
-    "-n", "--name",
-    "name",
-    type=str,
-    default=None,
-    help="Custom notebook name (without date prefix or .ipynb extension).",
-)
-@click.option(
-    "-d", "--data",
-    "data_path",
-    type=click.Path(),
-    default=None,
-    help="Data path to prepopulate in the notebook.",
-)
-@click.option(
-    "-l", "--list",
-    "list_templates",
+    "--processes",
+    "show_processes",
     is_flag=True,
-    help="List available templates.",
+    help="Also list per-process VRAM usage.",
 )
 @click.option(
-    "--templates-dir",
+    "--json",
+    "as_json",
     is_flag=True,
-    help="Show path to custom templates directory.",
+    help="Emit render/compute GPU + devices + processes as JSON.",
 )
-def notebook(template, output_path, name, data_path, list_templates, templates_dir):
+def gpu(watch, show_processes, as_json):
     r"""
-    Generate a notebook from a template.
-
-    Creates a Jupyter notebook with the naming convention yyyy-mm-dd_<template>.ipynb.
+    Show which GPU renders (fastplotlib) and which computes (suite2p /
+    cellpose / cupy), plus device memory.
 
     \b
     Examples:
-      mbo notebook --list              # List available templates
-      mbo notebook lsp                  # Create LBM-Suite2p-Python notebook
-      mbo notebook lsp -d /path/to/raw  # With data path prepopulated
-      mbo notebook basic -n my_analysis # Custom name: 2025-01-14_my_analysis.ipynb
-      mbo notebook --templates-dir      # Show custom templates location
+      mbo gpu               # render GPU, compute GPU, device memory
+      mbo gpu --processes   # also per-process VRAM
+      mbo gpu --watch 2     # refresh every 2s
+      mbo gpu --json        # machine-readable
     """
-    from mbo_utilities.templates import (
-        TEMPLATES,
-        create_notebook,
-        list_templates as get_templates,
-        get_template_path,
-    )
+    from mbo_utilities import gpu as gpu_mod
 
-    if templates_dir:
-        tpl_path = get_template_path()
-        click.echo(f"Custom templates directory: {tpl_path}")
-        click.echo("\nPlace .py files here to add custom templates.")
-        click.echo("See documentation for template format.")
+    if as_json:
+        import json as _json
+        click.echo(_json.dumps({
+            "render_gpu": gpu_mod.render_gpu(),
+            "compute_gpu": gpu_mod.compute_gpu(),
+            "devices": gpu_mod.gpu_devices(),
+            "processes": gpu_mod.gpu_processes() if show_processes else [],
+            "compute_disabled": gpu_mod.gpu_compute_disabled(),
+        }, indent=2))
         return
 
-    if list_templates or template is None:
-        templates = get_templates()
-        if not templates:
-            click.echo("No templates available.")
+    if watch:
+        try:
+            while True:
+                click.clear()
+                click.echo(gpu_mod.format_gpu_report(show_processes=show_processes))
+                click.echo("\n(Ctrl-C to stop)")
+                time.sleep(watch)
+        except KeyboardInterrupt:
             return
+    else:
+        click.echo(gpu_mod.format_gpu_report(show_processes=show_processes))
 
-        click.echo("\nAvailable notebook templates:\n")
-        max_name = max(len(t[0]) for t in templates)
-        for tpl_name, description in templates:
-            click.echo(f"  {tpl_name:<{max_name}}  {description}")
-        click.echo(f"\nUsage: mbo notebook <template> [-o output_dir] [-n name] [-d data_path]")
+
+@main.command("init")
+@click.argument("data_path", required=False, type=click.Path())
+@click.option(
+    "-o", "--output",
+    "output_dir",
+    type=click.Path(),
+    default=None,
+    help="Destination directory (overrides default location).",
+)
+@click.option(
+    "--overwrite/--no-overwrite",
+    default=False,
+    help="Overwrite existing notebooks.",
+)
+def init(data_path, output_dir, overwrite):
+    r"""
+    Create starter notebooks (mbo + LBM-Suite2p user guides).
+
+    With DATA_PATH, notebooks go in <DATA_PATH>/../scripts and the data path
+    is filled in. Without it, notebooks go in the current directory.
+
+    \b
+    Examples:
+      mbo init                       # notebooks in current directory
+      mbo init /data/raw             # notebooks in /data/scripts, path filled in
+      mbo init /data/raw -o ./nb     # notebooks in ./nb
+    """
+    src_dir = Path(__file__).resolve().parents[1] / "demos"
+
+    # source notebook -> default data-path token replaced when DATA_PATH given
+    # (None = copy as-is; the lsp guide is a markdown reference with no run path)
+    notebooks = {
+        "mbo_user_guide.ipynb": "D:/demo/raw",
+        "lsp_user_guide.ipynb": None,
+    }
+
+    if output_dir is not None:
+        dest = Path(output_dir).expanduser()
+    elif data_path is not None:
+        dest = Path(data_path).expanduser().resolve().parent / "scripts"
+    else:
+        dest = Path.cwd()
+    dest.mkdir(parents=True, exist_ok=True)
+
+    fill = Path(data_path).expanduser().resolve().as_posix() if data_path else None
+
+    written = []
+    for filename, token in notebooks.items():
+        src = src_dir / filename
+        if not src.exists():
+            click.secho(f"Missing: {filename}", fg="red")
+            continue
+        out = dest / filename
+        if out.exists() and not overwrite:
+            click.secho(f"Exists: {out}  (--overwrite to replace)", fg="yellow")
+            continue
+        text = src.read_text(encoding="utf-8")
+        if fill and token:
+            text = text.replace(token, fill)
+        out.write_text(text, encoding="utf-8")
+        written.append(out)
+        click.secho(f"Created: {out}", fg="green")
+
+    if not written:
         return
-
-    if template not in TEMPLATES:
-        click.secho(f"Unknown template: {template}", fg="red")
-        click.echo(f"Available: {', '.join(TEMPLATES.keys())}")
-        return
-
-    # build kwargs for template
-    kwargs = {}
-    if data_path:
-        kwargs["data_path"] = data_path
-
-    try:
-        out_file = create_notebook(
-            template,
-            output_path=output_path,
-            name=name,
-            **kwargs
-        )
-        click.secho(f"Created: {out_file}", fg="green")
-    except Exception as e:
-        click.secho(f"Error creating notebook: {e}", fg="red")
-        raise click.Abort()
+    if fill:
+        click.echo(f"Data path: {fill}")
+    click.echo(f"\nOpen with:\n  jupyter lab {dest}")
 
 
 if __name__ == "__main__":

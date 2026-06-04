@@ -31,9 +31,10 @@ from mbo_utilities.gui._imgui_helpers import (
     PopupAutoSize,
     draw_boxed_label,
     set_tooltip,
+    text_wrapped_cell,
     tooltip_marks_right,
 )
-from mbo_utilities.gui._selection_ui import draw_selection_table
+from mbo_utilities.gui._selection_ui import draw_selection_table, resolve_dim_labels
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.gui.widgets.pipelines.settings import (
     _dataset_size_bytes,
@@ -355,6 +356,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         # so the blob clouds don't correspond and the histogram peak is a
         # near-arbitrary offset that flings VW00 far from VW90.
         self._stitcher_coarse_align: bool = False
+
+        # Lay out tiles using acquisition stage positions (stage_x/y/z from
+        # each SPM's XML) as a per-tile Translation. Off by default — tiles
+        # land at the world origin and you'd run BigStitcher's "Move Tiles
+        # To Regular Grid" / registration instead.
+        self._stitcher_bake_tile_positions: bool = False
 
         # VW00 reorientation for the BigStitcher export (applied to VW00
         # only; VW90 keeps its pipeline pose). An editable op list: a
@@ -1214,6 +1221,15 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "only the per-view calibration affines are written "
                 "and you'd run BigStitcher's interest-point "
                 "registration manually to align the views."
+            )
+            _, self._stitcher_bake_tile_positions = imgui.checkbox(
+                "Bake tile stage positions",
+                self._stitcher_bake_tile_positions,
+            )
+            set_tooltip(
+                "Lay tiles out on the acquisition grid using stage "
+                "positions (stage_x/y/z from each SPM XML). Off: tiles "
+                "land at the origin."
             )
 
     def _draw_stitcher_spark_runtime_box(self) -> None:
@@ -2249,6 +2265,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             "output_suffix": self._iso_tree_suffix(input_dir),
             "stitcher_suffix": self._stitcher_suffix,
             "coarse_align": self._stitcher_coarse_align,
+            "bake_tile_positions": self._stitcher_bake_tile_positions,
             "orientation": orientation,
             "overwrite": self._overwrite,
             "specimens": [int(specimen)],
@@ -2403,6 +2420,34 @@ class IsoviewPipelineWidget(PipelineWidget):
             output_path=resolved_out or str(arr.scan_root),
         )
 
+    def _ram_capped_fuse_workers(self, arr: Any, requested: int) -> int:
+        """Clamp the fuse worker count to what available RAM can hold.
+
+        Each tiled-fuse worker loads two camera volumes + two masks + the
+        fused output, so budget ~6× one Z×Y×X volume per worker. Returns
+        ``requested`` unchanged when psutil/shape are unavailable or memory
+        is ample; only ever lowers it.
+        """
+        requested = max(1, int(requested))
+        try:
+            import psutil
+            shp = tuple(int(s) for s in arr.shape)
+            itemsize = int(getattr(arr.dtype, "itemsize", 2))
+            vol_gb = (shp[-3] * shp[-2] * shp[-1] * itemsize) / (1024 ** 3)
+            per_worker_gb = max(1.0, vol_gb * 6.0)
+            avail_gb = psutil.virtual_memory().available / (1024 ** 3)
+            ram_cap = max(1, int((avail_gb * 0.8) // per_worker_gb))
+        except Exception:
+            return requested
+        if ram_cap < requested:
+            if hasattr(self.parent, "logger"):
+                self.parent.logger.info(
+                    f"multi_fuse: capping workers {requested} -> {ram_cap} "
+                    f"(~{per_worker_gb:.0f} GiB/worker, {avail_gb:.0f} GiB free)"
+                )
+            return ram_cap
+        return requested
+
     def _submit_fuse(self, arr: Any) -> None:
         # multi_fuse accepts a ``.corrected/`` root directly — isoview's
         # ProcessingConfig.__post_init__ walks SPM##/TM###### from there
@@ -2475,6 +2520,15 @@ class IsoviewPipelineWidget(PipelineWidget):
                 int(p["search_y_step"]),
             ]
 
+        # RAM-cap the worker count. Each tiled-fuse worker is a separate
+        # process that holds two full camera volumes + two masks + the
+        # fused output (isoview reads whole volumes via read_volume →
+        # arr[:]), so peak footprint is several× one Z×Y×X volume. With
+        # large IsoView volumes (e.g. 494×2048×2048 = ~3.9 GiB each), the
+        # default min(4, cpu//2) workers can exceed RAM and OOM mid-fusion.
+        # Only ever reduces the count; never raises it.
+        workers = self._ram_capped_fuse_workers(arr, self._workers)
+
         args = {
             "input_path": str(input_dir),
             "output_dir": self._output_dir or None,
@@ -2484,7 +2538,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             ),
             "compression_level": self._compression_level,
             "overwrite": self._overwrite,
-            "workers": self._workers,
+            "workers": workers,
             "pyramid": self._pyramid,
             "pyramid_max_layers": self._pyramid_max_layers,
             "output_suffix": (self._fuse_output_suffix or "").strip() or None,
@@ -2668,17 +2722,32 @@ class IsoviewPipelineWidget(PipelineWidget):
         dims = "TCZYX" if len(shape) == 5 else None
         shape_text = " × ".join(str(s) for s in shape)
         if dims and len(dims) == len(shape):
-            shape_text = f"{shape_text} [{','.join(dims)}]"
+            # dimension labels on their own line under the sizes
+            shape_text = f"{shape_text}\n[{','.join(dims)}]"
 
         md = dict(getattr(arr, "metadata", {}) or {})
-        rows: list[tuple[str, str, str | None]] = [
-            ("Name", short_name, path_str or None),
-            ("Size on disk", _format_size(size_bytes), None),
-            ("Shape", shape_text, None),
-            ("Data state", str(arr.kind), None),
+        _warn_color = imgui.ImVec4(0.95, 0.45, 0.35, 1.0)
+        rows: list[tuple[str, str, str | None, Any]] = [
+            ("Name", short_name, path_str or None, None),
+            ("Size on disk", _format_size(size_bytes), None, None),
+            ("Shape", shape_text, None, None),
+            ("Data state", str(arr.kind), None, None),
         ]
+        # Frame rate: isoview metadata does not encode fs. Always show the
+        # row in red with a hint to set it via the metadata editor (Shift+M)
+        # so the missing value is obvious instead of silently absent.
+        fs_val = get_param(md, "fs")
+        if fs_val is None:
+            rows.append((
+                "Frame rate",
+                "not encoded (Shift+M to set)",
+                "isoview metadata does not currently encode the frame "
+                "rate.\nPress Shift+M to open the metadata editor and set it.",
+                _warn_color,
+            ))
+        else:
+            rows.append(("Frame rate", f"{fs_val} Hz", None, None))
         for label, key, unit in (
-            ("Frame rate", "fs", "Hz"),
             ("dx", "dx", "µm"),
             ("dy", "dy", "µm"),
             ("dz", "dz", "µm"),
@@ -2686,7 +2755,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             v = get_param(md, key)
             if v is None:
                 continue
-            rows.append((label, f"{v} {unit}".rstrip(), None))
+            rows.append((label, f"{v} {unit}".rstrip(), None, None))
 
         imgui.indent(8)
         try:
@@ -2702,16 +2771,15 @@ class IsoviewPipelineWidget(PipelineWidget):
                 imgui.table_setup_column(
                     "value", imgui.TableColumnFlags_.width_stretch
                 )
-                for label, value, hover in rows:
+                for label, value, hover, color in rows:
                     imgui.table_next_row()
                     imgui.table_set_column_index(0)
-                    imgui.text_unformatted(label)
+                    if color is not None:
+                        text_wrapped_cell(label, color)
+                    else:
+                        imgui.text_unformatted(label)
                     imgui.table_set_column_index(1)
-                    imgui.push_text_wrap_pos(0.0)
-                    try:
-                        imgui.text_unformatted(value)
-                    finally:
-                        imgui.pop_text_wrap_pos()
+                    text_wrapped_cell(value, color)
                     if hover and imgui.is_item_hovered():
                         imgui.set_tooltip(hover)
                 imgui.end_table()
@@ -2951,12 +3019,19 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.spacing()
 
     def _draw_iso_data_slicing(self, max_frames: int) -> None:
-        """Data-slicing section — Set slice button + count preview."""
+        """Data-slicing section — Set slice button + count preview.
+
+        The row is labeled with the loaded array's T-axis slider name
+        ("Tile" for tiled trees, "Timepoint" otherwise); the selected
+        indices forwarded to the pipeline are unchanged.
+        """
+        tp_label, _, _ = resolve_dim_labels(self.parent)
+
         imgui.text_colored(_SUBSECTION_COLOR, "Data slicing")
         set_tooltip(
-            "Restrict which timepoints feed the run. Click Set slice to "
-            "define a range using start:stop[:step] syntax (1-based, "
-            "inclusive). Leaving the full range selects all timepoints.",
+            f"Restrict which {tp_label.lower()} feed the run. Click Set "
+            "slice to define a range using start:stop[:step] syntax "
+            "(1-based, inclusive). Leaving the full range selects all.",
             align="right",
         )
         imgui.spacing()
@@ -2969,24 +3044,25 @@ class IsoviewPipelineWidget(PipelineWidget):
             if self._iso_tp_parsed is not None
             else max_frames
         )
-        imgui.text(f"Timepoints: {n_tp}/{max_frames}")
+        imgui.text(f"{tp_label}: {n_tp}/{max_frames}")
 
-        self._draw_iso_slicing_popup(max_frames)
+        self._draw_iso_slicing_popup(max_frames, tp_label)
         imgui.spacing()
         imgui.spacing()
 
-    def _draw_iso_slicing_popup(self, max_frames: int) -> None:
+    def _draw_iso_slicing_popup(self, max_frames: int, tp_label: str) -> None:
         """Slicing popup — pick which timepoints to process."""
+        popup_id = f"{tp_label}##iso_slice"
         if self._iso_slicing_open:
-            imgui.open_popup("Timepoints##iso_slice")
+            imgui.open_popup(popup_id)
             self._iso_slicing_open = False
 
         imgui.set_next_window_size(
             imgui.ImVec2(520, 0), imgui.Cond_.first_use_ever,
         )
-        if imgui.begin_popup("Timepoints##iso_slice"):
+        if imgui.begin_popup(popup_id):
             imgui.text_colored(
-                imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Timepoints",
+                imgui.ImVec4(0.8, 0.8, 0.2, 1.0), tp_label,
             )
             imgui.same_line()
             imgui.text_disabled("(?)")
@@ -3012,6 +3088,7 @@ class IsoviewPipelineWidget(PipelineWidget):
                 id_suffix="_iso",
                 num_channels=1,
                 c_attr="_iso_c",
+                tp_label=tp_label,
             )
 
             imgui.spacing()

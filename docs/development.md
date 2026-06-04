@@ -117,7 +117,7 @@ The `MBO_DEBUG=1` environment variable enables debug logging globally.
 
 ### Preferences
 
-User preferences stored in `~/mbo/settings/preferences.json`.
+User preferences stored in `~/.mbo/settings/preferences.json`.
 
 Handles recent files, dialog directories, GUI state, and pipeline defaults.
 
@@ -421,25 +421,29 @@ These are evaluated at module load using `importlib.util.find_spec()` (no actual
 Standard locations for user data:
 
 ```python
-from mbo_utilities.file_io import get_mbo_dirs
+from mbo_utilities import get_mbo_dirs
 
 dirs = get_mbo_dirs()
 # {
-#     "base": Path("~/mbo"),
-#     "imgui": Path("~/mbo/imgui"),
+#     "base": Path("~/.mbo"),
+#     "imgui": Path("~/.mbo/imgui"),
 #     "cache": Path("~/.mbo/cache"),
 #     "logs": Path("~/.mbo/logs"),
-#     "assets": Path("~/mbo/imgui/assets"),
-#     "settings": Path("~/mbo/imgui/assets/app_settings"),
-#     "data": Path("~/mbo/data"),
-#     "tests": Path("~/mbo/tests"),
+#     "assets": Path("~/.mbo/imgui/assets"),
+#     "settings": Path("~/.mbo/imgui/assets/app_settings"),  # imgui .ini files
+#     "user_settings": Path("~/.mbo/settings"),              # preferences json
+#     "templates": Path("~/.mbo/templates"),
+#     "data": Path("~/.mbo/data"),
+#     "tests": Path("~/.mbo/tests"),
 # }
 ```
 
 | Directory | Purpose |
 |-----------|---------|
-| `~/mbo/` | Root directory |
-| `~/mbo/settings/` | Preferences JSON |
+| `~/.mbo/` | Root directory |
+| `~/.mbo/settings/` | Preferences JSON |
+| `~/.mbo/imgui/assets/app_settings/` | imgui `.ini` layout files |
+| `~/.mbo/templates/` | Notebook templates |
 | `~/.mbo/cache/` | Temporary cached data |
 | `~/.mbo/logs/` | Application logs |
-| `~/mbo/data/` | Sample/user data |
+| `~/.mbo/data/` | Sample/user data |

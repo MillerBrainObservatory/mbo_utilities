@@ -71,8 +71,8 @@ class TaskMonitor:
         # Actually, ProcessManager expects to just read info.
         # Let's write to a standard location that ProcessManager knows about.
         # Standard: ~/.mbo/logs/progress_{pid}.json
-        self.log_dir = Path.home() / ".mbo" / "logs"
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        from mbo_utilities.preferences import get_mbo_dirs
+        self.log_dir = get_mbo_dirs()["logs"]
         if self.uuid:
             self.progress_file = self.log_dir / f"progress_{self.uuid}.json"
         else:
@@ -574,7 +574,14 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     raw_workers = s2p_settings.get("workers")
     if raw_workers in (None, 0):
         n_planes = len(planes) if planes else 1
-        use_gpu = bool(s2p_settings.get("rastermap_kwargs"))  # rough proxy for GPU work
+        # suite2p reg/detect run on the GPU unless torch_device is cpu or
+        # the env policy forces CPU; GPU workers contend for one device so
+        # _auto_workers caps them. Key off the real device, not rastermap.
+        from mbo_utilities.gpu import gpu_compute_disabled
+        device = str(
+            ops.get("torch_device") or s2p_settings.get("torch_device") or "cuda"
+        ).lower()
+        use_gpu = (not gpu_compute_disabled()) and not device.startswith("cpu")
         resolved = _auto_workers(n_planes, use_gpu=use_gpu)
         if resolved != raw_workers:
             logger.info(
@@ -646,6 +653,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
             force_reg=s2p_settings.get("force_reg", False),
             force_detect=s2p_settings.get("force_detect", False),
             accept_all_cells=s2p_settings.get("accept_all_cells", False),
+            norm_method=s2p_settings.get("norm_method", "dff"),
             dff_window_size=s2p_settings.get("dff_window_size", 300),
             dff_percentile=s2p_settings.get("dff_percentile", 20),
             dff_smooth_window=s2p_settings.get("dff_smooth_window"),
@@ -1161,6 +1169,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
             config,
             method=args.get("method"),
             coarse_align=args.get("coarse_align", False),
+            bake_tile_positions=args.get("bake_tile_positions", False),
             orientation=args.get("orientation"),
         )
         logger.info(f"  wrote: {xml_path}")

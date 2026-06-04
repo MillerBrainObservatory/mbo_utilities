@@ -5,7 +5,7 @@
 #   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
 #
 # environment variables:
-#   MBO_ENV_PATH     - custom path for dev environment (default: ~/mbo/envs/mbo_utilities)
+#   MBO_ENV_PATH     - custom path for dev environment (default: ~/<repos|code|software|projects>/mbo_utilities)
 #   MBO_SKIP_ENV     - set to "1" to skip dev environment creation
 #   MBO_OVERWRITE    - set to "1" to overwrite existing installations
 
@@ -1084,8 +1084,9 @@ function New-DesktopShortcut {
     $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "Miller Brain Studio ($BranchRef).lnk" } else { "Miller Brain Studio.lnk" }
     $shortcutPath = Join-Path $desktopPath $shortcutName
 
-    # setup mbo directory for launcher and icon
-    $mboDir = Join-Path $env:USERPROFILE "mbo"
+    # launcher + icon live under ~/.mbo (the app's config dir) so installs
+    # don't leave a stray ~/mbo alongside it
+    $mboDir = Join-Path $env:USERPROFILE ".mbo"
     if (-not (Test-Path $mboDir)) { New-Item -ItemType Directory -Path $mboDir -Force | Out-Null }
 
     $downloadRef = if ($BranchRef) { $BranchRef } else { "master" }
