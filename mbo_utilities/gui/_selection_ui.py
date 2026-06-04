@@ -7,6 +7,33 @@ used by both save-as dialog and suite2p run tab.
 from imgui_bundle import imgui, hello_imgui
 
 from mbo_utilities.arrays.features._slicing import parse_timepoint_selection
+from mbo_utilities.arrays.features._dim_labels import find_slider_name
+
+
+# friendly fallbacks when a slider name is just the bare axis letter (t/c/z)
+# or the axis has no slider for the loaded array.
+_DEFAULT_DIM_LABELS = {"t": "Timepoints", "z": "Z-Planes", "c": "Channels"}
+
+
+def resolve_dim_labels(parent) -> tuple[str, str, str]:
+    """Display labels for the T / Z / C slicing rows.
+
+    Maps each non-spatial axis to the name the viewer's slider already
+    shows for the loaded array (e.g. isoview "Tile"/"Cam"/"Zplane"),
+    falling back to the generic Timepoints/Z-Planes/Channels when the
+    slider name is just the bare axis letter or the axis has no slider.
+    The slicing only relabels the rows; the indices it returns (and the
+    args downstream tasks receive) are unchanged.
+
+    Returns ``(tp_label, z_label, c_label)``.
+    """
+    iw = getattr(parent, "image_widget", None)
+    names = getattr(iw, "_slider_dim_names", None) or () if iw is not None else ()
+    out = []
+    for canon in ("t", "z", "c"):
+        match = find_slider_name(names, canon)
+        out.append(match if match and len(match) > 1 else _DEFAULT_DIM_LABELS[canon])
+    return tuple(out)
 
 
 def _parse_range_selection(text: str, max_val: int) -> tuple[int, int, int, str]:
@@ -76,6 +103,9 @@ def draw_selection_table(
     suffix_attr: str | None = None,
     num_channels: int = 1,
     c_attr: str = "_saveas_c",
+    tp_label: str = "Timepoints",
+    z_label: str = "Z-Planes",
+    c_label: str = "Channels",
 ):
     """
     Draw a selection table for timepoints, z-planes, and channels.
@@ -100,6 +130,10 @@ def draw_selection_table(
         Number of color channels in data (default 1).
     c_attr : str
         Attribute prefix for channel state (e.g., "_saveas_c").
+    tp_label, z_label, c_label : str
+        Row labels for the timepoint, z-plane, and channel rows. Defaults
+        match the generic Timepoints/Z-Planes/Channels; callers pass the
+        loaded array's slider names via :func:`resolve_dim_labels`.
     """
     # get/set attributes dynamically
     tp_selection = getattr(parent, f"{tp_attr}_selection", f"1:{max_frames}")
@@ -160,7 +194,7 @@ def draw_selection_table(
         # timepoints row
         imgui.table_next_row()
         imgui.table_next_column()
-        imgui.text("Timepoints")
+        imgui.text(tp_label)
 
         imgui.table_next_column()
         imgui.set_next_item_width(INPUT_WIDTH)
@@ -219,7 +253,7 @@ def draw_selection_table(
         if num_planes > 1:
             imgui.table_next_row()
             imgui.table_next_column()
-            imgui.text("Z-Planes")
+            imgui.text(z_label)
 
             imgui.table_next_column()
             imgui.set_next_item_width(INPUT_WIDTH)
@@ -268,7 +302,7 @@ def draw_selection_table(
         if num_channels > 1:
             imgui.table_next_row()
             imgui.table_next_column()
-            imgui.text("Channels")
+            imgui.text(c_label)
 
             imgui.table_next_column()
             imgui.set_next_item_width(INPUT_WIDTH)

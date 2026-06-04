@@ -31,9 +31,10 @@ from mbo_utilities.gui._imgui_helpers import (
     PopupAutoSize,
     draw_boxed_label,
     set_tooltip,
+    text_wrapped_cell,
     tooltip_marks_right,
 )
-from mbo_utilities.gui._selection_ui import draw_selection_table
+from mbo_utilities.gui._selection_ui import draw_selection_table, resolve_dim_labels
 from mbo_utilities.gui.widgets.pipelines._base import PipelineWidget
 from mbo_utilities.gui.widgets.pipelines.settings import (
     _dataset_size_bytes,
@@ -2951,12 +2952,19 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.spacing()
 
     def _draw_iso_data_slicing(self, max_frames: int) -> None:
-        """Data-slicing section — Set slice button + count preview."""
+        """Data-slicing section — Set slice button + count preview.
+
+        The row is labeled with the loaded array's T-axis slider name
+        ("Tile" for tiled trees, "Timepoint" otherwise); the selected
+        indices forwarded to the pipeline are unchanged.
+        """
+        tp_label, _, _ = resolve_dim_labels(self.parent)
+
         imgui.text_colored(_SUBSECTION_COLOR, "Data slicing")
         set_tooltip(
-            "Restrict which timepoints feed the run. Click Set slice to "
-            "define a range using start:stop[:step] syntax (1-based, "
-            "inclusive). Leaving the full range selects all timepoints.",
+            f"Restrict which {tp_label.lower()} feed the run. Click Set "
+            "slice to define a range using start:stop[:step] syntax "
+            "(1-based, inclusive). Leaving the full range selects all.",
             align="right",
         )
         imgui.spacing()
@@ -2969,24 +2977,25 @@ class IsoviewPipelineWidget(PipelineWidget):
             if self._iso_tp_parsed is not None
             else max_frames
         )
-        imgui.text(f"Timepoints: {n_tp}/{max_frames}")
+        imgui.text(f"{tp_label}: {n_tp}/{max_frames}")
 
-        self._draw_iso_slicing_popup(max_frames)
+        self._draw_iso_slicing_popup(max_frames, tp_label)
         imgui.spacing()
         imgui.spacing()
 
-    def _draw_iso_slicing_popup(self, max_frames: int) -> None:
+    def _draw_iso_slicing_popup(self, max_frames: int, tp_label: str) -> None:
         """Slicing popup — pick which timepoints to process."""
+        popup_id = f"{tp_label}##iso_slice"
         if self._iso_slicing_open:
-            imgui.open_popup("Timepoints##iso_slice")
+            imgui.open_popup(popup_id)
             self._iso_slicing_open = False
 
         imgui.set_next_window_size(
             imgui.ImVec2(520, 0), imgui.Cond_.first_use_ever,
         )
-        if imgui.begin_popup("Timepoints##iso_slice"):
+        if imgui.begin_popup(popup_id):
             imgui.text_colored(
-                imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Timepoints",
+                imgui.ImVec4(0.8, 0.8, 0.2, 1.0), tp_label,
             )
             imgui.same_line()
             imgui.text_disabled("(?)")
@@ -3012,6 +3021,7 @@ class IsoviewPipelineWidget(PipelineWidget):
                 id_suffix="_iso",
                 num_channels=1,
                 c_attr="_iso_c",
+                tp_label=tp_label,
             )
 
             imgui.spacing()

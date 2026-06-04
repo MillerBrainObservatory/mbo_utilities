@@ -24,7 +24,7 @@ from mbo_utilities.gui._imgui_helpers import (
     checkbox_with_tooltip,
     draw_checkbox_grid,
 )
-from mbo_utilities.gui._selection_ui import draw_selection_table
+from mbo_utilities.gui._selection_ui import draw_selection_table, resolve_dim_labels
 from mbo_utilities.gui._metadata_editor import _check_missing_metadata
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
@@ -959,7 +959,10 @@ def _draw_selection_section(parent: Any):
         parent._saveas_c_stop = num_channels
         parent._saveas_c_step = 1
 
-    # draw selection table using shared component (includes suffix row)
+    # draw selection table using shared component (includes suffix row).
+    # row labels track the loaded array's slider names (isoview Tile/Cam/
+    # Zplane, etc.); the selected indices are unaffected.
+    tp_label, z_label, c_label = resolve_dim_labels(parent)
     tp_parsed, z_start, z_stop, z_step, c_start, c_stop, c_step = draw_selection_table(
         parent,
         max_frames,
@@ -970,6 +973,9 @@ def _draw_selection_section(parent: Any):
         suffix_attr="_saveas_output_suffix",
         num_channels=num_channels,
         c_attr="_saveas_c",
+        tp_label=tp_label,
+        z_label=z_label,
+        c_label=c_label,
     )
 
     # update legacy _selected_planes for compatibility

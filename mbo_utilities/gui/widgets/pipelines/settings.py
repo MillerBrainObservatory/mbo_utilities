@@ -166,7 +166,7 @@ def _ghost_button():
         yield
     finally:
         imgui.pop_style_color(3)
-from mbo_utilities.gui._selection_ui import draw_selection_table
+from mbo_utilities.gui._selection_ui import draw_selection_table, resolve_dim_labels
 from mbo_utilities.preferences import get_last_dir, set_last_dir
 from mbo_utilities._writers import _convert_paths_to_strings
 
@@ -1366,6 +1366,7 @@ def _draw_s2p_slicing_popup(self):
             imgui.end_tooltip()
         imgui.dummy(imgui.ImVec2(0, 4))
 
+        tp_label, z_label, c_label = resolve_dim_labels(self)
         tp_parsed, *_rest = draw_selection_table(
             self,
             max_frames,
@@ -1375,6 +1376,9 @@ def _draw_s2p_slicing_popup(self):
             id_suffix="_s2p",
             num_channels=num_channels,
             c_attr="_s2p_c",
+            tp_label=tp_label,
+            z_label=z_label,
+            c_label=c_label,
         )
 
         if tp_parsed:
