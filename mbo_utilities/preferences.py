@@ -428,3 +428,17 @@ def get_debug_logging() -> bool:
 def set_debug_logging(enabled: bool) -> None:
     """Persist the debug-logging flag for future launches."""
     _set_option("debug_logging", bool(enabled))
+
+
+def get_compute_gpu() -> str:
+    """Return the persisted compute-GPU policy ('auto', 'cpu', or '0'/'1'…).
+
+    Drives CUDA_VISIBLE_DEVICES for suite2p / cupy / cellpose. 'auto' leaves
+    device visibility unchanged; 'cpu' forces CPU.
+    """
+    return str(_get_options().get("compute_gpu", "auto"))
+
+
+def set_compute_gpu(value: str) -> None:
+    """Persist the compute-GPU policy for future launches."""
+    _set_option("compute_gpu", str(value))

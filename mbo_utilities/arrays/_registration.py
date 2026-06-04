@@ -46,8 +46,13 @@ def _auto_resolve_gpu() -> bool:
     if not HAS_CUPY:
         return False
     try:
-        _cp.cuda.runtime.getDeviceCount()
-        return True
+        from mbo_utilities.gpu import gpu_compute_disabled
+        if gpu_compute_disabled():
+            return False
+    except Exception:
+        pass
+    try:
+        return _cp.cuda.runtime.getDeviceCount() > 0
     except Exception:
         return False
 

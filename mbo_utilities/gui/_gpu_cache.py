@@ -16,11 +16,17 @@ from __future__ import annotations
 from typing import Any
 
 _ADAPTERS: list[Any] | None = None
+_DEFAULT_INDEX: int = -1
 
 
 def prime() -> None:
-    """Enumerate adapters and cache them. Safe to call multiple times."""
-    global _ADAPTERS
+    """Enumerate adapters and cache them. Safe to call multiple times.
+
+    Also records which adapter wgpu would pick by default, so the Options
+    popup can name the actual GPU behind "auto" without touching wgpu mid
+    frame.
+    """
+    global _ADAPTERS, _DEFAULT_INDEX
     if _ADAPTERS is not None:
         return
     try:
@@ -28,6 +34,20 @@ def prime() -> None:
         _ADAPTERS = list(fpl.enumerate_adapters())
     except Exception:
         _ADAPTERS = []
+    try:
+        import wgpu
+        default_info = wgpu.gpu.request_adapter_sync().info
+        infos = [a.info for a in _ADAPTERS]
+        _DEFAULT_INDEX = infos.index(default_info)
+    except Exception:
+        _DEFAULT_INDEX = -1
+
+
+def get_default_index() -> int:
+    """Index into :func:`get_adapters` of the adapter wgpu picks for 'auto'."""
+    if _ADAPTERS is None:
+        prime()
+    return _DEFAULT_INDEX
 
 
 def get_adapters() -> list[Any]:

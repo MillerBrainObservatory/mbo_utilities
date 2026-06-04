@@ -1222,6 +1222,63 @@ def processes(kill_all, kill, cleanup):
         click.echo("\nTip: Run 'mbo processes --cleanup' to remove finished entries.")
 
 
+@main.command("gpu")
+@click.option(
+    "--watch",
+    type=float,
+    default=None,
+    help="Refresh every N seconds until Ctrl-C.",
+)
+@click.option(
+    "--processes",
+    "show_processes",
+    is_flag=True,
+    help="Also list per-process VRAM usage.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit render/compute GPU + devices + processes as JSON.",
+)
+def gpu(watch, show_processes, as_json):
+    r"""
+    Show which GPU renders (fastplotlib) and which computes (suite2p /
+    cellpose / cupy), plus device memory.
+
+    \b
+    Examples:
+      mbo gpu               # render GPU, compute GPU, device memory
+      mbo gpu --processes   # also per-process VRAM
+      mbo gpu --watch 2     # refresh every 2s
+      mbo gpu --json        # machine-readable
+    """
+    from mbo_utilities import gpu as gpu_mod
+
+    if as_json:
+        import json as _json
+        click.echo(_json.dumps({
+            "render_gpu": gpu_mod.render_gpu(),
+            "compute_gpu": gpu_mod.compute_gpu(),
+            "devices": gpu_mod.gpu_devices(),
+            "processes": gpu_mod.gpu_processes() if show_processes else [],
+            "compute_disabled": gpu_mod.gpu_compute_disabled(),
+        }, indent=2))
+        return
+
+    if watch:
+        try:
+            while True:
+                click.clear()
+                click.echo(gpu_mod.format_gpu_report(show_processes=show_processes))
+                click.echo("\n(Ctrl-C to stop)")
+                time.sleep(watch)
+        except KeyboardInterrupt:
+            return
+    else:
+        click.echo(gpu_mod.format_gpu_report(show_processes=show_processes))
+
+
 @main.command("init")
 @click.argument("data_path", required=False, type=click.Path())
 @click.option(

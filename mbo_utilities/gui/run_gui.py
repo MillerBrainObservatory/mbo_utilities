@@ -1145,6 +1145,13 @@ def run_gui(
     $ mbo path/to/data.tif --metadata-only
     $ mbo --select-only  # Just open file dialog
     """
+    # resolve compute-GPU policy -> CUDA_VISIBLE_DEVICES before any torch/cupy
+    # import or worker spawn; detached workers inherit this environment. Env
+    # MBO_GPU overrides the persisted GUI preference.
+    import os as _os
+    from mbo_utilities.gpu import apply_gpu_policy
+    from mbo_utilities.preferences import get_compute_gpu
+    apply_gpu_policy(_os.environ.get("MBO_GPU") or get_compute_gpu())
     return _run_gui_impl(
         data_in=data_in,
         roi=roi,

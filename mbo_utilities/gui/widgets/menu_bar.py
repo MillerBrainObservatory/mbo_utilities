@@ -74,7 +74,7 @@ def draw_menu_bar(parent: Any):
                 if imgui.menu_item("Options", "", p_selected=False, enabled=True)[0]:
                     parent._show_options_popup = True
                 if imgui.is_item_hovered():
-                    imgui.set_tooltip("GPU adapter, debug logging, and other settings")
+                    imgui.set_tooltip("Render + compute GPU, debug logging, and other settings")
                 imgui.end_menu()
             if imgui.begin_menu("Docs", True):
                 if imgui.menu_item(

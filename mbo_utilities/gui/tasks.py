@@ -574,7 +574,14 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     raw_workers = s2p_settings.get("workers")
     if raw_workers in (None, 0):
         n_planes = len(planes) if planes else 1
-        use_gpu = bool(s2p_settings.get("rastermap_kwargs"))  # rough proxy for GPU work
+        # suite2p reg/detect run on the GPU unless torch_device is cpu or
+        # the env policy forces CPU; GPU workers contend for one device so
+        # _auto_workers caps them. Key off the real device, not rastermap.
+        from mbo_utilities.gpu import gpu_compute_disabled
+        device = str(
+            ops.get("torch_device") or s2p_settings.get("torch_device") or "cuda"
+        ).lower()
+        use_gpu = (not gpu_compute_disabled()) and not device.startswith("cpu")
         resolved = _auto_workers(n_planes, use_gpu=use_gpu)
         if resolved != raw_workers:
             logger.info(
