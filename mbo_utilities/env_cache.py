@@ -23,7 +23,8 @@ def get_env_hash() -> str:
 
 def get_cache_dir() -> Path:
     """get cache directory for environment caches."""
-    # avoid importing file_io (has heavy deps like numpy)
+    # kept inline rather than via get_mbo_dirs() to keep the fast-startup path
+    # free of package imports; must stay equal to get_mbo_dirs()["cache"]/"envs"
     cache_dir = Path.home() / ".mbo" / "cache" / "envs"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir

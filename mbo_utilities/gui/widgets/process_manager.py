@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from mbo_utilities import log
+from mbo_utilities.preferences import get_mbo_dirs
 
 logger = log.get("gui.process_manager")
 
@@ -58,7 +59,7 @@ class ProcessInfo:
     def update_from_sidecar(self, verbose=False):
         """Read progress_{uuid}.json (preferred) or progress_{pid}.json."""
         # Assume log dir is standard
-        log_dir = Path.home() / ".mbo" / "logs"
+        log_dir = get_mbo_dirs()["logs"]
 
         uuid = self.args.get("_uuid") if self.args else None
 
@@ -201,11 +202,12 @@ class ProcessManager:
     even after gui restart.
     """
 
-    PROCESS_FILE = Path.home() / ".mbo" / "cache" / "running_processes.json"
+    PROCESS_FILE = get_mbo_dirs()["cache"] / "running_processes.json"
 
     def __init__(self):
         self._processes: dict[int, ProcessInfo] = {}
         self._load()
+        prune_logs()
 
     def _load(self) -> None:
         """Load process info from disk."""
@@ -292,8 +294,7 @@ class ProcessManager:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
             # Central logging directory
-            log_dir = Path.home() / ".mbo" / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
+            log_dir = get_mbo_dirs()["logs"]
 
             # Single log file per task: {timestamp}_{task_type}_{short_uuid}.log
             log_file = log_dir / f"{timestamp}_{task_type}_{task_uuid[:8]}.log"
@@ -469,6 +470,58 @@ class ProcessManager:
     def has_running(self) -> bool:
         """Check if any tracked processes are still running."""
         return len(self.get_running()) > 0
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def prune_logs() -> None:
+    """Trim ~/.mbo/logs so task logs don't accumulate unbounded.
+
+    Deletes transient sidecars (progress_*/args_*/*.tmp) past a 24h grace, and
+    keeps the newest ``MBO_LOG_KEEP_RECENT`` (25) task logs while dropping the
+    rest once older than ``MBO_LOG_RETENTION_DAYS`` (14). Best-effort: a running
+    task's recent files fall inside the grace/keep window and are spared.
+    """
+    try:
+        log_dir = get_mbo_dirs()["logs"]
+        now = time.time()
+        retention = _env_int("MBO_LOG_RETENTION_DAYS", 14) * 86400
+        keep_recent = _env_int("MBO_LOG_KEEP_RECENT", 25)
+        grace = 24 * 3600
+
+        removed = 0
+        for pat in ("progress_*.json", "args_*.json", "*.tmp"):
+            for p in log_dir.glob(pat):
+                try:
+                    if now - p.stat().st_mtime > grace:
+                        p.unlink(missing_ok=True)
+                        removed += 1
+                except OSError:
+                    pass
+
+        logs = sorted(
+            (p for p in log_dir.glob("*.log*") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        cutoff = now - retention
+        for p in logs[keep_recent:]:
+            try:
+                if p.stat().st_mtime < cutoff:
+                    p.unlink(missing_ok=True)
+                    removed += 1
+            except OSError:
+                pass
+
+        if removed:
+            logger.debug(f"prune_logs: removed {removed} stale files from {log_dir}")
+    except Exception as e:
+        logger.debug(f"prune_logs failed: {e}")
 
 
 # global process manager instance

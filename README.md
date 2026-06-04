@@ -191,13 +191,13 @@ The CLI tool can be upgraded with `uv tool upgrade mbo_utilities`, or the packag
 # Windows
 uv tool uninstall mbo_utilities
 Remove-Item -Recurse -Force "$env:USERPROFILE\.mbo"
-Remove-Item "$env:USERPROFILE\Desktop\Miller Brain Suite.lnk" -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\Desktop\Miller Brain Studio.lnk" -ErrorAction SilentlyContinue
 ```
 
 ```bash
 # Linux/macOS
 uv tool uninstall mbo_utilities
-rm -rf ~/mbo
+rm -rf ~/.mbo
 ```
 
 **If installed in a project venv:**

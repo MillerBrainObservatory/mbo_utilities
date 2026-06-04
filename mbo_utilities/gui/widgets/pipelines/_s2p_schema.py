@@ -48,7 +48,10 @@ _LOAD_TIMEOUT_S = 10.0
 
 def _cache_dir() -> Path:
     override = os.environ.get("MBO_CACHE_DIR")
-    return Path(override) if override else Path.home() / ".mbo" / "cache"
+    if override:
+        return Path(override)
+    from mbo_utilities.preferences import get_mbo_dirs
+    return get_mbo_dirs()["cache"]
 
 
 def _suite2p_version() -> str:

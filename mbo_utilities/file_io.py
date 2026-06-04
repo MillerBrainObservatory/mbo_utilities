@@ -270,6 +270,7 @@ def get_last_savedir_path() -> Path:
         DeprecationWarning,
         stacklevel=2,
     )
-    return Path.home().joinpath(".mbo", "settings", "last_savedir.json")
+    from mbo_utilities.preferences import get_mbo_dirs
+    return get_mbo_dirs()["user_settings"] / "last_savedir.json"
 
 

@@ -4,7 +4,7 @@ User preferences management for MBO Utilities.
 This module provides centralized storage and retrieval of user preferences,
 including recent files, default directories, and GUI settings.
 
-All preferences are stored in ~/mbo/settings/ as JSON files.
+All preferences are stored in ~/.mbo/settings/ as JSON files.
 """
 
 from __future__ import annotations
@@ -34,11 +34,15 @@ def get_mbo_dirs() -> dict:
     logs = base.joinpath("logs")
     tests = base.joinpath("tests")
     data = base.joinpath("data")
+    templates = base.joinpath("templates")
 
     assets = imgui.joinpath("assets")
-    settings = assets.joinpath("app_settings")
+    # imgui .ini layout files
+    app_settings = assets.joinpath("app_settings")
+    # user preferences json (preferences.json, last_savedir.json)
+    user_settings = base.joinpath("settings")
 
-    for d in (base, imgui, cache, logs, assets, data, tests):
+    for d in (base, imgui, cache, logs, assets, data, tests, templates, user_settings):
         d.mkdir(exist_ok=True)
 
     return {
@@ -47,17 +51,17 @@ def get_mbo_dirs() -> dict:
         "cache": cache,
         "logs": logs,
         "assets": assets,
-        "settings": settings,
+        "settings": app_settings,
+        "user_settings": user_settings,
+        "templates": templates,
         "data": data,
         "tests": tests,
     }
 
 
 def _get_settings_dir() -> Path:
-    """Get the settings directory, creating it if needed."""
-    settings_dir = Path.home() / ".mbo" / "settings"
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    return settings_dir
+    """Get the user-preferences directory, creating it if needed."""
+    return get_mbo_dirs()["user_settings"]
 
 
 def _get_preferences_path() -> Path:

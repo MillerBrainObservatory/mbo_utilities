@@ -1566,7 +1566,11 @@ def _dataset_size_disk_cache_path(key: tuple[str, ...]) -> Path:
         "\n".join(key).encode("utf-8", errors="replace"), digest_size=16
     ).hexdigest()
     override = os.environ.get("MBO_CACHE_DIR")
-    base = Path(override) if override else Path.home() / ".mbo" / "cache"
+    if override:
+        base = Path(override)
+    else:
+        from mbo_utilities.preferences import get_mbo_dirs
+        base = get_mbo_dirs()["cache"]
     return base / f"dataset_size_{h}.json"
 
 
