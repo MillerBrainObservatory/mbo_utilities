@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join("..", "mbo_utilities")))
 def setup(app):
     """Copy the user_guide notebook from demos/ to docs/ before building."""
     docs_dir = Path(__file__).parent
-    source_notebook = docs_dir.parent / "demos" / "user_guide.ipynb"
+    source_notebook = docs_dir.parent / "demos" / "mbo_user_guide.ipynb"
     target_notebook = docs_dir / "user_guide.ipynb"
 
     if source_notebook.exists():

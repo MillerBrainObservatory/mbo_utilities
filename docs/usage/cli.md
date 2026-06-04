@@ -10,8 +10,7 @@ The `mbo` command provides tools for viewing, converting, and analyzing imaging 
 | `mbo convert` | Convert between formats |
 | `mbo info` | Show array info |
 | `mbo scanphase` | Analyze scan-phase offset |
-| `mbo notebook` | Generate template notebooks |
-| `mbo download` | Download files from GitHub |
+| `mbo init` | Create starter notebooks |
 | `mbo formats` | List supported formats |
 
 ## GUI Mode
@@ -150,55 +149,22 @@ Offset vs signal intensity. Red line suggests threshold below which measurements
 
 **Tips:** Use `-n 2` or `-n 3` to run quickly on a subset of frames. Multi-ROI data: offsets are averaged across ROIs.
 
-## Notebook
+## Init
 
-Generate template notebooks for common analysis pipelines.
+Create starter notebooks (mbo + LBM-Suite2p user guides).
 
 ```bash
-mbo notebook lsp                          # LBM-Suite2p-Python pipeline
-mbo notebook basic                        # basic data exploration
-mbo notebook dff                          # delta F/F analysis
-mbo notebook lsp -d /path/to/data         # pre-fill data path
-mbo notebook lsp -o ./notebooks           # custom output directory
-mbo notebook lsp -n my_analysis           # custom name: yyyy-mm-dd_my_analysis.ipynb
-mbo notebook -l                           # list available templates
+mbo init                       # notebooks in current directory
+mbo init /path/to/raw          # notebooks in /path/to/scripts, data path filled in
+mbo init /path/to/raw -o ./nb  # custom destination directory
 ```
 
 | Option | Description |
 |--------|-------------|
-| `-o, --output` | Output directory (default: current directory) |
-| `-n, --name` | Custom notebook name (date prefix auto-added) |
-| `-d, --data` | Data path to pre-fill in the notebook |
-| `-l, --list` | List available templates |
-| `--templates-dir` | Show custom templates directory path |
+| `-o, --output` | Destination directory (overrides default location) |
+| `--overwrite` | Overwrite existing notebooks |
 
-**Available Templates:**
-
-| Template | Description |
-|----------|-------------|
-| `lsp` | LBM-Suite2p-Python full pipeline with imports, ops config, and visualization |
-| `basic` | Basic mbo_utilities data exploration with imread/imwrite |
-| `dff` | Delta F/F analysis with compute_dff and activity maps |
-
-Templates show full function signatures with all parameters, formatted for easy customization.
-
-## Download
-
-Download files from GitHub (auto-converts blob to raw URLs).
-
-```bash
-mbo download https://github.com/user/repo/blob/main/notebook.ipynb
-mbo download https://github.com/user/repo/blob/main/data.npy -o ./data/
-```
-
-```
-Downloading from:
-  https://raw.githubusercontent.com/.../quickstart.ipynb
-Saving to:
-  C:\Users\...\quickstart.ipynb
-
-Successfully downloaded: quickstart.ipynb
-```
+With a `DATA_PATH` argument, notebooks are written to a `scripts/` directory beside the data and the data path is pre-filled. Without it, notebooks go in the current directory with default paths.
 
 ```{image} /_images/cli/jupyter_lab.png
 :width: 80%
@@ -209,8 +175,6 @@ Successfully downloaded: quickstart.ipynb
 
 ```bash
 mbo --check-install      # verify installation and GPU config
-mbo --download-notebook  # download user guide notebook
-mbo --download-file URL  # download any file
 ```
 
 ```
