@@ -1410,7 +1410,7 @@ wheels = [
 
 [[package]]
 name = "isoview"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "../isoview" }
 dependencies = [
     { name = "cellpose" },
