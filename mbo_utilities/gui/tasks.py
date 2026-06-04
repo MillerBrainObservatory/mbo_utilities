@@ -1169,6 +1169,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
             config,
             method=args.get("method"),
             coarse_align=args.get("coarse_align", False),
+            bake_tile_positions=args.get("bake_tile_positions", False),
             orientation=args.get("orientation"),
         )
         logger.info(f"  wrote: {xml_path}")
