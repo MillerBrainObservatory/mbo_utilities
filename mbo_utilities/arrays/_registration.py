@@ -498,3 +498,279 @@ class AxiallyAlignedView:
             f"AxiallyAlignedView(shape={self.shape}, dtype={self.dtype}, "
             f"pad=T{self._pt}/B{self._pb}/L{self._pl}/R{self._pr})"
         )
+
+
+_TCZYX = ("T", "C", "Z", "Y", "X")
+
+
+def _is_int_index(k) -> bool:
+    return isinstance(k, (int, np.integer))
+
+
+def _idx_list(k, n: int) -> list[int]:
+    """index (int / slice / list) -> list of non-negative ints over size n."""
+    if _is_int_index(k):
+        k = int(k)
+        return [k if k >= 0 else n + k]
+    if isinstance(k, slice):
+        return list(range(*k.indices(n)))
+    return [int(i) if int(i) >= 0 else n + int(i) for i in k]
+
+
+class AxialShiftView:
+    """5D TCZYX lazy view that applies per-plane axial shifts on read.
+
+    Non-destructive companion to `compute_axial_shifts` /
+    `imwrite(register_z=True)`: the source array is never modified, the
+    shifts are applied only when a frame is read. Toggle `enabled` at any
+    time to switch between the aligned (zero-padded canvas) view and the
+    original source frames.
+
+    Parameters
+    ----------
+    source : array-like
+        Any 5D TCZYX lazy array. Must expose `shape5d` (or a 5D `shape`)
+        and support `source[t, c, z, :, :]` indexing.
+    plane_shifts : array-like (nz, 2)
+        Cumulative per-plane integer (dy, dx) shifts, as produced by
+        `compute_axial_shifts`. Length must equal the source Z size.
+    enabled : bool, default True
+        If True, reads return aligned frames on a zero-padded canvas of
+        shape `(Y + pt + pb, X + pl + pr)`. If False, reads pass straight
+        through and return the original source frames.
+
+    Notes
+    -----
+    Shifts are integer pixel offsets, so applying them is a copy into an
+    offset window of a zero canvas — no interpolation, O(Y*X) per plane.
+    Reversal is exact: flipping `enabled` to False (or reading `source`)
+    yields the original pixels; nothing is ever written back.
+
+    Examples
+    --------
+    >>> view = with_axial_shifts(arr)        # shifts applied on read
+    >>> aligned_vol = np.asarray(view[0])    # (C, Z, Hc, Wc) aligned
+    >>> view.enabled = False                 # back to raw, same object
+    >>> raw_vol = np.asarray(view[0])        # original (C, Z, Y, X)
+    """
+
+    def __init__(self, source, plane_shifts, enabled: bool = True):
+        self._source = source
+
+        shape5d = getattr(source, "shape5d", None)
+        if shape5d is None:
+            shp = tuple(getattr(source, "shape", ()))
+            if len(shp) != 5:
+                raise ValueError(
+                    "AxialShiftView needs a 5D TCZYX source (with shape5d or a "
+                    f"5D shape); got shape {shp!r}"
+                )
+            shape5d = shp
+        self._T, self._C, self._Z, self._Y, self._X = (int(s) for s in shape5d)
+
+        self._shifts = np.asarray(plane_shifts, dtype=int)
+        if self._shifts.ndim != 2 or self._shifts.shape[1] != 2:
+            raise ValueError(
+                f"plane_shifts must be (nz, 2); got shape {self._shifts.shape}"
+            )
+        if len(self._shifts) != self._Z:
+            raise ValueError(
+                f"need one shift per plane: source has {self._Z} planes but "
+                f"got {len(self._shifts)} shifts"
+            )
+
+        dy, dx = self._shifts[:, 0], self._shifts[:, 1]
+        self._pt = max(0, -int(dy.min()))
+        self._pb = max(0, int(dy.max()))
+        self._pl = max(0, -int(dx.min()))
+        self._pr = max(0, int(dx.max()))
+        self._H = self._Y + self._pt + self._pb
+        self._W = self._X + self._pl + self._pr
+
+        self.enabled = bool(enabled)
+
+    @property
+    def source(self):
+        """the wrapped source array (never modified)."""
+        return self._source
+
+    @property
+    def plane_shifts(self) -> np.ndarray:
+        """the (nz, 2) integer shifts applied when enabled."""
+        return self._shifts
+
+    @property
+    def padding(self) -> tuple[int, int, int, int]:
+        """(pt, pb, pl, pr) canvas padding applied when enabled."""
+        return (self._pt, self._pb, self._pl, self._pr)
+
+    @property
+    def dtype(self):
+        return self._source.dtype
+
+    @property
+    def num_color_channels(self) -> int:
+        return self._C
+
+    @property
+    def metadata(self):
+        md = getattr(self._source, "metadata", None)
+        if md is not None and self.enabled:
+            # this view's pixels are already aligned, so don't advertise the
+            # still-pending shifts — a reader (or with_axial_shifts) applying
+            # them again would double-shift the saved data.
+            md = {
+                k: v
+                for k, v in md.items()
+                if k not in ("plane_shifts", "plane_shifts_params")
+            }
+        return md
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        return _TCZYX
+
+    @property
+    def shape5d(self) -> tuple[int, int, int, int, int]:
+        if self.enabled:
+            return (self._T, self._C, self._Z, self._H, self._W)
+        return (self._T, self._C, self._Z, self._Y, self._X)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.shape5d
+
+    @property
+    def ndim(self) -> int:
+        return 5
+
+    def __len__(self) -> int:
+        return self._T
+
+    def _key5(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        if Ellipsis in key:
+            i = key.index(Ellipsis)
+            n_missing = 5 - (len(key) - 1)
+            key = key[:i] + (slice(None),) * max(n_missing, 0) + key[i + 1:]
+        if len(key) > 5:
+            raise IndexError(f"too many indices for 5D array: {len(key)}")
+        if len(key) < 5:
+            key = key + (slice(None),) * (5 - len(key))
+        return key
+
+    def __getitem__(self, key):
+        t_key, c_key, z_key, y_key, x_key = self._key5(key)
+        # always read full spatial: shifts remap (y, x), so a padded-space
+        # spatial key can't be pushed down to the source.
+        raw = np.asarray(self._source[t_key, c_key, z_key, :, :])
+
+        if self.enabled:
+            raw = self._to_canvas(raw, t_key, c_key, z_key)
+
+        if y_key == slice(None) and x_key == slice(None):
+            return raw
+        spatial = (slice(None),) * (raw.ndim - 2) + (y_key, x_key)
+        return raw[spatial]
+
+    def _to_canvas(self, raw, t_key, c_key, z_key):
+        pt, pl = self._pt, self._pl
+        Y, X = self._Y, self._X
+        out = np.zeros(raw.shape[:-2] + (self._H, self._W), dtype=raw.dtype)
+
+        if _is_int_index(z_key):
+            z = _idx_list(z_key, self._Z)[0]
+            dy, dx = int(self._shifts[z, 0]), int(self._shifts[z, 1])
+            out[..., pt + dy: pt + dy + Y, pl + dx: pl + dx + X] = raw
+            return out
+
+        # z is a kept axis; its position = number of non-int axes before it.
+        z_axis = (0 if _is_int_index(t_key) else 1) + (0 if _is_int_index(c_key) else 1)
+        z_indices = _idx_list(z_key, self._Z)
+        raw_zf = np.moveaxis(raw, z_axis, 0)
+        out_zf = np.moveaxis(out, z_axis, 0)  # view into out
+        for i, z in enumerate(z_indices):
+            dy, dx = int(self._shifts[z, 0]), int(self._shifts[z, 1])
+            out_zf[i, ..., pt + dy: pt + dy + Y, pl + dx: pl + dx + X] = raw_zf[i]
+        return out
+
+    def __array__(self, dtype=None, copy=None):
+        # explicit (do not let __getattr__ leak the source's rank/shape).
+        data = np.asarray(self[0])
+        if dtype is not None:
+            data = data.astype(dtype)
+        return data
+
+    def astype(self, dtype, *args, **kwargs):
+        return np.asarray(self).astype(dtype, *args, **kwargs)
+
+    def _imwrite(self, outpath, **kwargs):
+        """Stream this view (aligned when enabled) to disk via the writers.
+
+        Lets `imwrite(view, out, ext=".zarr")` save the aligned, padded
+        volume without materializing it in memory. Output metadata omits
+        plane_shifts when enabled (they are baked into the saved pixels).
+        """
+        from mbo_utilities.arrays._base import _imwrite_base
+        return _imwrite_base(self, outpath, **kwargs)
+
+    def save(self, outpath, **kwargs):
+        return self._imwrite(outpath, **kwargs)
+
+    def __repr__(self) -> str:
+        return (
+            f"AxialShiftView(shape={self.shape}, dtype={self.dtype}, "
+            f"enabled={self.enabled}, "
+            f"pad=T{self._pt}/B{self._pb}/L{self._pl}/R{self._pr})"
+        )
+
+
+def with_axial_shifts(arr, *, enabled: bool = True, plane_shifts=None) -> AxialShiftView:
+    """Wrap a 5D TCZYX array so per-plane axial shifts are applied on read.
+
+    Non-destructive: `arr` is never modified. Reversible: set
+    `view.enabled = False` (or read `view.source`) to recover the
+    original frames.
+
+    Parameters
+    ----------
+    arr : array-like
+        5D TCZYX lazy array (exposes `shape5d`, supports `arr[t, c, z, :, :]`).
+    enabled : bool, default True
+        Initial state. True applies shifts on read; False passes through.
+    plane_shifts : array-like (nz, 2), optional
+        Shifts to use. Defaults to `arr.metadata["plane_shifts"]`.
+
+    Returns
+    -------
+    AxialShiftView
+
+    Raises
+    ------
+    ValueError
+        If `plane_shifts` is not given and no valid `plane_shifts` is
+        present in `arr.metadata`.
+    """
+    if plane_shifts is None:
+        md = getattr(arr, "metadata", None)
+        nz = int(arr.shape5d[2]) if hasattr(arr, "shape5d") else None
+        if not validate_axial_shifts(md, nz):
+            raw = md.get("plane_shifts") if md else None
+            # shifts present and well-formed, but the count doesn't match the
+            # array's planes — almost always a file written before the writer
+            # subset plane_shifts to the exported planes (stale .zarr / kernel).
+            if raw is not None and validate_axial_shifts(md, None):
+                n = len(np.asarray(raw))
+                raise ValueError(
+                    f"metadata has plane_shifts for {n} planes but this array has "
+                    f"{nz}. Re-run imwrite(register_z=True) with the current version "
+                    f"(restart the kernel first so it reloads), or pass plane_shifts= "
+                    f"with {nz} (dy, dx) rows."
+                )
+            raise ValueError(
+                "no valid plane_shifts in metadata; pass plane_shifts=, or run "
+                "compute_axial_shifts / imwrite(register_z=True) first"
+            )
+        plane_shifts = md["plane_shifts"]
+    return AxialShiftView(arr, plane_shifts, enabled=enabled)

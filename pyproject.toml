@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.0.8"
+version = "3.0.9"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -95,8 +95,9 @@ all = ["mbo_utilities[rastermap,isoview]"]
 [tool.uv]
 default-groups = ["dev", "isoview"]
 
-# Local dev: editable sibling checkouts. Stripped on publish (uv build --no-sources),
-# so PyPI consumers resolve isoview / lbm_suite2p_python from the registry.
+# Local dev: editable sibling checkouts. Honored by uv lock/sync, so CI (no sibling
+# checkouts) must pass --no-sources to resolve isoview / lbm_suite2p_python from PyPI.
+# uv build also strips them (--no-sources) so published wheels resolve from the registry.
 [tool.uv.sources]
 isoview = { path = "../isoview", editable = true }
 lbm_suite2p_python = { path = "../LBM-Suite2p-Python", editable = true }

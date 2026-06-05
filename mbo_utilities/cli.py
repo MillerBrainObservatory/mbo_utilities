@@ -1325,13 +1325,16 @@ def init(data_path, output_dir, overwrite):
 
     fill = Path(data_path).expanduser().resolve().as_posix() if data_path else None
 
+    from datetime import date
+    today = date.today().isoformat()
+
     written = []
     for filename, token in notebooks.items():
         src = src_dir / filename
         if not src.exists():
             click.secho(f"Missing: {filename}", fg="red")
             continue
-        out = dest / filename
+        out = dest / f"{today}_{filename}"
         if out.exists() and not overwrite:
             click.secho(f"Exists: {out}  (--overwrite to replace)", fg="yellow")
             continue

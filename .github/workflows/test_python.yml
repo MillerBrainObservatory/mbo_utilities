@@ -28,11 +28,11 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: GIT_LFS_SKIP_SMUDGE=1 uv sync
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --no-sources
 
       - name: Install test dependencies
         run: uv pip install pytest
 
       - name: Run tests (synthetic data only)
         run: |
-          uv run pytest tests/test_arrays.py tests/test_to_video.py -v --tb=short -k "synthetic or Synthetic"
+          uv run --no-sync pytest tests/test_arrays.py tests/test_to_video.py -v --tb=short -k "synthetic or Synthetic"

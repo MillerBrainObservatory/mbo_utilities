@@ -299,9 +299,13 @@ def imwrite(
     axial_max_reg_xy = int(kwargs.pop("max_reg_xy", 30))
 
     if register_z:
-        num_planes = get_param(file_metadata, "nplanes")
+        total_planes = (
+            int(lazy_array.shape5d[2])
+            if hasattr(lazy_array, "shape5d")
+            else get_param(file_metadata, "nplanes")
+        )
 
-        if validate_axial_shifts(file_metadata, num_planes):
+        if validate_axial_shifts(file_metadata, total_planes):
             logger.info("using plane_shifts already present in metadata.")
             if progress_callback:
                 progress_callback(1.0, "Using cached plane shifts")
@@ -315,10 +319,25 @@ def imwrite(
                 max_reg_xy=axial_max_reg_xy,
                 progress_callback=progress_callback,
             )
-            if not validate_axial_shifts(file_metadata, num_planes):
-                logger.error(
-                    "axial registration did not produce valid plane_shifts."
-                )
+
+        # shifts are cumulative over the full stack; when exporting a plane
+        # subset keep only the matching rows (re-referenced to the first
+        # written plane) so the output metadata carries one shift per written
+        # plane — with_axial_shifts requires len(plane_shifts) == output Z.
+        shifts = file_metadata.get("plane_shifts")
+        if planes is not None and shifts:
+            sel = list(planes) if isinstance(planes, (list, tuple)) else [planes]
+            sel0 = [p - 1 for p in sel]
+            if len(shifts) != len(sel0) and all(0 <= i < len(shifts) for i in sel0):
+                sub = [list(shifts[i]) for i in sel0]
+                y0, x0 = sub[0]
+                file_metadata["plane_shifts"] = [[y - y0, x - x0] for y, x in sub]
+
+        out_planes = len(sel0) if planes is not None and shifts else total_planes
+        if not validate_axial_shifts(file_metadata, out_planes):
+            logger.error(
+                "axial registration did not produce valid plane_shifts."
+            )
 
     if hasattr(lazy_array, "metadata"):
         with contextlib.suppress(AttributeError):

@@ -364,6 +364,16 @@ def _imwrite_base(
     frames_list = _norm_sel(frames)
     channels_list = _norm_sel(channels)
 
+    # num_frames=N truncates to the first N timepoints. the per-plane (.bin/
+    # .npy) path reads it from kwargs, but the volumetric writers only honor an
+    # explicit `frames` list — so synthesize one when num_frames is given and
+    # no explicit frame selection was made.
+    if ext_clean in ("tiff", "tif", "zarr", "h5", "hdf5") and frames_list is None:
+        _num_frames = kwargs.get("num_frames")
+        if _num_frames is not None:
+            total_T = int(arr.shape5d[0])
+            frames_list = list(range(1, min(int(_num_frames), total_T) + 1))
+
     # tiff: use volumetric writer
     if ext_clean in ("tiff", "tif"):
         # extract output_suffix from kwargs if present
