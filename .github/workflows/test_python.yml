@@ -35,4 +35,4 @@ jobs:
 
       - name: Run tests (synthetic data only)
         run: |
-          uv run pytest tests/test_arrays.py tests/test_to_video.py -v --tb=short -k "synthetic or Synthetic"
+          uv run --no-sync pytest tests/test_arrays.py tests/test_to_video.py -v --tb=short -k "synthetic or Synthetic"
