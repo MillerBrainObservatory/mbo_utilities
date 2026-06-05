@@ -1033,8 +1033,8 @@ def _write_volumetric_h5(
 
     This is the h5 analogue of `_write_volumetric_zarr`. Previously, h5
     output went through the per-plane streaming writer (`_write_plane`),
-    which produced one `.h5` file per z-plane (`zplane01_stack.h5`,
-    `zplane03_stack.h5`, ...). That mismatched zarr's behaviour, where the
+    which produced one `.h5` file per z-plane (`zplane01.h5`,
+    `zplane03.h5`, ...). That mismatched zarr's behaviour, where the
     full volume lives in a single store. This writer puts everything into
     one `.h5` with a 4D `(T, Z, Y, X)` dataset under `dataset_name`,
     matching what mbo's H5Array reader expects on the read side.

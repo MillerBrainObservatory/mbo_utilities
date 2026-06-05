@@ -75,7 +75,7 @@ Counting frames: 100%|███████████████████�
 Writing: D:/demo/volume (format: .zarr)
 Writing Zarr: 100%|███████████████████████████████| 119/119 [00:43<00:00, 2.71frames/s]
 
-Done! Output saved to: D:/demo/volume/tp00001-00119_zplane01-14_stack.zarr
+Done! Output saved to: D:/demo/volume/tp00001-00119_zplane01-14.zarr
 ```
 
 ## Info

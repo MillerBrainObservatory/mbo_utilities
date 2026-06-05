@@ -40,7 +40,7 @@ Reloaded Zarr
   Shape: (99, 14, 550, 448)
   Dtype: int16
   Dims: ('T', 'Z', 'Y', 'X')
-  File: tp00000-00099_zplane01-14_stack.zarr
+  File: tp00000-00099_zplane01-14.zarr
 
 --- Saving to TIFF ---
   Saved to: D:\demo\output_test\demo_data.tiff
@@ -55,20 +55,20 @@ Reloaded TIFF
   Dims: ('T', 'Z', 'Y', 'X')
   Planes: 14
   ROIs: 1
-  File: tp00000-00099_zplane01-14_stack.tif
+  File: tp00000-00099_zplane01-14.tif
 
 --- Saving to Binary (.bin) ---
-  Saved to: D:\demo\output_test\demo_bin\tp00000-00099_zplane01_stack.bin
+  Saved to: D:\demo\output_test\demo_bin\tp00000-00099_zplane01.bin
   Ops file: D:\demo\output_test\demo_bin\ops.npy
 
 ============================================================
 Reloaded Binary (BinArray)
 ============================================================
-  Path: D:\demo\output_test\demo_bin\tp00000-00099_zplane01_stack.bin
+  Path: D:\demo\output_test\demo_bin\tp00000-00099_zplane01.bin
   Type: BinArray
   Shape: (100, 550, 448)
   Dtype: int16
-  File: tp00000-00099_zplane01_stack.bin
+  File: tp00000-00099_zplane01.bin
 
 --- Saving to HDF5 ---
   Saved to: D:\demo\output_test\demo_data.h5
@@ -81,7 +81,7 @@ Reloaded HDF5
   Shape: (100, 550, 448)
   Dtype: int16
   Planes: 14
-  File: tp00000-00099_zplane01_stack.h5
+  File: tp00000-00099_zplane01.h5
 
 --- Saving to NPY ---
   Saved to: D:\demo\output_test\demo_data.npy
@@ -95,7 +95,7 @@ Reloaded NPY
   Dtype: int16
   Dims: TYX
   Planes: 1
-  File: tp00001-00050_zplane01_stack.npy
+  File: tp00001-00050_zplane01.npy
 
 ============================================================
 Demo complete!
@@ -129,7 +129,7 @@ Reloaded .zarr
   Shape: (100, 8, 256, 256)
   Dtype: float32
   Dims: ('T', 'Z', 'Y', 'X')
-  File: tp00001-00100_zplane01-08_stack.zarr
+  File: tp00001-00100_zplane01-08.zarr
 
 --- Round-trip test: .tiff ---
   Saved to: D:\demo\output_numpy\synthetic.tiff
@@ -144,19 +144,19 @@ Reloaded .tiff
   Dims: ('T', 'Z', 'Y', 'X')
   Planes: 8
   ROIs: 1
-  File: tp00001-00100_zplane01-08_stack.tif
+  File: tp00001-00100_zplane01-08.tif
 
 --- Round-trip test: .bin ---
-  Saved to: D:\demo\output_numpy\synthetic_bin\tp00001-00100_zplane01_stack.bin
+  Saved to: D:\demo\output_numpy\synthetic_bin\tp00001-00100_zplane01.bin
 
 ============================================================
 Reloaded .bin
 ============================================================
-  Path: D:\demo\output_numpy\synthetic_bin\tp00001-00100_zplane01_stack.bin
+  Path: D:\demo\output_numpy\synthetic_bin\tp00001-00100_zplane01.bin
   Type: BinArray
   Shape: (100, 256, 256)
   Dtype: int16
-  File: tp00001-00100_zplane01_stack.bin
+  File: tp00001-00100_zplane01.bin
 
 --- Round-trip test: .h5 ---
   Saved to: D:\demo\output_numpy\synthetic.h5
@@ -169,7 +169,7 @@ Reloaded .h5
   Shape: (100, 256, 256)
   Dtype: float32
   Planes: 8
-  File: tp00001-00100_zplane01_stack.h5
+  File: tp00001-00100_zplane01.h5
 
 --- Round-trip test: .npy ---
   Saved to: D:\demo\output_numpy\synthetic.npy
@@ -183,7 +183,7 @@ Reloaded .npy
   Dtype: float32
   Dims: TYX
   Planes: 1
-  File: tp00001-00100_zplane01_stack.npy
+  File: tp00001-00100_zplane01.npy
 
 ============================================================
 NumPy workflow demo complete!
