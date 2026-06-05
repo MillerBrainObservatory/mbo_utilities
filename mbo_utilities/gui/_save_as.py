@@ -309,7 +309,7 @@ def _draw_options_popup(parent: Any):
     # screen when the Options button is at the bottom of the Save As dialog
     # — and tall content (video options) then gets clipped. centering on the
     # viewport sidesteps both problems.
-    is_video = parent._ext in (".mp4", ".mov")
+    is_video = parent._ext == ".mp4"
     viewport = imgui.get_main_viewport()
     default_h = min(720 if is_video else 420, int(viewport.size.y * 0.9))
     center = imgui.ImVec2(
@@ -512,7 +512,7 @@ def _draw_options_popup(parent: Any):
                             imgui.set_item_default_focus()
                     imgui.end_combo()
 
-        if parent._ext in (".mp4", ".mov"):
+        if parent._ext == ".mp4":
             _draw_video_options(parent)
 
         imgui.spacing()
@@ -653,7 +653,9 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
         slot = means[i]
         if not isinstance(slot, dict) or not slot:
             return None
-        arr = slot.get(channel) or slot.get(0)
+        arr = slot.get(channel)
+        if arr is None:
+            arr = slot.get(0)
         if arr is None:
             return None
         stacks.append(np.asarray(arr, dtype=np.float32))
@@ -670,7 +672,7 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
 
 
 def _draw_video_options(parent: Any):
-    """Video-specific options shown when ext is .mp4 or .mov."""
+    """Video-specific options shown when ext is .mp4."""
     imgui.spacing()
     imgui.separator()
     imgui.text_colored(imgui.ImVec4(0.8, 0.8, 0.2, 1.0), "Video Options")
@@ -1003,7 +1005,7 @@ def _draw_selection_section(parent: Any):
 
     # build filename preview
     ext = getattr(parent, "_ext", ".tiff").lstrip(".")
-    is_video = f".{ext}" in (".mp4", ".mov")
+    is_video = f".{ext}" == ".mp4"
     tags = []
 
     # timepoint tag from parsed selection
@@ -1327,8 +1329,8 @@ def _draw_save_button(parent: Any):
                 if parent._ext == ".h5":
                     save_kwargs["dataset_name"] = parent._h5_dataset_name
 
-                # Video options (.mp4 or .mov)
-                if parent._ext in (".mp4", ".mov"):
+                # Video options (.mp4)
+                if parent._ext == ".mp4":
                     cmap_name = parent._saveas_video_cmaps[parent._saveas_video_cmap_idx]
                     save_kwargs["fps"] = parent._saveas_video_fps
                     save_kwargs["speed_factor"] = parent._saveas_video_speed_factor
@@ -1379,7 +1381,7 @@ def _draw_save_button(parent: Any):
                     src = Path(parent.fpath) if parent.fpath else None
                     input_path = str(src) if src else ""
                     fname = (src.name or "data") if src else "data"
-                    is_video = parent._ext in (".mp4", ".mov")
+                    is_video = parent._ext == ".mp4"
                     video_kwargs = {}
                     if is_video:
                         cmap_name = parent._saveas_video_cmaps[parent._saveas_video_cmap_idx]

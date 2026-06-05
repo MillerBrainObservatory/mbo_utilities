@@ -20,6 +20,7 @@ from mbo_utilities.arrays import (
     LBMPiezoArray,
     H5Array,
     LBMArray,
+    MP4Array,
     NumpyArray,
     PiezoArray,
     ScanImageArray,
@@ -41,9 +42,9 @@ if TYPE_CHECKING:
 logger = log.get("reader")
 
 # UI dropdown shows these formats (excludes .tif to avoid duplication)
-MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".klb", ".mp4", ".mov"]
+MBO_SUPPORTED_FTYPES = [".tiff", ".zarr", ".bin", ".h5", ".klb", ".mp4"]
 # reading accepts .tif as alias for .tiff
-MBO_READABLE_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy", ".klb"]
+MBO_READABLE_FTYPES = [".tiff", ".tif", ".zarr", ".bin", ".h5", ".npy", ".klb", ".mp4"]
 
 # extensions that require an optional third-party package. when the package
 # isn't importable we drop the extension from the GUI dropdown so the user
@@ -391,6 +392,10 @@ def _imread_impl(
     if first.suffix == ".h5":
         logger.debug(f"Reading HDF5 files from {first}.")
         return H5Array(first, **_filter_kwargs(H5Array, kwargs))
+
+    if first.suffix == ".mp4":
+        logger.debug(f"Reading MP4 file as MP4Array: {first}")
+        return MP4Array(first, **_filter_kwargs(MP4Array, kwargs))
 
     if first.suffix == ".zarr":
         # Case 1: nested zarrs inside

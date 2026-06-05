@@ -327,22 +327,29 @@ def _check_cupy(driver_cuda: str | None = None) -> tuple[FeatureStatus, str | No
 
 
 def _check_suite2p() -> FeatureStatus:
-    """Check suite2p installation."""
-    try:
-        import suite2p
-        version = getattr(suite2p, "__version__", "installed")
+    """Check LBM-Suite2p-Python installation.
+
+    Uses find_spec/metadata instead of importing, so base suite2p (which prints
+    an unrelated pynwb warning on import) is never loaded.
+    """
+    import importlib.util
+    if importlib.util.find_spec("lbm_suite2p_python") is None:
         return FeatureStatus(
-            name="Suite2p",
-            status=Status.OK,
-            version=version,
-            message="ready"
-        )
-    except ImportError:
-        return FeatureStatus(
-            name="Suite2p",
+            name="LBM-Suite2p-Python",
             status=Status.MISSING,
             message="not installed"
         )
+    try:
+        from importlib.metadata import version
+        ver = version("lbm-suite2p-python")
+    except Exception:
+        ver = "installed"
+    return FeatureStatus(
+        name="LBM-Suite2p-Python",
+        status=Status.OK,
+        version=ver,
+        message="ready"
+    )
 
 
 def _check_rastermap() -> FeatureStatus:
@@ -472,12 +479,12 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
             pass
 
     # check pipelines
-    _update(0.7, "Checking Suite2p...")
+    _update(0.7, "Checking LBM-Suite2p-Python...")
     suite2p_status = _check_suite2p()
     # if suite2p is installed but pytorch has no GPU, warn
     if suite2p_status.status == Status.OK and pytorch_status.gpu_ok is False:
         suite2p_status = FeatureStatus(
-            name="Suite2p",
+            name="LBM-Suite2p-Python",
             status=Status.WARN,
             version=suite2p_status.version,
             message="PyTorch has no GPU support",
