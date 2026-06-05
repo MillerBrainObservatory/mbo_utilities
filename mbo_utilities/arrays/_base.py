@@ -461,16 +461,16 @@ def _imwrite_base(
         )
         return result
 
-    # video: one file per (z, channel) via to_video.
-    if ext_clean in ("mp4", "mov"):
-        from mbo_utilities._writers import _write_volumetric_video
+    # video: one file per (z, channel).
+    if ext_clean == "mp4":
+        from mbo_utilities.arrays.mp4 import MP4Array
 
         output_suffix = kwargs.pop("output_suffix", None)
         mean_subtract_stack = kwargs.pop("mean_subtract_stack", None)
         mean_subtract_path = kwargs.pop("mean_subtract_path", None)
         if mean_subtract_stack is None and mean_subtract_path:
             mean_subtract_stack = np.load(mean_subtract_path)
-        return _write_volumetric_video(
+        return MP4Array.write_video(
             arr,
             outpath,
             metadata=md,
@@ -593,7 +593,7 @@ def _imwrite_base(
 
             # build per-plane Z + T tags once — used for both the
             # Suite2p-layout plane dir name (.bin) and the generic
-            # `tp...zplaneNN_stack.ext` filename (.npy etc.).
+            # `tp...zplaneNN.ext` filename (.npy etc.).
             z_tag = DimensionTag.from_dim_size(TAG_REGISTRY["Z"], num_planes, [plane_idx + 1])
             t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes, frames_list)
 
@@ -616,7 +616,7 @@ def _imwrite_base(
                 target = plane_dir / bin_name
             else:
                 tags = [t_tag, z_tag] if nframes > 1 else [z_tag]
-                filename = OutputFilename(tags, suffix="stack").build(f".{ext_clean}")
+                filename = OutputFilename(tags).build(f".{ext_clean}")
                 target = outpath / filename
 
             if target.exists() and not overwrite:

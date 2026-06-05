@@ -93,6 +93,7 @@ if TYPE_CHECKING:
         detect_isoview_kind as detect_isoview_kind,
         isoview_to_ome_zarr as isoview_to_ome_zarr,
     )
+    from mbo_utilities.arrays.mp4 import MP4Array as MP4Array
     from mbo_utilities.arrays.numpy import NumpyArray as NumpyArray
     from mbo_utilities.arrays.suite2p import (
         Suite2pArray as Suite2pArray,
@@ -113,6 +114,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     # array classes
     "Suite2pArray": (".suite2p", "Suite2pArray"),
     "H5Array": (".h5", "H5Array"),
+    "MP4Array": (".mp4", "MP4Array"),
     "TiffArray": (".tiff", "TiffArray"),
     "ScanImageArray": (".tiff", "ScanImageArray"),
     "LBMArray": (".tiff", "LBMArray"),
@@ -189,6 +191,7 @@ __all__ = [
     "consolidate_isoview",
     "detect_isoview_kind",
     "LBMArray",
+    "MP4Array",
     "NumpyArray",
     "PiezoArray",
     # ROI mixin

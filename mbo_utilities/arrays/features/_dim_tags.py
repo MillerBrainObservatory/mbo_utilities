@@ -5,9 +5,9 @@ extensible system for labeling output files with dimension ranges.
 tags follow array dims order and use format: {label}{start}[-{stop}[-{step}]]
 
 examples:
-    tp00001-10000_zplane01-14_stack.tif  (TZYX)
-    zplane01-14_stack.tif                (ZYX, single timepoint)
-    tp00001-10000_stack.tif              (TYX, single plane)
+    tp00001-10000_zplane01-14.tif  (TZYX)
+    zplane01-14.tif                (ZYX, single timepoint)
+    tp00001-10000.tif              (TYX, single plane)
 """
 
 from __future__ import annotations
@@ -234,7 +234,7 @@ class DimensionTag:
 class OutputFilename:
     """builds output filename from dimension tags."""
 
-    def __init__(self, tags: list[DimensionTag], suffix: str = "stack"):
+    def __init__(self, tags: list[DimensionTag], suffix: str = ""):
         self.tags = tags
         self.suffix = suffix
 
@@ -244,13 +244,16 @@ class OutputFilename:
         returns
         -------
         str
-            filename like "tp00001-10000_zplane01-14_stack.tif"
+            filename like "tp00001-10000_zplane01-14.tif"
         """
         if not ext.startswith("."):
             ext = "." + ext
 
         parts = [tag.to_string() for tag in self.tags]
-        parts.append(self.suffix)
+        if self.suffix:
+            parts.append(self.suffix)
+        if not parts:
+            parts = ["data"]
         return "_".join(parts) + ext
 
     @classmethod
@@ -260,7 +263,7 @@ class OutputFilename:
         planes: int | list | Sequence[int] | None = None,
         frames: int | list | Sequence[int] | None = None,
         channels: int | list | Sequence[int] | None = None,
-        suffix: str = "stack",
+        suffix: str = "",
     ) -> "OutputFilename":
         """create from array and optional selections.
 
@@ -275,7 +278,7 @@ class OutputFilename:
         channels : int | list | None
             channel selection (1-based indices)
         suffix : str
-            filename suffix (default "stack")
+            filename suffix (default "" = no suffix)
 
         returns
         -------

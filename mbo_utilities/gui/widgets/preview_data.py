@@ -587,7 +587,7 @@ class PreviewDataWidget(EdgeWindow):
         self._saveas_fix_phase = True
         self._saveas_use_fft = True
 
-        # Video export options (active when ext is .mp4 or .mov)
+        # Video export options (active when ext is .mp4)
         self._saveas_video_fps = 30
         self._saveas_video_speed_factor = 1.0
         self._saveas_video_auto = True

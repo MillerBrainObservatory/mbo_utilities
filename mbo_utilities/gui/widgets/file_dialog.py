@@ -485,7 +485,7 @@ class FileDialog:
             # count ok/warn/missing
             ok_count = 0
             issue_count = 0
-            deps = ["Suite2p", "Suite3D", "Rastermap", "PyTorch", "CuPy"]
+            deps = ["LBM-Suite2p-Python", "Rastermap", "PyTorch", "CuPy"]
             for name in deps:
                 feat = self._get_feature(name)
                 if feat is None or feat.status == Status.MISSING:
@@ -524,8 +524,8 @@ class FileDialog:
 
             # suite2p group
             self._draw_dependency_group(
-                "Suite2p",
-                "Suite2p",
+                "LBM-Suite2p-Python",
+                "LBM-Suite2p-Python",
                 [("PyTorch", "PyTorch")]
             )
 
