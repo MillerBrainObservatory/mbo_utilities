@@ -11,20 +11,20 @@ Create an extensible dimension tag system for filename generation that supports:
 ## Filename Convention
 
 ```
-{tag1}_{tag2}_{...}_stack.tif
+{tag1}_{tag2}_{...}.tif
 ```
 
 **Tag format:** `{label}{start}[-{stop}[-{step}]]`
 
 **Examples:**
-- `zplane01-14_tp00001-10000_stack.tif` → TZYX (14 planes, 10000 timepoints)
-- `zplane01-14_tp00001_stack.tif` → ZYX (14 planes, single timepoint)
-- `zplane01_tp00001-10000_stack.tif` → TYX (single plane, 10000 timepoints)
-- `zplane01-14-2_tp00001-10000_stack.tif` → TZYX with step=2 (planes 1,3,5,7,9,11,13)
+- `zplane01-14_tp00001-10000.tif` → TZYX (14 planes, 10000 timepoints)
+- `zplane01-14_tp00001.tif` → ZYX (14 planes, single timepoint)
+- `zplane01_tp00001-10000.tif` → TYX (single plane, 10000 timepoints)
+- `zplane01-14-2_tp00001-10000.tif` → TZYX with step=2 (planes 1,3,5,7,9,11,13)
 
 **Future examples:**
-- `cam0_zplane01-14_tp00001-10000_stack.tif` → Camera 0, volumetric
-- `beamlet01-04_zplane01_tp00001-10000_stack.tif` → Pollen calibration
+- `cam0_zplane01-14_tp00001-10000.tif` → Camera 0, volumetric
+- `beamlet01-04_zplane01_tp00001-10000.tif` → Pollen calibration
 
 ## Architecture
 
@@ -101,7 +101,9 @@ class OutputFilename:
     def build(self, ext: str = ".tif") -> str:
         """build filename string."""
         parts = [tag.to_string() for tag in self.tags]
-        return "_".join(parts + [self.suffix]) + ext
+        if self.suffix:
+            parts.append(self.suffix)
+        return "_".join(parts) + ext
 
     @classmethod
     def from_array(
@@ -109,7 +111,7 @@ class OutputFilename:
         arr,
         planes: slice | list | None = None,
         frames: slice | list | None = None,
-        suffix: str = "stack",
+        suffix: str = "",
     ) -> "OutputFilename":
         """create from array and selection."""
         ...
@@ -209,19 +211,19 @@ mbo.imwrite(arr, "output/", ext=".tiff")
 
 # new volumetric mode
 mbo.imwrite(arr, "output/", ext=".tiff", volumetric=True)
-# creates: output/zplane01-14_tp00001-10000_stack.tif
+# creates: output/zplane01-14_tp00001-10000.tif
 
 # with plane selection
 mbo.imwrite(arr, "output/", ext=".tiff", volumetric=True, planes=[1, 2, 4])
-# creates: output/zplane01-02-04_tp00001-10000_stack.tif
+# creates: output/zplane01-02-04_tp00001-10000.tif
 
 # single timepoint
 mbo.imwrite(arr[0:1], "output/", ext=".tiff", volumetric=True)
-# creates: output/zplane01-14_tp00001_stack.tif
+# creates: output/zplane01-14_tp00001.tif
 ```
 
 ## Open Questions
 
-1. Should `_stack` suffix be configurable or always present for volumetric?
-2. How to handle ROI dimension in filename? `roi01-04_zplane01-14_stack.tif`?
+1. ~~Should `_stack` suffix be configurable or always present for volumetric?~~ Resolved: no default suffix; `output_suffix` appends one only when provided.
+2. How to handle ROI dimension in filename? `roi01-04_zplane01-14.tif`?
 3. Should non-tiff formats (zarr, h5) also use this naming convention?
