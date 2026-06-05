@@ -194,3 +194,6 @@ dev/
 # webknossos comparison scratch
 .wk-venv/
 demos/_wk_compare/
+
+# generated at build from demos/ (see setup.py); demos/ is the source of truth
+mbo_utilities/assets/notebooks/
