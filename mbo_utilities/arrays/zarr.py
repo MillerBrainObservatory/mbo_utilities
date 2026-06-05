@@ -140,7 +140,17 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin
 
         shapes = [z.shape for z in self.zs]
         if len(set(shapes)) != 1:
-            raise ValueError(f"Inconsistent shapes across zarr stores: {shapes}")
+            listing = "\n".join(
+                f"  - {p.name}: {tuple(s)}"
+                for p, s in zip(self.filenames, shapes)
+            )
+            parent = self.filenames[0].parent
+            raise ValueError(
+                f"{parent} contains {len(self.zs)} zarr stores with different "
+                f"shapes, so they are separate datasets and cannot be opened "
+                f"together:\n{listing}\n"
+                f"Open one explicitly, e.g. imread(r\"{self.filenames[0]}\")."
+            )
 
         # For OME-Zarr, metadata is on the group; for standard zarr, on the array
         self._metadata = []
