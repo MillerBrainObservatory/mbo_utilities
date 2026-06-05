@@ -187,25 +187,25 @@ def main(
     clear_cache=False,
     gpu_index_arg=None,
 ):
-    r"""
-    MBO Utilities CLI - data preview and processing tools.
+    """
+    MBO Utilities - preview and process imaging data.
 
     \b
-    GUI Mode:
-      mbo                            Open file selection dialog
-      mbo /path/to/data              Open specific file in GUI
-      mbo /path/to/data --metadata   Show only metadata
+    Open the viewer:
+      mbo                   file selection dialog
+      mbo PATH              open a file or folder
+      mbo PATH --metadata   print metadata only
 
     \b
-    Commands:
-      mbo init [DATA_PATH]           Create starter notebooks
-      mbo convert INPUT OUTPUT       Convert between formats
-      mbo info INPUT                 Show array information (CLI)
-      mbo formats                    List supported formats
+    Common commands:
+      mbo init [PATH]       create starter notebooks
+      mbo convert IN OUT    convert between formats
+      mbo info PATH         print array info
+      mbo formats           list supported formats
 
     \b
-    Utilities:
-      mbo --check-install                 Verify installation
+    Verify install:
+      mbo --check-install
     """
     # handle --clear-cache early
     if clear_cache:
@@ -1306,7 +1306,14 @@ def init(data_path, output_dir, overwrite):
       mbo init /data/raw             # notebooks in /data/scripts, path filled in
       mbo init /data/raw -o ./nb     # notebooks in ./nb
     """
-    src_dir = Path(__file__).resolve().parents[1] / "demos"
+    # Shipped copy (wheel / uv tool install) is generated from demos/ at build
+    # time into the package. Fall back to demos/ for source/editable runs.
+    pkg_dir = Path(__file__).resolve().parent
+    candidates = [pkg_dir / "assets" / "notebooks", pkg_dir.parent / "demos"]
+    src_dir = next(
+        (c for c in candidates if (c / "mbo_user_guide.ipynb").exists()),
+        candidates[0],
+    )
 
     # source notebook -> default data-path token replaced when DATA_PATH given
     # (None = copy as-is; the lsp guide is a markdown reference with no run path)
