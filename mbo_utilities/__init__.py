@@ -23,6 +23,7 @@ except PackageNotFoundError:
 
 # Define what's available for lazy loading
 __all__ = [
+    "AxialShiftView",
     "MBO_SUPPORTED_FTYPES",
     "VoxelSize",
     "add_recent_file",
@@ -59,6 +60,7 @@ __all__ = [
     "set_last_save_dir",
     # Visualization
     "to_video",
+    "with_axial_shifts",
     "write_ops",
 ]
 
@@ -83,6 +85,11 @@ def __getattr__(name):
     if name == "files_to_dask":
         from .arrays import files_to_dask
         return files_to_dask
+
+    # Axial plane-shift apply/remove (read-time, non-destructive)
+    if name in ("with_axial_shifts", "AxialShiftView"):
+        from .arrays import with_axial_shifts, AxialShiftView
+        return with_axial_shifts if name == "with_axial_shifts" else AxialShiftView
 
     # File utilities (file_io -> tifffile, zarr)
     if name in (

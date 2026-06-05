@@ -80,8 +80,10 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
 if TYPE_CHECKING:
     from mbo_utilities.arrays._registration import (
         AxiallyAlignedView as AxiallyAlignedView,
+        AxialShiftView as AxialShiftView,
         compute_axial_shifts as compute_axial_shifts,
         validate_axial_shifts as validate_axial_shifts,
+        with_axial_shifts as with_axial_shifts,
     )
     from mbo_utilities.arrays.bin import BinArray as BinArray
     from mbo_utilities.arrays.h5 import H5Array as H5Array
@@ -128,8 +130,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
     "AxiallyAlignedView": ("._registration", "AxiallyAlignedView"),
+    "AxialShiftView": ("._registration", "AxialShiftView"),
     "compute_axial_shifts": ("._registration", "compute_axial_shifts"),
     "validate_axial_shifts": ("._registration", "validate_axial_shifts"),
+    "with_axial_shifts": ("._registration", "with_axial_shifts"),
     # features subpackage
     "features": (".features", None),
     # ROI mixin
@@ -211,6 +215,8 @@ __all__ = [
     "supports_roi",
     # Registration
     "AxiallyAlignedView",
+    "AxialShiftView",
     "compute_axial_shifts",
     "validate_axial_shifts",
+    "with_axial_shifts",
 ]
