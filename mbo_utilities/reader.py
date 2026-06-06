@@ -158,6 +158,7 @@ def imread(
     # Stored as ``channel`` (zero-based) — picklable through reader_kwargs
     # so subprocess workers can re-create the wrap after their own imread.
     channel = kwargs.pop("channel", None)
+    squeeze = kwargs.pop("squeeze", False)
     arr = _imread_impl(inputs, **kwargs)
     if channel is not None:
         from mbo_utilities.arrays._channel_view import _ChannelView
@@ -166,8 +167,10 @@ def imread(
                 "imread(channel=%r): underlying array is %dD, returning unwrapped",
                 channel, getattr(arr, "ndim", "?"),
             )
-            return arr
-        return _ChannelView(arr, int(channel))
+        else:
+            arr = _ChannelView(arr, int(channel))
+    if squeeze and hasattr(arr, "squeeze"):
+        arr = arr.squeeze()
     return arr
 
 

@@ -97,6 +97,11 @@ class LazyArray:
         """return True if this class can open `path`. default: no."""
         return False
 
+    def squeeze(self):
+        """Return a view with size-1 T/C/Z axes dropped (opt-in ergonomics)."""
+        from mbo_utilities.squeeze import SqueezedView
+        return SqueezedView(self)
+
 
 _ENTRY_POINT_GROUP = "mbo_utilities.lazy_arrays"
 _REGISTRY: list[type[LazyArray]] = []
