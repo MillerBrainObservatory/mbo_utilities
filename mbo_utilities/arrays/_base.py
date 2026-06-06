@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from mbo_utilities import log
+from mbo_utilities.lazy_array import LazyArray
 from mbo_utilities.arrays.features._dim_labels import get_dims
 from mbo_utilities._writers import _write_plane, _write_volumetric_tiff, _write_volumetric_zarr
 from numpy.exceptions import AxisError
@@ -37,78 +38,15 @@ def get_dtype(dtype):
 DIMS = ("T", "C", "Z", "Y", "X")
 
 
-class Shape5DMixin:
+class Shape5DMixin(LazyArray):
+    """Backwards-compatible alias for the 5D accessors, now on `LazyArray`.
+
+    The accessors (`_shape5d`, `shape5d`, `nt`/`nc`/`nz`/`ny`/`nx`,
+    `source_path`) were folded into `LazyArray` in v4. This subclass is
+    retained so existing `class FooArray(..., Shape5DMixin)` declarations
+    keep working and become `LazyArray` instances; it is removed once every
+    array class inherits `LazyArray` directly.
     """
-    mixin providing always-5D shape accessors.
-
-    array classes that include this mixin must implement `_shape5d()`
-    returning a 5-tuple (T, C, Z, Y, X) with singletons for unused dims.
-
-    provides named size accessors (nt, nc, nz, ny, nx) and a shape5d
-    property so consumers never need to guess dimension positions.
-    """
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        """return the 5D TCZYX shape. subclasses must implement this."""
-        raise NotImplementedError
-
-    @property
-    def shape5d(self) -> tuple[int, int, int, int, int]:
-        """shape as 5D TCZYX, always length 5."""
-        return self._shape5d()
-
-    @property
-    def nt(self) -> int:
-        """number of timepoints."""
-        return self._shape5d()[0]
-
-    @property
-    def nc(self) -> int:
-        """number of channels."""
-        return self._shape5d()[1]
-
-    @property
-    def nz(self) -> int:
-        """number of z-planes."""
-        return self._shape5d()[2]
-
-    @property
-    def ny(self) -> int:
-        """spatial height."""
-        return self._shape5d()[3]
-
-    @property
-    def nx(self) -> int:
-        """spatial width."""
-        return self._shape5d()[4]
-
-    @property
-    def source_path(self) -> Path | None:
-        """canonical path `imread()` uses to reconstruct this array.
-
-        default implementation derives it from `self.filenames` (list or
-        single path) or falls back to `self.path`. subclasses whose files
-        span per-plane subdirectories (e.g. volumetric Suite2p) must
-        override — a file path like `.../plane01/data.bin` is not
-        equivalent to its parent directory once passed through imread.
-        """
-        filenames = getattr(self, "filenames", None)
-        if filenames is None:
-            # fallback for arrays that use a different attribute name
-            # (NumpyArray → `.path`, IsoView* → `.base_path`).
-            path = getattr(self, "path", None) or getattr(self, "base_path", None)
-            return Path(path) if path else None
-        if isinstance(filenames, (str, Path)):
-            return Path(filenames)
-        paths = [str(p) for p in filenames]
-        if not paths:
-            return None
-        if len(paths) == 1:
-            return Path(paths[0])
-        try:
-            return Path(commonpath(paths))
-        except ValueError:
-            return Path(paths[0]).parent
 
 
 def _normalize_key(key, ndim):

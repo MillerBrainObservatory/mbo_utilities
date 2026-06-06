@@ -47,6 +47,9 @@ __all__ = [
     # Core I/O
     "imread",
     "imwrite",
+    # Pluggable array API
+    "LazyArray",
+    "register_array_class",
     # Metadata
     "is_raw_scanimage",
     "load_npy",
@@ -77,6 +80,11 @@ def __getattr__(name):
     if name == "MBO_SUPPORTED_FTYPES":
         from .reader import MBO_SUPPORTED_FTYPES
         return MBO_SUPPORTED_FTYPES
+
+    # Pluggable array API (dependency-light; safe to import early)
+    if name in ("LazyArray", "register_array_class"):
+        from .lazy_array import LazyArray, register_array_class
+        return LazyArray if name == "LazyArray" else register_array_class
 
     if name == "get_mbo_dirs":
         from .preferences import get_mbo_dirs
