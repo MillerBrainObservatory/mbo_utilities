@@ -60,6 +60,41 @@ def _normalize_key(key, ndim):
     return key
 
 
+# axes of canonical 5D TCZYX that a natural-rank array of the given ndim
+# does NOT have (front-padded as singletons by _shape5d). used to map a
+# 5D index onto the underlying lower-rank array.
+_SKIP_BY_RAW_NDIM = {
+    5: (),
+    4: (1,),          # C
+    3: (1, 2),        # C, Z
+    2: (0, 1, 2),     # T, C, Z
+    1: (0, 1, 2, 3),  # T, C, Z, Y
+}
+
+
+def _index_5d_into_raw(data, key, raw_ndim):
+    """Index a natural-rank `data` with a 5D TCZYX `key`.
+
+    The array presents singleton T/C/Z axes that `data` lacks; those axes
+    are dropped from the key before indexing, then re-inserted (size 1) on
+    the result for any that were sliced rather than integer-indexed, so the
+    output keeps numpy 5D semantics.
+    """
+    key = _normalize_key(key, 5)
+    key = key + (slice(None),) * (5 - len(key))
+    skip = _SKIP_BY_RAW_NDIM.get(raw_ndim, ())
+    raw_key = tuple(k for i, k in enumerate(key) if i not in skip)
+    out = np.asarray(data[raw_key])
+    out_axis = 0
+    for i in range(5):
+        if isinstance(key[i], (int, np.integer)):
+            continue  # integer index drops this axis
+        if i in skip:
+            out = np.expand_dims(out, axis=out_axis)
+        out_axis += 1
+    return out
+
+
 def supports_roi(obj):
     """
     Check if object supports ROI operations.

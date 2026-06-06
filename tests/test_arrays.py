@@ -172,7 +172,10 @@ class TestH5Array:
 
         arr = H5Array(h5_path)
 
-        assert arr.shape == expected_data.shape
+        # always 5D TCZYX (source is TYX)
+        nt, ny, nx = expected_data.shape
+        assert arr.shape == (nt, 1, 1, ny, nx)
+        assert arr.ndim == 5
         assert arr.dtype == expected_data.dtype
 
     def test_indexing(self, h5_file):
@@ -181,7 +184,8 @@ class TestH5Array:
 
         arr = H5Array(h5_path)
 
-        frame = arr[0]
+        # arr[0, 0, 0] -> (Y, X) frame
+        frame = arr[0, 0, 0]
         assert frame.shape == expected_data[0].shape
         assert np.array_equal(frame, expected_data[0])
 
@@ -191,7 +195,7 @@ class TestH5Array:
 
         arr = H5Array(h5_path)
 
-        sliced = arr[1:4]
+        sliced = arr[1:4, 0, 0]
         assert sliced.shape == expected_data[1:4].shape
         assert np.array_equal(sliced, expected_data[1:4])
 
@@ -766,7 +770,8 @@ class TestImreadDispatcher:
         arr = mbo.imread(h5_path)
 
         assert hasattr(arr, "shape")
-        assert arr.shape == synthetic_3d_data.shape
+        nt, ny, nx = synthetic_3d_data.shape
+        assert arr.shape == (nt, 1, 1, ny, nx)
 
     def test_imread_bin(self, tmp_path, synthetic_3d_data):
         """imread should return array for binary directory."""

@@ -12,7 +12,8 @@ import h5py
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin, Shape5DMixin
+from mbo_utilities.arrays._base import _imwrite_base, _index_5d_into_raw, ReductionMixin, Shape5DMixin
+from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.metadata import get_param
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
@@ -108,13 +109,27 @@ class H5Array(ReductionMixin, Shape5DMixin):
             ) from None
 
         self.dataset_name = dataset
-        self.shape = self._d.shape
+        self._raw_shape = tuple(self._d.shape)
         self._dtype = self._d.dtype
-        self.ndim = self._d.ndim
         self._target_dtype = None
 
+    PRIORITY = 50
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        p = Path(file)
+        return p.is_file() and p.suffix.lower() in (".h5", ".hdf5", ".hdf")
+
+    @property
+    def shape(self) -> tuple[int, int, int, int, int]:
+        return self._shape5d()
+
+    @property
+    def ndim(self) -> int:
+        return 5
+
     def _shape5d(self) -> tuple[int, int, int, int, int]:
-        s = self.shape
+        s = self._raw_shape
         if len(s) == 5:
             return s
         if len(s) == 4:
@@ -154,38 +169,14 @@ class H5Array(ReductionMixin, Shape5DMixin):
         return self.shape[0]
 
     def __getitem__(self, key):
-        if not isinstance(key, tuple):
-            key = (key,)
-
-        # Expand ellipsis to match ndim
-        if Ellipsis in key:
-            idx = key.index(Ellipsis)
-            n_missing = self.ndim - (len(key) - 1)
-            key = key[:idx] + (slice(None),) * n_missing + key[idx + 1 :]
-
-        slices = []
-        result_shape = []
-        dim = 0
-        for k in key:
-            if k is None:
-                result_shape.append(1)
-            else:
-                slices.append(k)
-                dim += 1
-
-        data = self._d[tuple(slices)]
-
-        for i, k in enumerate(key):
-            if k is None:
-                data = np.expand_dims(data, axis=i)
-
+        out = _index_5d_into_raw(self._d, key, len(self._raw_shape))
         if self._target_dtype is not None:
-            data = data.astype(self._target_dtype)
-        return data
+            out = out.astype(self._target_dtype)
+        return out
 
     def __array__(self, dtype=None, copy=None):
-        # return first frame for fast histogram/preview (prevents accidental full load)
-        data = self._d[0]
+        # representative (Y, X) frame for fast preview (no accidental full load)
+        data = np.asarray(self[0, 0, 0])
         if self._target_dtype is not None:
             data = data.astype(self._target_dtype)
         if dtype is not None:
@@ -236,3 +227,6 @@ class H5Array(ReductionMixin, Shape5DMixin):
             debug=debug,
             **kwargs,
         )
+
+
+register_array_class(H5Array, priority=50)
