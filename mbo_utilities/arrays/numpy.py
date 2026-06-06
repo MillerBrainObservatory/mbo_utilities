@@ -172,7 +172,11 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
     @classmethod
     def can_open(cls, file: Path | str) -> bool:
         p = Path(file)
-        return p.is_file() and p.suffix.lower() in (".npy", ".npz")
+        if p.suffix.lower() not in (".npy", ".npz"):
+            return False
+        if (p.parent / "pmd_demixer.npy").is_file():
+            return False  # PMD demixer arrays are not supported (legacy raises)
+        return p.is_file()
 
     @property
     def shape(self) -> tuple[int, int, int, int, int]:

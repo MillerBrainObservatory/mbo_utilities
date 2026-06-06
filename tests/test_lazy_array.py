@@ -105,6 +105,47 @@ def test_dispatch_resolves_npy_to_numpyarray(tmp_path):
     assert _dispatch(p) is NumpyArray
 
 
+def test_imread_dispatch_override(tmp_path):
+    """A runtime-registered high-PRIORITY plugin wins over built-ins via imread."""
+    import tifffile
+    import mbo_utilities
+
+    p = tmp_path / "x.tif"
+    tifffile.imwrite(str(p), np.zeros((4, 8, 8), dtype="uint16"))
+
+    # baseline: a plain tiff loads as TiffArray
+    assert type(mbo_utilities.imread(p)).__name__ == "TiffArray"
+
+    class _OverrideArray(LazyArray):
+        PRIORITY = 200
+        dtype = None
+        metadata = {}
+
+        def __init__(self, path, **kw):
+            self.path = path
+
+        @classmethod
+        def can_open(cls, path):
+            return True
+
+        def _shape5d(self):
+            return (1, 1, 1, 1, 1)
+
+        def __getitem__(self, key):
+            return None
+
+    before = list(_REGISTRY)
+    try:
+        register_array_class(_OverrideArray)
+        assert isinstance(mbo_utilities.imread(p), _OverrideArray)
+    finally:
+        if _OverrideArray in _REGISTRY and _OverrideArray not in before:
+            _REGISTRY.remove(_OverrideArray)
+
+    # removing the registration restores normal dispatch
+    assert type(mbo_utilities.imread(p)).__name__ == "TiffArray"
+
+
 def test_priority_override_on_register():
     class _LowArray(LazyArray):
         PRIORITY = 1

@@ -118,6 +118,8 @@ class H5Array(ReductionMixin, Shape5DMixin):
     @classmethod
     def can_open(cls, file: Path | str) -> bool:
         p = Path(file)
+        if p.name.endswith("_pollen.h5"):
+            return False  # pollen calibration output, not source data
         return p.is_file() and p.suffix.lower() in (".h5", ".hdf5", ".hdf")
 
     @property

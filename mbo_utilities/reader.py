@@ -34,6 +34,7 @@ from mbo_utilities.arrays.isoview import (
     IsoviewArray,
     detect_isoview_kind,
 )
+from mbo_utilities.lazy_array import _dispatch
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -187,6 +188,25 @@ def _imread_impl(
         p = Path(inputs)
         if not p.exists():
             raise ValueError(f"Input path does not exist: {p}")
+
+        # redirect an inner-zarr path (zarr.json / chunk file) to the store
+        # root so can_open() sees the store directory, matching the legacy
+        # redirect further down.
+        if not p.is_dir():
+            for ancestor in p.parents:
+                if ancestor.suffix.lower() == ".zarr" and ancestor.is_dir():
+                    logger.debug(f"Redirecting {p.name} -> parent zarr store {ancestor}")
+                    p = ancestor
+                    break
+
+        # v4 dispatch: the highest-PRIORITY registered class (built-in or a
+        # third-party plugin) whose can_open() accepts the path wins. Falls
+        # through to the legacy detection below for inputs no class claims
+        # (multi-file lists, .bin/.klb/.mp4, reg_tif folders, mixed dirs).
+        cls = _dispatch(p)
+        if cls is not None:
+            logger.debug(f"Dispatch selected {cls.__name__} for {p}")
+            return cls(p, **_filter_kwargs(cls, kwargs))
 
         # Suite2p outputs take priority over isoview ancestor matching.
         # detect_isoview_kind walks up parents looking for `.corrected` /
