@@ -17,6 +17,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin, Shape5DMixin
+from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.arrays.features import DimLabels
 
 from mbo_utilities.metadata import get_param
@@ -285,6 +286,19 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
     >>> arr.is_volumetric
     True
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        p = Path(file)
+        if p.name == "ops.npy":
+            return True
+        if p.is_dir():
+            if (p / "ops.npy").exists():
+                return True
+            return any(
+                (d / "ops.npy").exists() for d in p.iterdir() if d.is_dir()
+            )
+        return False
 
     def __init__(
         self,
@@ -795,3 +809,6 @@ def load_ops(ops_input: str | Path | list[str | Path]):
     return {}
 
 
+
+
+register_array_class(Suite2pArray, priority=60)

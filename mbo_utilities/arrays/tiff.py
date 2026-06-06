@@ -16,6 +16,7 @@ from tifffile import TiffFile
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import ReductionMixin, Shape5DMixin, TiffReaderMixin, _normalize_key
+from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.file_io import expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
 from mbo_utilities.metadata.scanimage import (
@@ -2199,3 +2200,13 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
             return PiezoArray(files, **kwargs)
         kwargs.pop("average_frames", None)
         return SinglePlaneArray(files, **kwargs)
+
+
+# self-registration for imread() dispatch (v4). more specific layouts win
+# via higher PRIORITY; TiffArray is the last-resort fallback.
+register_array_class(LBMArray, priority=90)
+register_array_class(LBMPiezoArray, priority=90)
+register_array_class(PiezoArray, priority=80)
+register_array_class(SinglePlaneArray, priority=80)
+register_array_class(ScanImageArray, priority=70)
+register_array_class(TiffArray, priority=30)

@@ -14,6 +14,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin, Shape5DMixin
+from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 import contextlib
 
@@ -165,6 +166,13 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
 
         # Set dimension labels based on array shape
         self._dims = self._infer_dims()
+
+    PRIORITY = 50
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        p = Path(file)
+        return p.is_file() and p.suffix.lower() in (".npy", ".npz")
 
     @property
     def shape(self) -> tuple[int, int, int, int, int]:
@@ -356,3 +364,6 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
             graphic_kwargs=graphic_kwargs,
             **kwargs,
         )
+
+
+register_array_class(NumpyArray)

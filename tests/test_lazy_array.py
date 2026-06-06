@@ -71,6 +71,40 @@ def test_register_and_dispatch_by_priority():
             _REGISTRY.remove(_FakeArray)
 
 
+def test_builtin_classes_registered_with_priorities():
+    from mbo_utilities.arrays import NumpyArray, ZarrArray, TiffArray, Suite2pArray
+    from mbo_utilities.arrays.tiff import (
+        LBMArray,
+        LBMPiezoArray,
+        PiezoArray,
+        SinglePlaneArray,
+        ScanImageArray,
+    )
+
+    expected = {
+        NumpyArray: 50,
+        Suite2pArray: 60,
+        ZarrArray: 80,
+        ScanImageArray: 70,
+        LBMArray: 90,
+        LBMPiezoArray: 90,
+        PiezoArray: 80,
+        SinglePlaneArray: 80,
+        TiffArray: 30,
+    }
+    for cls, prio in expected.items():
+        assert cls in _REGISTRY, f"{cls.__name__} not registered"
+        assert cls.PRIORITY == prio
+
+
+def test_dispatch_resolves_npy_to_numpyarray(tmp_path):
+    from mbo_utilities.arrays import NumpyArray
+
+    p = tmp_path / "x.npy"
+    np.save(p, np.zeros((3, 8, 8), dtype="uint16"))
+    assert _dispatch(p) is NumpyArray
+
+
 def test_priority_override_on_register():
     class _LowArray(LazyArray):
         PRIORITY = 1

@@ -13,6 +13,7 @@ import numpy as np
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin, Shape5DMixin
+from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.arrays.features import (
     DimLabelsMixin,
     DimensionSpecMixin,
@@ -93,6 +94,13 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin
     >>> arr.dims
     ('Z', 'T', 'Y', 'X')
     """
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        p = Path(file)
+        if p.suffix == ".zarr":
+            return True
+        return p.is_dir() and (p / "zarr.json").exists()
 
     def __init__(
         self,
@@ -790,3 +798,6 @@ def merge_zarr_zplanes(
     logger.info(f"Successfully created merged OME-Zarr at {output_path}")
     logger.info(f"Napari scale (t,z,y,x): {image.attrs['scale']}")
     return output_path
+
+
+register_array_class(ZarrArray, priority=80)
