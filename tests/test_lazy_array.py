@@ -83,7 +83,7 @@ def test_builtin_classes_registered_with_priorities():
 
     expected = {
         NumpyArray: 50,
-        Suite2pArray: 60,
+        Suite2pArray: 100,
         ZarrArray: 80,
         ScanImageArray: 70,
         LBMArray: 90,

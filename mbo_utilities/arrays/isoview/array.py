@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from mbo_utilities.arrays._base import ReductionMixin, Shape5DMixin
+from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.log import get as _get_logger
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 
@@ -1498,6 +1499,18 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
     everything else is shared.
     """
 
+    # imread() dispatch: wins over generic ZarrArray (corrected/fused are
+    # .ome.zarr). suite2p outputs are claimed by Suite2pArray at a higher
+    # priority, so a suite2p folder inside a .corrected tree stays suite2p.
+    PRIORITY = 90
+
+    @classmethod
+    def can_open(cls, file: Path | str) -> bool:
+        try:
+            return detect_isoview_kind(file) is not None
+        except Exception:
+            return False
+
     # Pre-cache the display range so the histogram opens at a sensible
     # default for IsoView 16-bit fluorescence data instead of probing
     # the first frame (which can be slow for large fused volumes and
@@ -2066,3 +2079,6 @@ def isoview_to_ome_zarr(
         pyramid_method=pyramid_method,
         output_suffix=output_suffix or arr.stack_type,
     )
+
+
+register_array_class(IsoviewArray)

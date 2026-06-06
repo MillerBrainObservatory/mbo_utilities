@@ -811,4 +811,6 @@ def load_ops(ops_input: str | Path | list[str | Path]):
 
 
 
-register_array_class(Suite2pArray, priority=60)
+# priority above IsoviewArray (90): a suite2p folder living inside a
+# .corrected/.fused tree must resolve to Suite2pArray, not IsoviewArray.
+register_array_class(Suite2pArray, priority=100)
