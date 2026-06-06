@@ -13,7 +13,7 @@ from typing import Sequence
 import numpy as np
 
 from mbo_utilities import log
-from mbo_utilities.arrays._base import _imwrite_base, ReductionMixin, Shape5DMixin
+from mbo_utilities.arrays._base import _imwrite_base, _index_5d_into_raw, ReductionMixin, Shape5DMixin
 from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 import contextlib
@@ -207,33 +207,11 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
         return "TCZYX"
 
     def __getitem__(self, item):
-        # translate 5D indexing to the underlying array's actual ndim
-        # shape5d pads missing dims with singletons at the front
-        # e.g., 3D TYX data has shape5d (T, 1, 1, Y, X)
-        # key (t, c, z, y, x) maps to (t, y, x) by dropping singleton dims
-        if not isinstance(item, tuple):
-            item = (item,)
-        raw_ndim = len(self._raw_shape)
-        skip = set()
-        if len(item) > raw_ndim:
-            if raw_ndim <= 3:
-                skip = {1, 2}  # C, Z
-            elif raw_ndim == 4:
-                skip = {1}  # C
-            raw_key = tuple(k for i, k in enumerate(item) if i not in skip)
-            raw_key = raw_key[:raw_ndim]
-        else:
-            raw_key = item
-
-        out = self.data[raw_key]
+        # 5D TCZYX indexing translated onto the underlying array's natural
+        # rank (shape5d front-pads singleton T/C/Z).
+        out = _index_5d_into_raw(self.data, item, len(self._raw_shape))
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)
-
-        # re-expand stripped singleton dims (only for slice keys, not int keys)
-        for axis in sorted(skip):
-            if axis < len(item) and not isinstance(item[axis], (int, np.integer)):
-                out = np.expand_dims(out, axis=axis)
-
         return out
 
     def __len__(self) -> int:

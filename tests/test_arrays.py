@@ -37,31 +37,31 @@ class TestNumpyArray:
         assert arr.ndim == 5
 
     def test_indexing_single_frame(self, synthetic_3d_data):
-        """Index single frame."""
+        """Index single frame (5D: drop T, C, Z with integer indices)."""
         arr = NumpyArray(synthetic_3d_data)
 
-        frame = arr[0]
+        frame = arr[0, 0, 0]
         expected = synthetic_3d_data[0]
 
         assert frame.shape == expected.shape
         assert np.array_equal(frame, expected)
 
     def test_indexing_slice(self, synthetic_3d_data):
-        """Index with slice."""
+        """Index with slice over T (C, Z indexed out)."""
         arr = NumpyArray(synthetic_3d_data)
 
-        sliced = arr[2:5]
+        sliced = arr[2:5, 0, 0]
         expected = synthetic_3d_data[2:5]
 
         assert sliced.shape == expected.shape
         assert np.array_equal(sliced, expected)
 
     def test_indexing_fancy(self, synthetic_3d_data):
-        """Fancy indexing with list."""
+        """Fancy indexing with list over T (C, Z indexed out)."""
         arr = NumpyArray(synthetic_3d_data)
 
         indices = [0, 2, 4]
-        result = arr[indices]
+        result = arr[indices, 0, 0]
         expected = synthetic_3d_data[indices]
 
         assert result.shape == expected.shape
