@@ -617,14 +617,16 @@ class TiffReaderMixin:
         return self
 
     def __array__(self, dtype=None, copy=None):
-        """Return a representative frame (prevents accidental full load).
+        """Return a representative (Y, X) frame (prevents accidental full load).
 
-        for 2D data the whole image IS the frame; self[0] would return
-        a single row. for 3D+ we take self[0] as the first slice along
-        the outer dim.
+        v4 arrays are always 5D TCZYX, so the first frame is self[0, 0, 0].
+        for legacy natural-rank shapes: 2D is the whole image; 3D/4D take
+        the first slice along the outer dim.
         """
         ndim = getattr(self, "ndim", None)
-        if ndim == 2:
+        if ndim == 5:
+            data = np.asarray(self[0, 0, 0])
+        elif ndim == 2:
             data = np.asarray(self[:])
         else:
             data = np.asarray(self[0])

@@ -535,34 +535,27 @@ class TestTiffVolumeAutoDetection:
         return vol_dir, synthetic_4d_data
 
     def test_volume_directory_detection(self, tiff_volume_dir):
-        """TiffArray detects volume directory. Natural rank drops C=1."""
+        """TiffArray detects volume directory; always 5D TCZYX (C=1)."""
         vol_dir, expected_data = tiff_volume_dir
 
         arr = TiffArray(vol_dir)
 
-        # natural rank: (T, Z, Y, X) — C=1 dropped
-        assert arr.ndim == 4, f"Expected 4D array (C=1 squeezed), got {arr.ndim}D"
-        assert arr.shape == expected_data.shape, "Natural shape mismatch"
-        # 5D contract preserved via shape5d
-        assert arr.shape5d == (
-            expected_data.shape[0],
-            1,
-            expected_data.shape[1],
-            expected_data.shape[2],
-            expected_data.shape[3],
-        )
+        nt, nz, ny, nx = expected_data.shape
+        assert arr.ndim == 5, f"Expected 5D array, got {arr.ndim}D"
+        assert arr.shape == (nt, 1, nz, ny, nx)
+        assert arr.shape5d == arr.shape
 
     def test_volume_indexing(self, tiff_volume_dir):
-        """Test indexing volume TiffArray at natural rank."""
+        """Test indexing volume TiffArray with 5D semantics."""
         vol_dir, expected_data = tiff_volume_dir
 
         arr = TiffArray(vol_dir)
 
-        # natural rank is (T, Z, Y, X); arr[0] squeezes T -> (Z, Y, X)
-        frame = arr[0]
+        # arr[0, 0] indexes T and C -> (Z, Y, X)
+        frame = arr[0, 0]
         frame_np = np.asarray(frame)
         assert frame_np.size == expected_data[0].size, "Element count mismatch"
-        assert frame_np.ndim == 3, "Single T-frame should be 3D (Z, Y, X)"
+        assert frame_np.ndim == 3, "T,C-indexed frame should be 3D (Z, Y, X)"
 
     def test_find_tiff_plane_files(self, tiff_volume_dir):
         """Test find_tiff_plane_files helper function."""

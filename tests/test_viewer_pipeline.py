@@ -364,10 +364,10 @@ class TestCustomMetadataPropagation:
                 f"{ops_file}: expected dz=15.0, got {ops.get('dz')}"
 
     def test_natural_rank_tiff_bin_write(self, tmp_path):
-        """Natural-rank 4D TiffArray (T, Z, Y, X) — was crashing because
-        `_imwrite_base` did `arr.shape[2]` (which is Y, not Z, on a
-        natural-rank array) and tried to iterate Y-many planes. Fix uses
-        `arr.shape5d[2]` to always pick the real Z size.
+        """Volumetric TiffArray (T, 1, Z, Y, X) writes one bin per plane.
+
+        `_imwrite_base` uses `arr.shape5d[2]` (== `arr.shape[2]` now that
+        arrays are always 5D) to pick the real Z size when iterating planes.
         """
         import numpy as np
         import tifffile
@@ -384,8 +384,8 @@ class TestCustomMetadataPropagation:
             )
 
         arr = imread(vol_dir)
-        # natural-rank reports 4D, shape5d still reports 5D
-        assert arr.ndim == 4
+        # always 5D TCZYX
+        assert arr.ndim == 5
         assert arr.shape5d == (nt, 1, nz, 16, 16)
 
         out = tmp_path / "out"
