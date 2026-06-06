@@ -216,15 +216,15 @@ show_install_type_prompt() {
     echo ""
     echo -e "${WHITE}Installation Type${NC}"
     echo ""
-    echo -e "  ${GRAY}CLI             - global 'mbo' command on your PATH, just runs the GUI.${NC}"
+    echo -e "  ${GRAY}Global          - global 'mbo' command on your PATH, just runs the GUI.${NC}"
     echo -e "  ${GRAY}                  Self-contained; no activation, no imports, no notebooks.${NC}"
-    echo -e "  ${GRAY}Local env       - project-local venv you 'cd' into and run 'uv run ...' or${NC}"
+    echo -e "  ${GRAY}Local           - project-local venv you 'cd' into and run 'uv run ...' or${NC}"
     echo -e "  ${GRAY}                  import from. Use this for scripts, notebooks, development.${NC}"
     echo -e "  ${GRAY}Both            - pick this if you want the GUI anywhere AND a local env to code in.${NC}"
     echo ""
-    echo -e "  ${CYAN}[1] Environment + CLI${NC} - Create Python venv with mbo_utilities + global CLI (Recommended)"
-    echo -e "  ${CYAN}[2] Environment${NC}       - Create Python venv only (for library use)"
-    echo -e "  ${CYAN}[3] CLI${NC}               - Install global CLI only (mbo command)"
+    echo -e "  ${CYAN}[1] Both${NC}   - global mbo command + local Python environment (Recommended)"
+    echo -e "  ${CYAN}[2] Local${NC}  - Python environment only (for library use)"
+    echo -e "  ${CYAN}[3] Global${NC} - global mbo command only (just the GUI)"
     echo ""
 
     while true; do
@@ -963,81 +963,67 @@ install_dev_environment() {
 # Desktop Entry / App Bundle
 # =============================================================================
 
-create_desktop_entry_linux() {
-    if [[ "$INSTALL_CLI" != "true" ]]; then
-        return
-    fi
-
-    info "Creating desktop entry..."
-
-    local app_dir="$HOME/.local/share/applications"
-    local icon_dir="$HOME/.mbo"
-    local desktop_file="$app_dir/mbo-utilities.desktop"
-    local icon_path="$icon_dir/icon.png"
-
-    mkdir -p "$app_dir" "$icon_dir"
-
-    # Download icon
-    local download_ref="${BRANCH_REF:-master}"
-    if curl -LsSf "https://raw.githubusercontent.com/$GITHUB_REPO/$download_ref/mbo_utilities/assets/app_settings/icon.png" -o "$icon_path" 2>/dev/null; then
-        info "Icon downloaded"
-    elif curl -LsSf "https://raw.githubusercontent.com/$GITHUB_REPO/master/mbo_utilities/assets/app_settings/icon.png" -o "$icon_path" 2>/dev/null; then
-        info "Icon downloaded"
-    else
-        warn "Could not download icon"
-        icon_path=""
-    fi
-
-    # Find mbo executable
-    local mbo_path=$(which mbo 2>/dev/null || echo "$HOME/.local/bin/mbo")
-
-    cat > "$desktop_file" << EOF
-[Desktop Entry]
-Type=Application
-Name=MBO Utilities
-Comment=Miller Brain Observatory Image Viewer
-Exec=$mbo_path
-Icon=$icon_path
-Terminal=false
-Categories=Science;Education;
-EOF
-
-    chmod +x "$desktop_file"
-
-    # Copy to desktop if exists
-    if [[ -d "$HOME/Desktop" ]]; then
-        cp "$desktop_file" "$HOME/Desktop/"
-        chmod +x "$HOME/Desktop/mbo-utilities.desktop"
-        success "Desktop shortcut created"
-    fi
-
-    success "Application menu entry created"
+read_yes_no() {
+    # read_yes_no "Prompt" "y"|"n"  ->  return 0 (yes) / 1 (no)
+    local prompt="$1"
+    local default="${2:-y}"
+    local suffix="[Y/n]"
+    [[ "$default" == "n" ]] && suffix="[y/N]"
+    while true; do
+        read -p "$prompt $suffix " ans
+        ans=$(echo "$ans" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+        if [[ -z "$ans" ]]; then
+            [[ "$default" == "n" ]] && return 1 || return 0
+        fi
+        case "$ans" in
+            y|yes) return 0 ;;
+            n|no)  return 1 ;;
+            *) warn "Please answer y or n." ;;
+        esac
+    done
 }
 
-create_desktop_entry_macos() {
-    if [[ "$INSTALL_CLI" != "true" ]]; then
-        return
+add_mbo_shortcut() {
+    # add_mbo_shortcut <mbo_exe> <name>
+    local mbo_exe="$1"
+    local name="$2"
+
+    if [[ ! -x "$mbo_exe" ]]; then
+        mbo_exe=$(command -v mbo 2>/dev/null || echo "$mbo_exe")
     fi
+
+    info "Creating desktop shortcut..."
+    if [[ "$PLATFORM" == "macos" ]]; then
+        create_macos_app_bundle "$mbo_exe" "$name"
+    else
+        # `mbo shortcut` writes the .desktop entry using the bundled icon
+        if ! "$mbo_exe" shortcut --name "$name"; then
+            warn "Could not create desktop shortcut (requires a newer mbo_utilities)."
+        fi
+    fi
+}
+
+create_macos_app_bundle() {
+    local mbo_path="$1"
+    local app_name="${2:-Miller Brain Studio}"
 
     info "Creating macOS app bundle..."
 
     local app_dir="$HOME/Applications"
-    local app_path="$app_dir/MBO Utilities.app"
+    local app_path="$app_dir/$app_name.app"
     local icon_dir="$HOME/.mbo"
 
     mkdir -p "$app_dir" "$icon_dir"
     mkdir -p "$app_path/Contents/MacOS"
     mkdir -p "$app_path/Contents/Resources"
 
-    local mbo_path=$(which mbo 2>/dev/null || echo "$HOME/.local/bin/mbo")
-
     # Create launcher script
-    cat > "$app_path/Contents/MacOS/MBO Utilities" << EOF
+    cat > "$app_path/Contents/MacOS/$app_name" << EOF
 #!/bin/bash
 export PATH="$HOME/.local/bin:\$PATH"
 "$mbo_path"
 EOF
-    chmod +x "$app_path/Contents/MacOS/MBO Utilities"
+    chmod +x "$app_path/Contents/MacOS/$app_name"
 
     # Create Info.plist
     cat > "$app_path/Contents/Info.plist" << EOF
@@ -1046,11 +1032,11 @@ EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>MBO Utilities</string>
+    <string>$app_name</string>
     <key>CFBundleIdentifier</key>
     <string>com.millerbrainobservatory.mbo-utilities</string>
     <key>CFBundleName</key>
-    <string>MBO Utilities</string>
+    <string>$app_name</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundlePackageType</key>
@@ -1070,7 +1056,7 @@ EOF
 
     # Create symlink on desktop
     if [[ -d "$HOME/Desktop" ]]; then
-        ln -sf "$app_path" "$HOME/Desktop/MBO Utilities.app"
+        ln -sf "$app_path" "$HOME/Desktop/$app_name.app"
         success "Desktop alias created"
     fi
 }
@@ -1097,7 +1083,7 @@ show_usage_instructions() {
     if [[ "$INSTALL_CLI" == "true" ]]; then
         section=$((section + 1))
         local bin_dir=$(get_uv_tool_bin_dir)
-        local header="CLI - available system-wide"
+        local header="Global - available system-wide"
         if $show_both; then header="(${section}) $header"; fi
         echo -e "  ${GRAY}${header}${NC}"
         echo -e "    ${WHITE}mbo${NC}                    # open GUI"
@@ -1169,25 +1155,25 @@ main() {
         show_env_location_prompt
     fi
 
-    # Step 6: Install CLI tool if requested
+    # Step 6: Install global CLI tool if requested
     if [[ "$INSTALL_CLI" == "true" ]]; then
         if ! install_mbo_tool; then
-            error "CLI installation failed."
+            error "Global installation failed."
             exit 1
+        fi
+        if read_yes_no "Add a desktop shortcut for the global app?" "y"; then
+            local bin_dir=$(get_uv_tool_bin_dir)
+            add_mbo_shortcut "$bin_dir/mbo" "Miller Brain Studio"
         fi
     fi
 
-    # Step 7: Create dev environment if requested
+    # Step 7: Create local environment if requested
     if [[ "$INSTALL_ENV" == "true" && "$SKIP_ENV" != "1" && -n "$MBO_ENV_PATH" ]]; then
         install_dev_environment
-    fi
-
-    # Step 8: Create desktop entry
-    if [[ "$INSTALL_CLI" == "true" ]]; then
-        if [[ "$PLATFORM" == "linux" ]]; then
-            create_desktop_entry_linux
-        elif [[ "$PLATFORM" == "macos" ]]; then
-            create_desktop_entry_macos
+        if [[ -x "$MBO_ENV_PATH/bin/mbo" ]]; then
+            if read_yes_no "Add a desktop shortcut for the local environment?" "n"; then
+                add_mbo_shortcut "$MBO_ENV_PATH/bin/mbo" "Miller Brain Studio (local)"
+            fi
         fi
     fi
 

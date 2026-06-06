@@ -202,6 +202,7 @@ def main(
       mbo convert IN OUT    convert between formats
       mbo info PATH         print array info
       mbo formats           list supported formats
+      mbo shortcut          create a desktop icon
 
     \b
     Verify install:
@@ -1357,6 +1358,33 @@ def init(data_path, output_dir, overwrite):
     if fill:
         click.echo(f"Data path: {fill}")
     click.echo(f"\nOpen with:\n  jupyter lab {dest}")
+
+
+@main.command("shortcut")
+@click.option(
+    "--name",
+    default="Miller Brain Studio",
+    help="Shortcut name.",
+)
+def shortcut(name):
+    r"""
+    Create a desktop icon that opens the GUI.
+
+    Windows: a .lnk that launches the viewer with no console window.
+    Linux: a .desktop entry on the Desktop.
+
+    \b
+    Examples:
+      mbo shortcut
+      mbo shortcut --name "MBO"
+    """
+    from mbo_utilities._shortcut import create_desktop_shortcut
+
+    try:
+        path = create_desktop_shortcut(name=name)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.secho(f"Created: {path}", fg="green")
 
 
 if __name__ == "__main__":

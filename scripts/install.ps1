@@ -624,18 +624,18 @@ function Show-InstallTypePrompt {
     Write-Host ""
     Write-Host "Installation Type" -ForegroundColor White
     Write-Host ""
-    Write-Host "  CLI - one global 'mbo' command that works in any terminal." -ForegroundColor DarkGray
-    Write-Host "        Opens the GUI viewer. Nothing to activate. Choose this to just use the app." -ForegroundColor DarkGray
+    Write-Host "  Global - one 'mbo' command that works in any terminal." -ForegroundColor DarkGray
+    Write-Host "           Opens the GUI viewer. Nothing to activate. Choose this to just use the app." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Environment - a Python venv you install into and work from." -ForegroundColor DarkGray
-    Write-Host "        For writing scripts, running notebooks, 'import mbo_utilities', or development." -ForegroundColor DarkGray
-    Write-Host "        You 'cd' into its folder and run things with 'uv run ...'." -ForegroundColor DarkGray
+    Write-Host "  Local  - a Python venv you install into and work from." -ForegroundColor DarkGray
+    Write-Host "           For writing scripts, running notebooks, 'import mbo_utilities', or development." -ForegroundColor DarkGray
+    Write-Host "           You 'cd' into its folder and run things with 'uv run ...'." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Both - the 'mbo' command everywhere, plus an environment to write code in." -ForegroundColor DarkGray
+    Write-Host "  Both   - the 'mbo' command everywhere, plus an environment to write code in." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [1] Both        - mbo command + Python environment (Recommended)" -ForegroundColor Cyan
-    Write-Host "  [2] Environment - Python environment only (scripts, notebooks, imports)" -ForegroundColor Cyan
-    Write-Host "  [3] CLI         - mbo command only (just the GUI)" -ForegroundColor Cyan
+    Write-Host "  [1] Both   - global mbo command + local Python environment (Recommended)" -ForegroundColor Cyan
+    Write-Host "  [2] Local  - Python environment only (scripts, notebooks, imports)" -ForegroundColor Cyan
+    Write-Host "  [3] Global - mbo command only (just the GUI)" -ForegroundColor Cyan
     Write-Host ""
 
     do {
@@ -1062,86 +1062,35 @@ function Get-UvToolBinDir {
     return $null
 }
 
-function New-DesktopShortcut {
-    param([string]$BranchRef = $null)
+function Read-YesNo {
+    param([string]$Prompt, [bool]$DefaultYes = $true)
 
+    $suffix = if ($DefaultYes) { "[Y/n]" } else { "[y/N]" }
+    while ($true) {
+        $ans = Read-Host "$Prompt $suffix"
+        if ([string]::IsNullOrWhiteSpace($ans)) { return $DefaultYes }
+        switch ($ans.Trim().ToLower()) {
+            "y"   { return $true }
+            "yes" { return $true }
+            "n"   { return $false }
+            "no"  { return $false }
+            default { Write-Warn "Please answer y or n." }
+        }
+    }
+}
+
+function Add-MboShortcut {
+    param([string]$MboExe, [string]$Name)
+
+    if (-not (Test-Path $MboExe)) {
+        Write-Warn "mbo not found at $MboExe; skipping shortcut."
+        return
+    }
     Write-Info "Creating desktop shortcut..."
-
-    # get uv tool bin directory
-    $binDir = Get-UvToolBinDir
-    if (-not $binDir) {
-        Write-Warn "Could not find uv tool bin directory. Skipping shortcut."
-        return
-    }
-
-    $mboExePath = Join-Path $binDir "mbo.exe"
-    if (-not (Test-Path $mboExePath)) {
-        Write-Warn "mbo.exe not found at $mboExePath. Skipping shortcut."
-        return
-    }
-
-    $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $shortcutName = if ($BranchRef -and $BranchRef -ne "master") { "Miller Brain Studio ($BranchRef).lnk" } else { "Miller Brain Studio.lnk" }
-    $shortcutPath = Join-Path $desktopPath $shortcutName
-
-    # launcher + icon live under ~/.mbo (the app's config dir) so installs
-    # don't leave a stray ~/mbo alongside it
-    $mboDir = Join-Path $env:USERPROFILE ".mbo"
-    if (-not (Test-Path $mboDir)) { New-Item -ItemType Directory -Path $mboDir -Force | Out-Null }
-
-    $downloadRef = if ($BranchRef) { $BranchRef } else { "master" }
-
-    # download icon (same as taskbar icon)
-    $iconPath = Join-Path $mboDir "icon.ico"
-    try {
-        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/$downloadRef/mbo_utilities/assets/app_settings/icon.ico" -OutFile $iconPath -ErrorAction Stop
-    }
-    catch {
-        try { Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$GITHUB_REPO/master/mbo_utilities/assets/app_settings/icon.ico" -OutFile $iconPath -ErrorAction Stop }
-        catch { $iconPath = $null }
-    }
-
-    # create VBScript launcher to hide terminal window
-    # The "0" argument to Run means hidden window, "False" means don't wait
-    $launcherPath = Join-Path $mboDir "mbo_launcher.vbs"
-    $vbsContent = @"
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """$mboExePath""", 0, False
-"@
-    try {
-        Set-Content -Path $launcherPath -Value $vbsContent -Encoding ASCII
-    }
-    catch {
-        Write-Warn "Could not create launcher script: $_"
-        # Fall back to direct shortcut
-        $launcherPath = $null
-    }
-
-    # create shortcut pointing to VBScript launcher (no terminal window)
-    try {
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-
-        if ($launcherPath -and (Test-Path $launcherPath)) {
-            # Use wscript.exe to run the VBS launcher (fully hidden)
-            $shortcut.TargetPath = "wscript.exe"
-            $shortcut.Arguments = """$launcherPath"""
-        }
-        else {
-            # Fallback: direct to mbo.exe (will show terminal)
-            $shortcut.TargetPath = $mboExePath
-        }
-
-        $shortcut.WorkingDirectory = [Environment]::GetFolderPath("UserProfile")
-        if ($iconPath -and (Test-Path $iconPath)) { $shortcut.IconLocation = $iconPath }
-        $shortcut.Description = "MBO Image Viewer"
-        $shortcut.Save()
-
-        Write-Success "Desktop shortcut created: $shortcutName"
-    }
-    catch {
-        Write-Warn "Could not create desktop shortcut: $_"
-        Write-Warn "You can manually create a shortcut to: $mboExePath"
+    # `mbo shortcut` creates the .lnk using the bundled icon and prints the path
+    & $MboExe shortcut --name $Name
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Could not create desktop shortcut (requires a newer mbo_utilities)."
     }
 }
 
@@ -1165,7 +1114,7 @@ function Show-UsageInstructions {
     if ($CliInstalled) {
         $sectionNum++
         $binDir = Get-UvToolBinDir
-        $header = if ($showBoth) { "(${sectionNum}) CLI - available system-wide" } else { "CLI - available system-wide" }
+        $header = if ($showBoth) { "(${sectionNum}) Global - available system-wide" } else { "Global - available system-wide" }
         Write-Host "  $header" -ForegroundColor Gray
         Write-Host "    mbo                    # open GUI" -ForegroundColor White
         Write-Host "    mbo /path/to/data      # open specific file" -ForegroundColor White
@@ -1253,23 +1202,29 @@ function Main {
         $envLocation = Show-EnvLocationPrompt
     }
 
-    # step 6: install CLI tool if requested
+    # step 6: install global CLI tool if requested
     if ($installType.InstallCli) {
         $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackages $cupyPackages -PytorchIndexUrl $pytorchIndexUrl
         if (-not $toolInstalled) {
-            Write-Err "CLI installation failed."
+            Write-Err "Global installation failed."
             exit 1
+        }
+        if (Read-YesNo "Add a desktop shortcut for the global app?" $true) {
+            $binDir = Get-UvToolBinDir
+            $globalMbo = if ($binDir) { Join-Path $binDir "mbo.exe" } else { "mbo" }
+            Add-MboShortcut -MboExe $globalMbo -Name "Miller Brain Studio"
         }
     }
 
-    # step 7: create dev environment if requested
+    # step 7: create local environment if requested
     if ($installType.InstallEnv -and $envLocation) {
         $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -CupyPackages $cupyPackages -PytorchIndexUrl $pytorchIndexUrl
-    }
-
-    # step 8: create desktop shortcut (only if CLI was installed)
-    if ($installType.InstallCli) {
-        New-DesktopShortcut -BranchRef $sourceInfo.Ref
+        if ($envPath) {
+            if (Read-YesNo "Add a desktop shortcut for the local environment?" $false) {
+                $localMbo = Join-Path $envPath "Scripts\mbo.exe"
+                Add-MboShortcut -MboExe $localMbo -Name "Miller Brain Studio (local)"
+            }
+        }
     }
 
     # show usage instructions

@@ -131,6 +131,7 @@ Launch an interactive GPU-accelerated viewer for exploring large imaging dataset
 mbo                    # launch GUI
 mbo /path/to/data      # open file directly
 mbo --check-install    # verify GPU configuration
+mbo shortcut           # add a desktop icon (Windows/Linux)
 ```
 
 → [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/gui_guide.html)
