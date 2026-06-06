@@ -146,6 +146,36 @@ def test_imread_dispatch_override(tmp_path):
     assert type(mbo_utilities.imread(p)).__name__ == "TiffArray"
 
 
+def test_example_fork_plugin(tmp_path):
+    """The examples/forking plugin resolves through imread once registered."""
+    import importlib.util
+    from pathlib import Path
+    import mbo_utilities
+
+    repo_root = Path(__file__).resolve().parents[1]
+    plugin_path = repo_root / "examples" / "forking" / "myfmt_array.py"
+    spec = importlib.util.spec_from_file_location("_myfmt_array", plugin_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    MyFormatArray = mod.MyFormatArray
+
+    data = np.arange(3 * 8 * 6, dtype="uint16").reshape(3, 8, 6)
+    np.save(tmp_path / "tmp.npy", data)
+    p = tmp_path / "d.myfmt"
+    (tmp_path / "tmp.npy").rename(p)
+
+    before = list(_REGISTRY)
+    try:
+        register_array_class(MyFormatArray)
+        arr = mbo_utilities.imread(p)
+        assert type(arr).__name__ == "MyFormatArray"
+        assert arr.shape == (3, 1, 1, 8, 6)
+        assert np.array_equal(np.asarray(arr[0, 0, 0]), data[0])
+    finally:
+        if MyFormatArray in _REGISTRY and MyFormatArray not in before:
+            _REGISTRY.remove(MyFormatArray)
+
+
 def test_priority_override_on_register():
     class _LowArray(LazyArray):
         PRIORITY = 1

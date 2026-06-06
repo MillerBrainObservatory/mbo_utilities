@@ -35,8 +35,18 @@ class LazyArray:
         raise NotImplementedError
 
     @property
+    def shape(self) -> tuple[int, int, int, int, int]:
+        """shape as 5D TCZYX. subclasses may override (e.g. squeezed views)."""
+        return self._shape5d()
+
+    @property
+    def ndim(self) -> int:
+        """always 5 for a canonical LazyArray."""
+        return 5
+
+    @property
     def shape5d(self) -> tuple[int, int, int, int, int]:
-        """shape as 5D TCZYX, always length 5."""
+        """shape as 5D TCZYX, always length 5 (alias of `shape`)."""
         return self._shape5d()
 
     @property

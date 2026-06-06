@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.1.0"
+version = "4.0.0"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -56,6 +56,22 @@ dependencies = [
 mbo = "mbo_utilities.cli:main"
 pollen = "pollen.pollen_calibration_mbo:main"
 docs = "scripts.build_docs:main"
+
+# v4 pluggable array API: imread() dispatch loads every class in this group.
+# Third-party packages declare the same group to add formats without editing
+# mbo_utilities (see docs/forking.md). Built-ins also self-register on import.
+[project.entry-points."mbo_utilities.lazy_arrays"]
+lbm = "mbo_utilities.arrays.tiff:LBMArray"
+lbm_piezo = "mbo_utilities.arrays.tiff:LBMPiezoArray"
+piezo = "mbo_utilities.arrays.tiff:PiezoArray"
+single_plane = "mbo_utilities.arrays.tiff:SinglePlaneArray"
+scanimage = "mbo_utilities.arrays.tiff:ScanImageArray"
+tiff = "mbo_utilities.arrays.tiff:TiffArray"
+zarr = "mbo_utilities.arrays.zarr:ZarrArray"
+suite2p = "mbo_utilities.arrays.suite2p:Suite2pArray"
+h5 = "mbo_utilities.arrays.h5:H5Array"
+numpy = "mbo_utilities.arrays.numpy:NumpyArray"
+isoview = "mbo_utilities.arrays.isoview.array:IsoviewArray"
 
 [project.urls]
 Homepage = "https://github.com/millerbrainobservatory/mbo_utilities"
