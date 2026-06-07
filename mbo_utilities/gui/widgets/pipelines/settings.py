@@ -57,6 +57,37 @@ _SUBSECTION_COLOR = imgui.ImVec4(0.55, 0.75, 1.0, 1.0)
 _LOAD_WARN_COLOR = imgui.ImVec4(1.00, 0.85, 0.30, 1.0)
 _LOAD_BAD_COLOR = imgui.ImVec4(1.00, 0.40, 0.40, 1.0)
 
+def _has_gpu_torch() -> bool:
+    """True if the installed PyTorch is a GPU build (CUDA / ROCm / Intel XPU),
+    or macOS (MPS).
+
+    Reads ``torch/version.py`` — the build's ``cuda``/``hip``/``xpu`` fields,
+    which are ``None`` on a CPU-only wheel — WITHOUT importing torch (an
+    import is multi-second and would freeze the GUI thread). The version
+    *string* alone is ambiguous (a plain '2.12.0' can be either build), so
+    the accelerator fields are the reliable signal. ~0.3 ms; reflects what a
+    fresh worker process will actually load. Only the definitive CPU-only
+    case warns; anything indeterminate does not.
+    """
+    import sys
+
+    if sys.platform == "darwin":
+        return True  # MPS path on macOS
+    try:
+        import importlib.util
+        import re
+        from pathlib import Path
+
+        spec = importlib.util.find_spec("torch")
+        text = (Path(spec.origin).parent / "version.py").read_text()
+    except Exception:
+        return True  # can't determine — don't nag
+    for field in ("cuda", "hip", "xpu"):
+        m = re.search(rf"^{field}\b[^=\n]*=\s*(.+?)\s*$", text, re.M)
+        if m and m.group(1).strip() not in ("None", ""):
+            return True
+    return False  # all accelerator fields None -> CPU-only build
+
 
 def _detect_physical_cores() -> int:
     """Best-effort physical-core count. Falls back to os.cpu_count() // 2
@@ -2889,6 +2920,59 @@ def _draw_section_suite2p_content(self):
             "  sparsery: functional detection, sparse activity (upstream default)\n"
             "  sourcery: functional detection, legacy"
         )
+
+        # Warn once (modal) when cellpose is selected without GPU PyTorch:
+        # detection silently falls back to CPU, which is far slower.
+        if self.s2p.algorithm == "cellpose" and not _has_gpu_torch():
+            if not getattr(self, "_cellpose_cpu_warned", False):
+                imgui.open_popup("No GPU for cellpose")
+                self._cellpose_cpu_warned = True
+        else:
+            self._cellpose_cpu_warned = False
+
+        imgui.set_next_window_pos(
+            imgui.get_main_viewport().get_center(),
+            imgui.Cond_.appearing,
+            pivot=imgui.ImVec2(0.5, 0.5),
+        )
+        imgui.set_next_window_size(
+            imgui.ImVec2(hello_imgui.em_size(26), 0.0), imgui.Cond_.appearing
+        )
+        _cp_opened, _ = imgui.begin_popup_modal(
+            "No GPU for cellpose", flags=imgui.WindowFlags_.no_saved_settings
+        )
+        if _cp_opened:
+            imgui.text_colored(_LOAD_BAD_COLOR, "No GPU PyTorch detected.")
+            imgui.text("Cellpose will run very slowly on the CPU.")
+            imgui.spacing()
+            _torch_cmd = (
+                "uv pip uninstall torch torchvision\n\n"
+                "uv pip install torch torchvision "
+                "--index-url https://download.pytorch.org/whl/cu126"
+            )
+            imgui.text_wrapped(
+                "You need a version of PyTorch with GPU capabilities. See:"
+            )
+            _torch_url = "https://pytorch.org/get-started/locally/"
+            if imgui.text_link(_torch_url):
+                import webbrowser
+                webbrowser.open(_torch_url)
+            imgui.text_wrapped(
+                "for the command that matches your operating system and "
+                "CUDA version. For example:"
+            )
+            imgui.spacing()
+            imgui.push_style_color(imgui.Col_.text, _SUBSECTION_COLOR)
+            imgui.text_wrapped(_torch_cmd)
+            imgui.pop_style_color()
+            with _ghost_button():
+                if imgui.small_button(f"{fa.ICON_FA_COPY}##torch_gpu_copy"):
+                    imgui.set_clipboard_text(_torch_cmd)
+            set_tooltip("Copy commands to clipboard", show_mark=False)
+            imgui.spacing()
+            if imgui.button("OK", imgui.ImVec2(120, 0)):
+                imgui.close_current_popup()
+            imgui.end_popup()
 
         imgui.spacing()
 
