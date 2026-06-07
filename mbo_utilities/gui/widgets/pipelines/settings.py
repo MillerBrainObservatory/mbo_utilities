@@ -4572,9 +4572,9 @@ def _run_plane_worker_thread(config):
     if selected_planes_0based is not None:
         selections["Z"] = list(selected_planes_0based)
 
-    # source shape/dims must come from the lazy array's 5D contract,
-    # not from arr.shape (which may be natural-rank for TiffArray).
-    source_shape = tuple(arr.shape5d) if hasattr(arr, "shape5d") else None
+    # source shape/dims must be the uniform 5D TCZYX, so use _shape5d()
+    # (arr.shape is the natural rank for BinArray / a 4D _ChannelView).
+    source_shape = tuple(arr._shape5d()) if hasattr(arr, "_shape5d") else None
     source_dims = ("T", "C", "Z", "Y", "X")
 
     # Log raw source values BEFORE scaling — critical diagnostic when

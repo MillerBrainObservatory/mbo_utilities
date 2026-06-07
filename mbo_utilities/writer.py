@@ -300,8 +300,8 @@ def imwrite(
 
     if register_z:
         total_planes = (
-            int(lazy_array.shape5d[2])
-            if hasattr(lazy_array, "shape5d")
+            int(lazy_array._shape5d()[2])
+            if hasattr(lazy_array, "_shape5d")
             else get_param(file_metadata, "nplanes")
         )
 

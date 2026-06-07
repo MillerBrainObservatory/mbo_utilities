@@ -13,7 +13,6 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.lazy_array import LazyArray
 from mbo_utilities.arrays.features._dim_labels import get_dims
-from mbo_utilities._writers import _write_plane, _write_volumetric_tiff, _write_volumetric_zarr
 from numpy.exceptions import AxisError
 
 if TYPE_CHECKING:
@@ -41,7 +40,7 @@ DIMS = ("T", "C", "Z", "Y", "X")
 class Shape5DMixin(LazyArray):
     """Backwards-compatible alias for the 5D accessors, now on `LazyArray`.
 
-    The accessors (`_shape5d`, `shape5d`, `nt`/`nc`/`nz`/`ny`/`nx`,
+    The accessors (`_shape5d`, `nt`/`nc`/`nz`/`ny`/`nx`,
     `source_path`) were folded into `LazyArray` in v4. This subclass is
     retained so existing `class FooArray(..., Shape5DMixin)` declarations
     keep working and become `LazyArray` instances; it is removed once every
@@ -301,6 +300,14 @@ def _imwrite_base(
     Path
         Output path (file for tiff, directory for other formats).
     """
+    # imported here, not at module top, to avoid a circular import:
+    # _writers -> metadata -> arrays -> _base -> _writers
+    from mbo_utilities._writers import (
+        _write_plane,
+        _write_volumetric_tiff,
+        _write_volumetric_zarr,
+    )
+
     outpath = Path(outpath)
     outpath.mkdir(parents=True, exist_ok=True)
 
@@ -322,7 +329,7 @@ def _imwrite_base(
 
     md = _sanitize_metadata(md)
 
-    num_planes = arr.shape5d[2]
+    num_planes = arr._shape5d()[2]
     num_channels = getattr(arr, "num_color_channels", 1)
 
     def _norm_sel(val):
@@ -344,7 +351,7 @@ def _imwrite_base(
     if ext_clean in ("tiff", "tif", "zarr", "h5", "hdf5") and frames_list is None:
         _num_frames = kwargs.get("num_frames")
         if _num_frames is not None:
-            total_T = int(arr.shape5d[0])
+            total_T = int(arr._shape5d()[0])
             frames_list = list(range(1, min(int(_num_frames), total_T) + 1))
 
     # tiff: use volumetric writer
@@ -474,8 +481,8 @@ def _imwrite_base(
         )
 
     # other formats: use per-plane streaming writer (bin, npy)
-    # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
-    # correct T/Z sizes (arr.shape[0] is T for 4D, but Y for 2D natural).
+    # use _shape5d() so BinArray (natural rank) and _ChannelView (4D) still
+    # report the correct T/Z/Y/X regardless of their public .shape rank.
     # build 0-based channel indices to iterate. if the user selected
     # specific channels, iterate those; otherwise iterate all channels
     # the array actually has. the old code only wrote channel 0 when
@@ -485,11 +492,12 @@ def _imwrite_base(
     else:
         channels_0idx = list(range(num_channels))
 
-    nframes = arr.shape5d[0]  # T
-    Ly, Lx = arr.shape5d[3], arr.shape5d[4]
+    s5 = arr._shape5d()
+    nframes = s5[0]  # T
+    Ly, Lx = s5[3], s5[4]
 
     # validate num_planes against Z dimension
-    actual_z_size = arr.shape5d[2]
+    actual_z_size = s5[2]
     if num_planes > actual_z_size:
         num_planes = actual_z_size
 

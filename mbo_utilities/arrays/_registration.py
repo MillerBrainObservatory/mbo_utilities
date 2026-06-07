@@ -262,10 +262,10 @@ def _stream_plane_mean(arr, max_frames: int, chunk_frames: int) -> np.ndarray:
     """stream a (nz, ny, nx) time-mean image from a lazy array without
     materializing the full 4d movie in memory.
 
-    supports both 5d arrays (T, C, Z, Y, X) with shape5d and 4d (T, Z, Y, X).
+    supports both 5d arrays (T, C, Z, Y, X) and 4d (T, Z, Y, X).
     """
-    if hasattr(arr, "shape5d"):
-        T, C, Z, Y, X = tuple(arr.shape5d)
+    if hasattr(arr, "_shape5d"):
+        T, C, Z, Y, X = tuple(arr._shape5d())
         use_5d = True
     elif getattr(arr, "ndim", None) == 4:
         T, Z, Y, X = arr.shape
@@ -321,7 +321,7 @@ def compute_axial_shifts(
     parameters
     ----------
     arr : lazy array
-        any array with shape5d (T, C, Z, Y, X) or a 4d (T, Z, Y, X) shape.
+        any 5D (T, C, Z, Y, X) or 4d (T, Z, Y, X) lazy array.
     metadata : dict or None
         target metadata dict. mutated in place if not None.
     max_frames : int
@@ -529,8 +529,8 @@ class AxialShiftView:
     Parameters
     ----------
     source : array-like
-        Any 5D TCZYX lazy array. Must expose `shape5d` (or a 5D `shape`)
-        and support `source[t, c, z, :, :]` indexing.
+        Any 5D TCZYX lazy array (5D `shape`) supporting
+        `source[t, c, z, :, :]` indexing.
     plane_shifts : array-like (nz, 2)
         Cumulative per-plane integer (dy, dx) shifts, as produced by
         `compute_axial_shifts`. Length must equal the source Z size.
@@ -557,15 +557,15 @@ class AxialShiftView:
     def __init__(self, source, plane_shifts, enabled: bool = True):
         self._source = source
 
-        shape5d = getattr(source, "shape5d", None)
-        if shape5d is None:
-            shp = tuple(getattr(source, "shape", ()))
-            if len(shp) != 5:
+        if hasattr(source, "_shape5d"):
+            shape5d = tuple(source._shape5d())
+        else:
+            shape5d = tuple(getattr(source, "shape", ()))
+            if len(shape5d) != 5:
                 raise ValueError(
-                    "AxialShiftView needs a 5D TCZYX source (with shape5d or a "
-                    f"5D shape); got shape {shp!r}"
+                    "AxialShiftView needs a 5D TCZYX source (with a 5D shape); "
+                    f"got shape {shape5d!r}"
                 )
-            shape5d = shp
         self._T, self._C, self._Z, self._Y, self._X = (int(s) for s in shape5d)
 
         self._shifts = np.asarray(plane_shifts, dtype=int)
@@ -630,15 +630,14 @@ class AxialShiftView:
     def dims(self) -> tuple[str, ...]:
         return _TCZYX
 
-    @property
-    def shape5d(self) -> tuple[int, int, int, int, int]:
+    def _shape5d(self) -> tuple[int, int, int, int, int]:
         if self.enabled:
             return (self._T, self._C, self._Z, self._H, self._W)
         return (self._T, self._C, self._Z, self._Y, self._X)
 
     @property
     def shape(self) -> tuple[int, ...]:
-        return self.shape5d
+        return self._shape5d()
 
     @property
     def ndim(self) -> int:
@@ -736,7 +735,7 @@ def with_axial_shifts(arr, *, enabled: bool = True, plane_shifts=None) -> AxialS
     Parameters
     ----------
     arr : array-like
-        5D TCZYX lazy array (exposes `shape5d`, supports `arr[t, c, z, :, :]`).
+        5D TCZYX lazy array (5D `shape`, supports `arr[t, c, z, :, :]`).
     enabled : bool, default True
         Initial state. True applies shifts on read; False passes through.
     plane_shifts : array-like (nz, 2), optional
@@ -754,7 +753,7 @@ def with_axial_shifts(arr, *, enabled: bool = True, plane_shifts=None) -> AxialS
     """
     if plane_shifts is None:
         md = getattr(arr, "metadata", None)
-        nz = int(arr.shape5d[2]) if hasattr(arr, "shape5d") else None
+        nz = int(arr._shape5d()[2]) if hasattr(arr, "_shape5d") else None
         if not validate_axial_shifts(md, nz):
             raw = md.get("plane_shifts") if md else None
             # shifts present and well-formed, but the count doesn't match the

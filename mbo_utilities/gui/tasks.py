@@ -373,7 +373,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         _src_arr = imread(input_path)
         src_meta = dict(getattr(_src_arr, "metadata", {}) or {})
         src_shape = (
-            tuple(_src_arr.shape5d) if hasattr(_src_arr, "shape5d") else None
+            tuple(_src_arr._shape5d()) if hasattr(_src_arr, "_shape5d") else None
         )
     except Exception as e:
         logger.warning(
@@ -501,7 +501,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         num_planes_reg = None
         if _src_arr_for_reg is not None:
             try:
-                num_planes_reg = int(_src_arr_for_reg.shape5d[2])
+                num_planes_reg = int(_src_arr_for_reg._shape5d()[2])
             except Exception as e:
                 logger.warning(
                     f"task_suite2p: cannot probe num_planes: {e}. "

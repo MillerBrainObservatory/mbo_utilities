@@ -1159,7 +1159,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         # padded Ly/Lx via the setter would have those values silently
         # overwritten on the very next `arr.metadata` read, before the
         # writer could see them. callers that need spatial dims should
-        # use `arr.shape` / `arr.shape5d` directly; downstream metadata
+        # use `arr.shape` directly; downstream metadata
         # consumers (OutputMetadata.to_dict) fill them in via setdefault
         # when missing, so removing the auto-fill costs nothing.
         return self._metadata

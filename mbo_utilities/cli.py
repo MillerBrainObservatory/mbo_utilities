@@ -1317,10 +1317,9 @@ def init(data_path, output_dir, overwrite):
     )
 
     # source notebook -> default data-path token replaced when DATA_PATH given
-    # (None = copy as-is; the lsp guide is a markdown reference with no run path)
     notebooks = {
         "mbo_user_guide.ipynb": "D:/demo/raw",
-        "lsp_user_guide.ipynb": None,
+        "lsp_user_guide.ipynb": "D:/demo/raw",
     }
 
     if output_dir is not None:

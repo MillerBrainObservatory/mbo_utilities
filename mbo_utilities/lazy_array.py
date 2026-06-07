@@ -45,11 +45,6 @@ class LazyArray:
         return 5
 
     @property
-    def shape5d(self) -> tuple[int, int, int, int, int]:
-        """shape as 5D TCZYX, always length 5 (alias of `shape`)."""
-        return self._shape5d()
-
-    @property
     def nt(self) -> int:
         """number of timepoints."""
         return self._shape5d()[0]

@@ -745,9 +745,10 @@ class MP4Array(ReductionMixin, Shape5DMixin):
         outpath.mkdir(parents=True, exist_ok=True)
         ext_clean = ext.lower().lstrip(".")
 
-        num_planes = arr.shape5d[2]
-        num_channels = getattr(arr, "num_color_channels", arr.shape5d[1])
-        nframes_total = arr.shape5d[0]
+        s5 = arr._shape5d()
+        num_planes = s5[2]
+        num_channels = getattr(arr, "num_color_channels", s5[1])
+        nframes_total = s5[0]
 
         planes_0idx = [p - 1 for p in planes] if planes else list(range(num_planes))
         channels_0idx = [c - 1 for c in channels] if channels else list(range(num_channels))

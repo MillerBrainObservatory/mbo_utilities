@@ -211,8 +211,8 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
         return "TCZYX"
 
     def __getitem__(self, item):
-        # 5D TCZYX indexing translated onto the underlying array's natural
-        # rank (shape5d front-pads singleton T/C/Z).
+        # 5D TCZYX indexing translated onto the underlying array's stored
+        # rank (_shape5d front-pads singleton T/C/Z).
         out = _index_5d_into_raw(self.data, item, len(self._raw_shape))
         if self._target_dtype is not None:
             out = out.astype(self._target_dtype)

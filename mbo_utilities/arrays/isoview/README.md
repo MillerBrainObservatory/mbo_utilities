@@ -57,7 +57,6 @@ Construction steps (in order):
 | Property              | Returns                                                                          |
 | --------------------- | -------------------------------------------------------------------------------- |
 | `shape`               | `(T, C, Z, Y, X)`.                                                              |
-| `shape5d` (mixin)     | Same as `shape`.                                                                |
 | `dims`                | `("T", "C", "Z", "Y", "X")`.                                                    |
 | `ndim`                | `5`.                                                                            |
 | `dtype`               | numpy dtype of the on-disk volumes.                                             |

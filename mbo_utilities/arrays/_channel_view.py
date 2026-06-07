@@ -26,12 +26,8 @@ class _ChannelView:
         return (s[0], s[2], s[3], s[4])
 
     def _shape5d(self) -> tuple[int, int, int, int, int]:
-        s = self._arr.shape5d if hasattr(self._arr, "shape5d") else self._arr.shape
+        s = self._arr._shape5d() if hasattr(self._arr, "_shape5d") else self._arr.shape
         return (s[0], 1, s[2], s[3], s[4])
-
-    @property
-    def shape5d(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
 
     @property
     def ndim(self):
