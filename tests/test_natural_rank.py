@@ -1,14 +1,14 @@
 """
-5D-contract tests for TiffArray (v4).
+5D-shape tests for TiffArray (v4).
 
-Natural rank was removed in v4: every array `imread()` returns is always
-5D TCZYX (`ndim == 5`), with singleton T/C/Z axes kept, not squeezed.
-User-facing squeezing is opt-in (`arr.squeeze()` / `imread(squeeze=True)`).
+Every array `imread()` returns is always 5D TCZYX (`ndim == 5`), with
+singleton T/C/Z axes kept, not squeezed. User-facing squeezing is opt-in
+(`arr.squeeze()` / `imread(squeeze=True)`).
 
-These tests pin that contract:
+These tests pin that behavior:
 
 1. `shape`/`ndim`/`dims` are always 5D TCZYX
-2. `shape5d`/`nt`/`nc`/`nz`/`ny`/`nx` equal `shape`
+2. `nt`/`nc`/`nz`/`ny`/`nx` match `shape`
 3. `__getitem__` follows numpy 5D semantics (integer axes squeeze out)
 4. `np.asarray(arr)` returns a representative (Y, X) frame
 5. `arr.vmin`/`arr.vmax` work on every rank pattern and array class
@@ -84,7 +84,6 @@ class TestTiffArray5DShape:
         assert arr.shape == (1, 1, 1, ny, nx)
         assert arr.ndim == 5
         assert arr.dims == ("T", "C", "Z", "Y", "X")
-        assert arr.shape5d == arr.shape
 
     def test_3d_time_series(self, tiff_3d_tyx):
         path, data = tiff_3d_tyx
@@ -92,7 +91,6 @@ class TestTiffArray5DShape:
         nt, ny, nx = data.shape
         assert arr.shape == (nt, 1, 1, ny, nx)
         assert arr.ndim == 5
-        assert arr.shape5d == arr.shape
 
     def test_3d_zstack_no_time(self, tiff_3d_zyx):
         path, nz = tiff_3d_zyx
@@ -109,31 +107,29 @@ class TestTiffArray5DShape:
         nt, nz, ny, nx = data.shape
         assert arr.shape == (nt, 1, nz, ny, nx)
         assert arr.ndim == 5
-        assert arr.shape5d == arr.shape
 
 
-class TestTiffArrayShape5DInvariants:
-    """shape5d / nt / nc / nz / ny / nx equal shape and are always length 5."""
-
-    @pytest.mark.parametrize("fixture_name", [
-        "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
-    ])
-    def test_shape5d_always_length_5(self, request, fixture_name):
-        fixture = request.getfixturevalue(fixture_name)
-        path = fixture[0]
-        arr = TiffArray(path)
-        assert len(arr.shape5d) == 5
-        assert arr.shape5d == arr.shape
+class TestTiffArray5DInvariants:
+    """nt / nc / nz / ny / nx match shape and shape is always length 5."""
 
     @pytest.mark.parametrize("fixture_name", [
         "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
     ])
-    def test_named_accessors_match_shape5d(self, request, fixture_name):
+    def test_shape_always_length_5(self, request, fixture_name):
         fixture = request.getfixturevalue(fixture_name)
         path = fixture[0]
         arr = TiffArray(path)
-        s5 = arr.shape5d
-        assert (arr.nt, arr.nc, arr.nz, arr.ny, arr.nx) == s5
+        assert len(arr.shape) == 5
+        assert arr.ndim == 5
+
+    @pytest.mark.parametrize("fixture_name", [
+        "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
+    ])
+    def test_named_accessors_match_shape(self, request, fixture_name):
+        fixture = request.getfixturevalue(fixture_name)
+        path = fixture[0]
+        arr = TiffArray(path)
+        assert (arr.nt, arr.nc, arr.nz, arr.ny, arr.nx) == arr.shape
 
 
 class TestTiffArray5DIndexing:

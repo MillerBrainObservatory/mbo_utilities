@@ -1,8 +1,8 @@
 """
-tests for shape5d protocol (phase 1).
+tests for the 5D shape of every array type.
 
-validates that shape5d returns correct 5D (T, C, Z, Y, X) for each array
-type, and that nt/nc/nz/ny/nx match expected dimension sizes.
+validates that `.shape` returns 5D (T, C, Z, Y, X) for each array type,
+and that nt/nc/nz/ny/nx match expected dimension sizes.
 """
 
 import numpy as np
@@ -31,7 +31,7 @@ class TestShape5DProtocol:
             pass
 
         with pytest.raises(NotImplementedError):
-            Incomplete().shape5d
+            Incomplete().shape
 
 
 class TestNumpyArrayShape5D:
@@ -39,7 +39,7 @@ class TestNumpyArrayShape5D:
 
     def test_3d_tyx(self, synthetic_3d_data):
         arr = NumpyArray(synthetic_3d_data)
-        s5 = arr.shape5d
+        s5 = arr.shape
         assert len(s5) == 5
         assert s5 == (20, 1, 1, 128, 128)
         assert arr.nt == 20
@@ -50,7 +50,7 @@ class TestNumpyArrayShape5D:
 
     def test_4d_tzyx(self, synthetic_4d_data):
         arr = NumpyArray(synthetic_4d_data)
-        s5 = arr.shape5d
+        s5 = arr.shape
         assert len(s5) == 5
         assert s5 == (10, 1, 3, 64, 64)
         assert arr.nt == 10
@@ -60,13 +60,13 @@ class TestNumpyArrayShape5D:
     def test_5d_tczyx(self):
         data = np.zeros((5, 2, 3, 32, 32), dtype=np.int16)
         arr = NumpyArray(data)
-        s5 = arr.shape5d
+        s5 = arr.shape
         assert s5 == (5, 2, 3, 32, 32)
 
     def test_2d_yx(self):
         data = np.zeros((64, 64), dtype=np.int16)
         arr = NumpyArray(data)
-        s5 = arr.shape5d
+        s5 = arr.shape
         assert s5 == (1, 1, 1, 64, 64)
 
 
@@ -80,7 +80,9 @@ class TestBinArrayShape5D:
             arr = BinArray(path, shape=shape, dtype=synthetic_3d_data.dtype)
             arr._file[:] = synthetic_3d_data
 
-            s5 = arr.shape5d
+            # BinArray keeps its natural (T, Y, X) shape; _shape5d() pads to 5D.
+            assert arr.shape == shape
+            s5 = arr._shape5d()
             assert len(s5) == 5
             assert s5 == (shape[0], 1, 1, shape[1], shape[2])
             assert arr.nt == shape[0]
@@ -101,7 +103,7 @@ class TestTiffArrayShape5D:
             tifffile.imwrite(str(path), synthetic_3d_data)
 
             arr = TiffArray(path)
-            s5 = arr.shape5d
+            s5 = arr.shape
             assert len(s5) == 5
             # T=20, C=1, Z=1, Y=128, X=128
             assert s5[0] == 20
@@ -123,7 +125,7 @@ class TestTiffArrayShape5D:
                 tifffile.imwrite(str(plane_path), synthetic_4d_data[:, z])
 
             arr = TiffArray(vol_dir)
-            s5 = arr.shape5d
+            s5 = arr.shape
             assert len(s5) == 5
             assert s5[0] == 10  # T
             assert s5[1] == 1   # C
@@ -145,7 +147,7 @@ class TestZarrArrayShape5D:
             store[:] = synthetic_4d_data
 
             arr = ZarrArray(path)
-            s5 = arr.shape5d
+            s5 = arr.shape
             assert len(s5) == 5
             assert s5 == (10, 1, 3, 64, 64)
             assert arr.nc == 1
@@ -159,8 +161,8 @@ class TestShape5DConsistency:
         arr3 = NumpyArray(synthetic_3d_data)
         arr4 = NumpyArray(synthetic_4d_data)
 
-        assert len(arr3.shape5d) == 5
-        assert len(arr4.shape5d) == 5
+        assert len(arr3.shape) == 5
+        assert len(arr4.shape) == 5
 
     def test_spatial_dims_preserved(self, synthetic_3d_data):
         """Y, X dimensions match original data."""
@@ -171,7 +173,7 @@ class TestShape5DConsistency:
     def test_named_accessors_match_shape5d(self, synthetic_4d_data):
         """nt/nc/nz/ny/nx match shape5d tuple elements."""
         arr = NumpyArray(synthetic_4d_data)
-        s5 = arr.shape5d
+        s5 = arr.shape
         assert arr.nt == s5[0]
         assert arr.nc == s5[1]
         assert arr.nz == s5[2]

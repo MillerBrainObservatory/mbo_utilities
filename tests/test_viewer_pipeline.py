@@ -366,7 +366,7 @@ class TestCustomMetadataPropagation:
     def test_natural_rank_tiff_bin_write(self, tmp_path):
         """Volumetric TiffArray (T, 1, Z, Y, X) writes one bin per plane.
 
-        `_imwrite_base` uses `arr.shape5d[2]` (== `arr.shape[2]` now that
+        `_imwrite_base` uses `arr._shape5d()[2]` (== `arr.shape[2]` now that
         arrays are always 5D) to pick the real Z size when iterating planes.
         """
         import numpy as np
@@ -386,7 +386,7 @@ class TestCustomMetadataPropagation:
         arr = imread(vol_dir)
         # always 5D TCZYX
         assert arr.ndim == 5
-        assert arr.shape5d == (nt, 1, nz, 16, 16)
+        assert arr.shape == (nt, 1, nz, 16, 16)
 
         out = tmp_path / "out"
         imwrite(arr, out, ext=".bin")  # must not crash

@@ -34,8 +34,8 @@ def test_shape5dmixin_is_lazyarray_subclass():
 def test_existing_array_is_lazyarray_instance():
     arr = NumpyArray(np.zeros((4, 8, 8), dtype="uint16"))
     assert isinstance(arr, LazyArray)
-    # behavior unchanged: still 5D shape5d.
-    assert arr.shape5d == (4, 1, 1, 8, 8)
+    # behavior unchanged: still 5D shape.
+    assert arr.shape == (4, 1, 1, 8, 8)
 
 
 def test_default_can_open_is_false(tmp_path):

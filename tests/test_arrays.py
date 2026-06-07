@@ -547,7 +547,6 @@ class TestTiffVolumeAutoDetection:
         nt, nz, ny, nx = expected_data.shape
         assert arr.ndim == 5, f"Expected 5D array, got {arr.ndim}D"
         assert arr.shape == (nt, 1, nz, ny, nx)
-        assert arr.shape5d == arr.shape
 
     def test_volume_indexing(self, tiff_volume_dir):
         """Test indexing volume TiffArray with 5D semantics."""
