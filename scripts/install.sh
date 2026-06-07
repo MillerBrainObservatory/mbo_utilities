@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 # MBO Utilities Installation Script for Linux/macOS
-# Installs mbo CLI via uv tool, optionally creates a dev environment
+# Installs the global 'mbo' CLI (uv tool) and/or a local dev environment,
+# with an optional desktop shortcut for each.
 #
 # Usage:
 #   curl -LsSf https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
@@ -10,6 +11,8 @@
 #   MBO_ENV_PATH     - custom path for dev environment (default: ~/<repos|code|software|projects>/mbo_utilities)
 #   MBO_SKIP_ENV     - set to "1" to skip dev environment creation
 #   MBO_OVERWRITE    - set to "1" to overwrite existing installations
+#   MBO_ASSUME_YES   - set to "1" to accept default answers (non-interactive)
+#   MBO_PYTHON       - Python version for the install (default: 3.12)
 
 set -euo pipefail
 
@@ -19,6 +22,8 @@ GITHUB_REPO="MillerBrainObservatory/mbo_utilities"
 MBO_ENV_PATH="${MBO_ENV_PATH:-}"
 SKIP_ENV="${MBO_SKIP_ENV:-0}"
 OVERWRITE="${MBO_OVERWRITE:-0}"
+ASSUME_YES="${MBO_ASSUME_YES:-0}"
+MBO_PYTHON="${MBO_PYTHON:-3.12}"
 PLATFORM=""
 SOURCE=""
 INSTALL_SPEC=""
@@ -148,6 +153,11 @@ show_system_dependencies() {
         echo -e "  [2] Exit"
         echo ""
 
+        if [[ "$ASSUME_YES" == "1" ]]; then
+            warn "MBO_ASSUME_YES: continuing despite missing dependencies."
+            return 0
+        fi
+
         while true; do
             read -p "Select option (1-2): " choice
             case $choice in
@@ -213,6 +223,13 @@ get_uv_tool_bin_dir() {
 # =============================================================================
 
 show_install_type_prompt() {
+    if [[ "$ASSUME_YES" == "1" ]]; then
+        info "MBO_ASSUME_YES: installing both global CLI + local environment."
+        INSTALL_CLI=true
+        INSTALL_ENV=true
+        return
+    fi
+
     echo ""
     echo -e "${WHITE}Installation Type${NC}"
     echo ""
@@ -267,6 +284,14 @@ get_github_branches() {
 }
 
 show_source_selection() {
+    if [[ "$ASSUME_YES" == "1" ]]; then
+        info "MBO_ASSUME_YES: installing from PyPI (stable)."
+        SOURCE="pypi"
+        INSTALL_SPEC="mbo_utilities"
+        BRANCH_REF=""
+        return
+    fi
+
     echo ""
     echo -e "${WHITE}Installation Source${NC}"
     echo ""
@@ -398,6 +423,12 @@ check_nvidia_gpu() {
 }
 
 show_optional_dependencies() {
+    if [[ "$ASSUME_YES" == "1" ]]; then
+        info "MBO_ASSUME_YES: no optional extras (base install)."
+        EXTRAS=()
+        return
+    fi
+
     echo ""
     echo -e "${WHITE}Optional Dependencies${NC}"
     echo ""
@@ -525,6 +556,12 @@ show_env_location_prompt() {
 
     local default_path=$(get_default_env_path)
 
+    if [[ "$ASSUME_YES" == "1" ]]; then
+        info "MBO_ASSUME_YES: environment location $default_path"
+        MBO_ENV_PATH="$default_path"
+        return
+    fi
+
     echo ""
     echo -e "${WHITE}Environment Location${NC}"
     echo ""
@@ -635,6 +672,11 @@ install_mbo_tool() {
             echo -e "  ${CYAN}[3] Cancel${NC}    - Exit"
             echo ""
 
+            if [[ "$ASSUME_YES" == "1" ]]; then
+                info "MBO_ASSUME_YES: keeping existing installation."
+                return 0
+            fi
+
             while true; do
                 read -p "Select option (1-3): " choice
                 case $choice in
@@ -663,7 +705,7 @@ install_mbo_tool() {
     # --reinstall forces uv to re-fetch and rebuild even when the same branch
     # name is already cached, so re-running after pushing fixes to a branch
     # picks them up instead of keeping the stale tool env.
-    if uv tool install "$full_spec" --python 3.12 --reinstall; then
+    if uv tool install "$full_spec" --python "$MBO_PYTHON" --reinstall; then
         # ensure the tool bin dir is on the user's shell PATH. uv's own
         # install-time PATH wiring doesn't always fire (locked-down
         # configs, unusual shells). idempotent — safe to run every time.
@@ -766,7 +808,7 @@ install_dev_environment() {
                 echo ""
 
                 while true; do
-                    read -p "Select option (1-3): " choice
+                    if [[ "$ASSUME_YES" == "1" ]]; then choice="2"; else read -p "Select option (1-3): " choice; fi
                     case $choice in
                         1)
                             info "Removing existing .venv..."
@@ -800,7 +842,7 @@ install_dev_environment() {
                 echo ""
 
                 while true; do
-                    read -p "Select option (1-2): " choice
+                    if [[ "$ASSUME_YES" == "1" ]]; then choice="1"; else read -p "Select option (1-2): " choice; fi
                     case $choice in
                         1)
                             MBO_ENV_PATH="$venv_path"
@@ -829,7 +871,7 @@ install_dev_environment() {
             echo ""
 
             while true; do
-                read -p "Select option (1-2): " choice
+                if [[ "$ASSUME_YES" == "1" ]]; then choice="1"; else read -p "Select option (1-2): " choice; fi
                 case $choice in
                     1)
                         MBO_ENV_PATH="$venv_path"
@@ -877,7 +919,7 @@ install_dev_environment() {
             echo ""
 
             while true; do
-                read -p "Select option (1-3): " choice
+                if [[ "$ASSUME_YES" == "1" ]]; then choice="2"; else read -p "Select option (1-3): " choice; fi
                 case $choice in
                     1)
                         info "Removing existing environment..."
@@ -906,8 +948,8 @@ install_dev_environment() {
         local env_parent=$(dirname "$MBO_ENV_PATH")
         mkdir -p "$env_parent"
 
-        info "Creating virtual environment with Python 3.12..."
-        if ! uv venv "$MBO_ENV_PATH" --python 3.12; then
+        info "Creating virtual environment with Python $MBO_PYTHON..."
+        if ! uv venv "$MBO_ENV_PATH" --python "$MBO_PYTHON"; then
             error "Failed to create virtual environment"
             return 1
         fi
@@ -967,6 +1009,11 @@ read_yes_no() {
     # read_yes_no "Prompt" "y"|"n"  ->  return 0 (yes) / 1 (no)
     local prompt="$1"
     local default="${2:-y}"
+
+    if [[ "$ASSUME_YES" == "1" ]]; then
+        [[ "$default" == "n" ]] && return 1 || return 0
+    fi
+
     local suffix="[Y/n]"
     [[ "$default" == "n" ]] && suffix="[y/N]"
     while true; do

@@ -1,5 +1,6 @@
 # MBO Utilities Installation Script for Windows
-# installs mbo CLI via uv tool, optionally creates a dev environment
+# Installs the global 'mbo' CLI (uv tool) and/or a local dev environment,
+# with an optional desktop shortcut for each.
 #
 # usage:
 #   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
@@ -8,13 +9,17 @@
 #   MBO_ENV_PATH     - custom path for dev environment (default: ~/<repos|code|software|projects>/mbo_utilities)
 #   MBO_SKIP_ENV     - set to "1" to skip dev environment creation
 #   MBO_OVERWRITE    - set to "1" to overwrite existing installations
+#   MBO_ASSUME_YES   - set to "1" to accept default answers (non-interactive)
+#   MBO_PYTHON       - Python version for the install (default: 3.12)
 
 $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
 
-# System dependency URLs (informational only)
-$FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/"
+# accept default answers without prompting (CI / unattended re-provisioning)
+$ASSUME_YES = ($env:MBO_ASSUME_YES -eq "1")
+# python version used for `uv tool install` and `uv venv`
+$MBO_PYTHON = if ($env:MBO_PYTHON) { $env:MBO_PYTHON } else { "3.12" }
 
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
 function Write-Success { Write-Host "[OK] $args" -ForegroundColor Green }
@@ -55,8 +60,7 @@ function Test-SystemDependencies {
 function Show-SystemDependencyCheck {
     <#
     .SYNOPSIS
-    Display system dependency status and prompt user if required deps are missing.
-    Returns $true if installation should proceed, $false to abort.
+    Display system dependency status (informational; no required deps on Windows).
     #>
     param([hashtable]$Deps)
 
@@ -79,8 +83,6 @@ function Show-SystemDependencyCheck {
     }
 
     Write-Host ""
-
-    return $true
 }
 
 function Show-Banner {
@@ -121,7 +123,7 @@ function Install-Uv {
     }
     catch {
         Write-Err "Failed to install uv: $_"
-        exit 1
+        throw
     }
 }
 
@@ -147,6 +149,11 @@ function Get-GitHubBranches {
 }
 
 function Show-SourceSelection {
+    if ($ASSUME_YES) {
+        Write-Info "MBO_ASSUME_YES: installing from PyPI (stable)."
+        return @{ Source = "pypi"; Spec = "mbo_utilities"; Ref = $null }
+    }
+
     Write-Host ""
     Write-Host "Installation Source" -ForegroundColor White
     Write-Host ""
@@ -413,6 +420,12 @@ function Get-UvToolPythonPath {
 function Show-OptionalDependencies {
     param([hashtable]$GpuInfo)
 
+    if ($ASSUME_YES) {
+        Write-Info "MBO_ASSUME_YES: no optional extras (base install)."
+        $extras = @()
+        return $extras
+    }
+
     Write-Host ""
     Write-Host "Optional Dependencies" -ForegroundColor White
     Write-Host ""
@@ -512,11 +525,17 @@ function Install-MboTool {
                 Write-Host "  [3] Cancel    - Exit" -ForegroundColor Cyan
                 Write-Host ""
 
-                do {
-                    $choice = Read-Host "Select option (1-3)"
-                    $valid = $choice -match '^[123]$'
-                    if (-not $valid) { Write-Warn "Invalid selection." }
-                } while (-not $valid)
+                if ($ASSUME_YES) {
+                    $choice = "2"
+                    Write-Info "MBO_ASSUME_YES: keeping existing installation."
+                }
+                else {
+                    do {
+                        $choice = Read-Host "Select option (1-3)"
+                        $valid = $choice -match '^[123]$'
+                        if (-not $valid) { Write-Warn "Invalid selection." }
+                    } while (-not $valid)
+                }
 
                 switch ($choice) {
                     "1" {
@@ -529,7 +548,8 @@ function Install-MboTool {
                     }
                     "3" {
                         Write-Info "Installation cancelled."
-                        exit 0
+                        $script:Cancelled = $true
+                        return $false
                     }
                 }
             }
@@ -540,7 +560,7 @@ function Install-MboTool {
         # branch name is already cached. without it, pushing fixes to a
         # branch and re-running the script would silently keep the stale
         # version in the tool environment.
-        $installArgs = @($fullSpec, "--python", "3.12", "--reinstall")
+        $installArgs = @($fullSpec, "--python", $MBO_PYTHON, "--reinstall")
         uv tool install @installArgs 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {
@@ -621,6 +641,11 @@ function Install-MboTool {
 }
 
 function Show-InstallTypePrompt {
+    if ($ASSUME_YES) {
+        Write-Info "MBO_ASSUME_YES: installing both global CLI + local environment."
+        return @{ InstallCli = $true; InstallEnv = $true }
+    }
+
     Write-Host ""
     Write-Host "Installation Type" -ForegroundColor White
     Write-Host ""
@@ -670,6 +695,11 @@ function Show-EnvLocationPrompt {
     }
 
     $defaultPath = Get-DefaultEnvPath
+
+    if ($ASSUME_YES) {
+        Write-Info "MBO_ASSUME_YES: environment location $defaultPath"
+        return $defaultPath
+    }
 
     Write-Host ""
     Write-Host "Environment Location" -ForegroundColor White
@@ -808,11 +838,17 @@ function Install-DevEnvironment {
                 Write-Host "  [3] Skip      - Don't modify dev environment" -ForegroundColor Cyan
                 Write-Host ""
 
-                do {
-                    $choice = Read-Host "Select option (1-3)"
-                    $valid = $choice -match '^[123]$'
-                    if (-not $valid) { Write-Warn "Invalid selection." }
-                } while (-not $valid)
+                if ($ASSUME_YES) {
+                    $choice = "2"
+                    Write-Info "MBO_ASSUME_YES: updating existing .venv."
+                }
+                else {
+                    do {
+                        $choice = Read-Host "Select option (1-3)"
+                        $valid = $choice -match '^[123]$'
+                        if (-not $valid) { Write-Warn "Invalid selection." }
+                    } while (-not $valid)
+                }
 
                 switch ($choice) {
                     "1" {
@@ -840,11 +876,17 @@ function Install-DevEnvironment {
                 Write-Host "  [2] Skip         - Don't create dev environment" -ForegroundColor Cyan
                 Write-Host ""
 
-                do {
-                    $choice = Read-Host "Select option (1-2)"
-                    $valid = $choice -match '^[12]$'
-                    if (-not $valid) { Write-Warn "Invalid selection." }
-                } while (-not $valid)
+                if ($ASSUME_YES) {
+                    $choice = "1"
+                    Write-Info "MBO_ASSUME_YES: creating .venv."
+                }
+                else {
+                    do {
+                        $choice = Read-Host "Select option (1-2)"
+                        $valid = $choice -match '^[12]$'
+                        if (-not $valid) { Write-Warn "Invalid selection." }
+                    } while (-not $valid)
+                }
 
                 switch ($choice) {
                     "1" {
@@ -869,11 +911,17 @@ function Install-DevEnvironment {
             Write-Host "  [2] Skip                - Don't create dev environment" -ForegroundColor Cyan
             Write-Host ""
 
-            do {
-                $choice = Read-Host "Select option (1-2)"
-                $valid = $choice -match '^[12]$'
-                if (-not $valid) { Write-Warn "Invalid selection." }
-            } while (-not $valid)
+            if ($ASSUME_YES) {
+                $choice = "1"
+                Write-Info "MBO_ASSUME_YES: creating .venv inside."
+            }
+            else {
+                do {
+                    $choice = Read-Host "Select option (1-2)"
+                    $valid = $choice -match '^[12]$'
+                    if (-not $valid) { Write-Warn "Invalid selection." }
+                } while (-not $valid)
+            }
 
             switch ($choice) {
                 "1" {
@@ -917,11 +965,17 @@ function Install-DevEnvironment {
             Write-Host "  [3] Skip      - Don't modify dev environment" -ForegroundColor Cyan
             Write-Host ""
 
-            do {
-                $choice = Read-Host "Select option (1-3)"
-                $valid = $choice -match '^[123]$'
-                if (-not $valid) { Write-Warn "Invalid selection." }
-            } while (-not $valid)
+            if ($ASSUME_YES) {
+                $choice = "2"
+                Write-Info "MBO_ASSUME_YES: updating existing environment."
+            }
+            else {
+                do {
+                    $choice = Read-Host "Select option (1-3)"
+                    $valid = $choice -match '^[123]$'
+                    if (-not $valid) { Write-Warn "Invalid selection." }
+                } while (-not $valid)
+            }
 
             switch ($choice) {
                 "1" {
@@ -946,8 +1000,8 @@ function Install-DevEnvironment {
             New-Item -ItemType Directory -Path $envParent -Force | Out-Null
         }
 
-        Write-Info "Creating virtual environment with Python 3.12..."
-        uv venv $EnvPath --python 3.12
+        Write-Info "Creating virtual environment with Python $MBO_PYTHON..."
+        uv venv $EnvPath --python $MBO_PYTHON
         if ($LASTEXITCODE -ne 0) {
             Write-Err "Failed to create virtual environment"
             return $null
@@ -1065,6 +1119,8 @@ function Get-UvToolBinDir {
 function Read-YesNo {
     param([string]$Prompt, [bool]$DefaultYes = $true)
 
+    if ($ASSUME_YES) { return $DefaultYes }
+
     $suffix = if ($DefaultYes) { "[Y/n]" } else { "[y/N]" }
     while ($true) {
         $ans = Read-Host "$Prompt $suffix"
@@ -1083,8 +1139,15 @@ function Add-MboShortcut {
     param([string]$MboExe, [string]$Name)
 
     if (-not (Test-Path $MboExe)) {
-        Write-Warn "mbo not found at $MboExe; skipping shortcut."
-        return
+        # fall back to PATH lookup (e.g. the bin dir wasn't resolvable)
+        $resolved = Get-Command $MboExe -ErrorAction SilentlyContinue
+        if ($resolved) {
+            $MboExe = $resolved.Source
+        }
+        else {
+            Write-Warn "mbo not found ($MboExe); skipping shortcut."
+            return
+        }
     }
     Write-Info "Creating desktop shortcut..."
     # `mbo shortcut` creates the .lnk using the bundled icon and prints the path
@@ -1155,14 +1218,12 @@ function Show-UsageInstructions {
 }
 
 function Main {
+    $script:Cancelled = $false
     Show-Banner
 
-    # step 0: check system dependencies first
+    # step 0: show system dependencies (informational)
     $sysDeps = Test-SystemDependencies
-    $shouldContinue = Show-SystemDependencyCheck -Deps $sysDeps
-    if (-not $shouldContinue) {
-        exit 0
-    }
+    Show-SystemDependencyCheck -Deps $sysDeps
 
     # check/install uv
     if (-not (Test-UvInstalled)) {
@@ -1205,9 +1266,12 @@ function Main {
     # step 6: install global CLI tool if requested
     if ($installType.InstallCli) {
         $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackages $cupyPackages -PytorchIndexUrl $pytorchIndexUrl
+        if ($script:Cancelled) {
+            return
+        }
         if (-not $toolInstalled) {
             Write-Err "Global installation failed."
-            exit 1
+            return
         }
         if (Read-YesNo "Add a desktop shortcut for the global app?" $true) {
             $binDir = Get-UvToolBinDir
@@ -1233,7 +1297,7 @@ function Main {
     Write-Success "Installation completed!"
     Write-Host ""
     if ($installType.InstallCli) {
-        Write-Host "You may need to restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
+        Write-Host "Open a NEW terminal to use 'mbo' (this session's PATH is already updated)." -ForegroundColor Yellow
     }
 }
 
