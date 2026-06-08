@@ -567,7 +567,7 @@ class MP4Array(ReductionMixin, Shape5DMixin):
         first = np.asarray(self._reader.get_data(0))
         height, width = first.shape[0], first.shape[1]
         self._dtype = np.dtype(first.dtype)
-        self.shape = (nframes, height, width)
+        self._raw_shape = (nframes, height, width)
         self._target_dtype = None
 
         self._metadata = dict(metadata) if metadata else {}
@@ -579,13 +579,18 @@ class MP4Array(ReductionMixin, Shape5DMixin):
     def can_open(cls, path: Path | str) -> bool:
         return Path(path).suffix.lower() == ".mp4"
 
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        # MP4Array stays 3D (T, Y, X); it is not part of the 5D dispatch set.
+        return self._raw_shape
+
     def _shape5d(self) -> tuple[int, int, int, int, int]:
-        s = self.shape  # always (T, Y, X)
+        s = self._raw_shape  # always (T, Y, X)
         return (s[0], 1, 1, s[1], s[2])
 
     @property
     def ndim(self) -> int:
-        return len(self.shape)
+        return len(self._raw_shape)
 
     @property
     def dtype(self):
@@ -740,9 +745,10 @@ class MP4Array(ReductionMixin, Shape5DMixin):
         outpath.mkdir(parents=True, exist_ok=True)
         ext_clean = ext.lower().lstrip(".")
 
-        num_planes = arr.shape5d[2]
-        num_channels = getattr(arr, "num_color_channels", arr.shape5d[1])
-        nframes_total = arr.shape5d[0]
+        s5 = arr._shape5d()
+        num_planes = s5[2]
+        num_channels = getattr(arr, "num_color_channels", s5[1])
+        nframes_total = s5[0]
 
         planes_0idx = [p - 1 for p in planes] if planes else list(range(num_planes))
         channels_0idx = [c - 1 for c in channels] if channels else list(range(num_channels))

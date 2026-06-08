@@ -202,6 +202,7 @@ def main(
       mbo convert IN OUT    convert between formats
       mbo info PATH         print array info
       mbo formats           list supported formats
+      mbo shortcut          create a desktop icon
 
     \b
     Verify install:
@@ -1316,10 +1317,9 @@ def init(data_path, output_dir, overwrite):
     )
 
     # source notebook -> default data-path token replaced when DATA_PATH given
-    # (None = copy as-is; the lsp guide is a markdown reference with no run path)
     notebooks = {
         "mbo_user_guide.ipynb": "D:/demo/raw",
-        "lsp_user_guide.ipynb": None,
+        "lsp_user_guide.ipynb": "D:/demo/raw",
     }
 
     if output_dir is not None:
@@ -1357,6 +1357,58 @@ def init(data_path, output_dir, overwrite):
     if fill:
         click.echo(f"Data path: {fill}")
     click.echo(f"\nOpen with:\n  jupyter lab {dest}")
+
+
+@main.command("download-models")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Re-download even if already present.",
+)
+def download_models(force):
+    r"""
+    Download/repair the cellpose model used by suite2p detection.
+
+    \b
+    Examples:
+      mbo download-models           # download if missing or corrupt
+      mbo download-models --force   # re-download
+    """
+    from mbo_utilities._cellpose_model import ensure_cellpose_model
+
+    path = ensure_cellpose_model(force=force)
+    if path:
+        click.secho(f"cellpose model ready: {path}", fg="green")
+    else:
+        click.secho("cellpose model unavailable (pip install cellpose)", fg="red")
+        raise click.Abort
+
+
+@main.command("shortcut")
+@click.option(
+    "--name",
+    default="Miller Brain Studio",
+    help="Shortcut name.",
+)
+def shortcut(name):
+    r"""
+    Create a desktop icon that opens the GUI.
+
+    Windows: a .lnk that launches the viewer with no console window.
+    Linux: a .desktop entry on the Desktop.
+
+    \b
+    Examples:
+      mbo shortcut
+      mbo shortcut --name "MBO"
+    """
+    from mbo_utilities._shortcut import create_desktop_shortcut
+
+    try:
+        path = create_desktop_shortcut(name=name)
+    except Exception as e:
+        raise click.ClickException(str(e))
+    click.secho(f"Created: {path}", fg="green")
 
 
 if __name__ == "__main__":

@@ -182,7 +182,7 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
         if nz is not None:
             return list(range(nz)), "z"
 
-    # fallback: detect from shape5d if available, else from parent
+    # fallback: detect from arr.nz if available, else from parent
     if nz is None:
         nz = arr.nz if hasattr(arr, "nz") else 1
     if nc is None:
@@ -507,7 +507,7 @@ def refresh_zstats(parent: Any):
         z_idx = dims_lower.index("z")
         parent.nz = parent.shape[z_idx]
     elif arr is not None and hasattr(arr, "nz"):
-        # arrays with shape5d carry a canonical Z size even when dims
+        # lazy arrays carry a canonical Z size (.nz) even when dims
         # don't expose a "z" label — prefer that over a positional guess.
         parent.nz = int(arr.nz)
     elif len(parent.shape) >= 4:

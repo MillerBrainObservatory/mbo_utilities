@@ -510,9 +510,13 @@ def _create_image_widget(data_array, widget: bool = True):
         pass
 
     if RenderCanvas is not None:
+        # present_method="screen" renders the wgpu surface directly. The
+        # "bitmap" method blits via QPainter inside paintEvent, which
+        # re-enters during Qt's resize loop ("Recursive repaint detected",
+        # paintEngine==0) and freezes the window on resize.
         figure_kwargs = {
             "canvas": "pyqt6",
-            "canvas_kwargs": {"present_method": "bitmap"},
+            "canvas_kwargs": {"present_method": "screen"},
             "size": (fig_w, fig_h),
         }
     else:

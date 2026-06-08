@@ -38,7 +38,9 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 
 We recommend [uv](https://docs.astral.sh/uv/) for managing environments.
 
-For help setting up, see [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html).
+Simply remove the `uv` from the below commands if using a different python package manager.
+
+See [the MBO guide on virtual environments](https://millerbrainobservatory.github.io/guides/venvs.html) for more information on managing python environments.
 
 ```bash
 uv venv --python 3.12.9
@@ -82,7 +84,7 @@ uv pip install cupy-cuda11x  # for CUDA 11.x
 ### Verify installation
 
 ```bash
-mbo --check-install
+uv run mbo --check-install
 ```
 
 This will show the status of all packages, GPU availability, and provide exact install commands for anything missing.
@@ -131,6 +133,7 @@ Launch an interactive GPU-accelerated viewer for exploring large imaging dataset
 mbo                    # launch GUI
 mbo /path/to/data      # open file directly
 mbo --check-install    # verify GPU configuration
+mbo shortcut           # add a desktop icon (Windows/Linux)
 ```
 
 → [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/gui_guide.html)

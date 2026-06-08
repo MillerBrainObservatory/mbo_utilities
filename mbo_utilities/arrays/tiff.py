@@ -16,6 +16,7 @@ from tifffile import TiffFile
 
 from mbo_utilities import log
 from mbo_utilities.arrays._base import ReductionMixin, Shape5DMixin, TiffReaderMixin, _normalize_key
+from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.file_io import expand_paths
 from mbo_utilities.metadata import get_metadata, get_param, extract_roi_slices
 from mbo_utilities.metadata.scanimage import (
@@ -716,25 +717,8 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
         return self._nz
 
     @property
-    def _natural_dropped_axes(self) -> tuple[int, ...]:
-        # indices in (T, C, Z) that are singleton; Y, X are always kept.
-        # shape/ndim/__getitem__ hide these axes so generic tiffs present
-        # at their real rank (2D image stays 2D, TYX timeseries stays 3D, etc.).
-        # shape5d and Shape5DMixin accessors (nt/nc/nz/ny/nx) remain 5D.
-        dropped = []
-        if self._nframes <= 1:
-            dropped.append(0)
-        if self._nc <= 1:
-            dropped.append(1)
-        if self._nz <= 1:
-            dropped.append(2)
-        return tuple(dropped)
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        full = self._shape5d()
-        dropped = self._natural_dropped_axes
-        return tuple(s for i, s in enumerate(full) if i not in dropped)
+    def shape(self) -> tuple[int, int, int, int, int]:
+        return self._shape5d()
 
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         return (self._nframes, self._nc, self._nz, self._ly, self._lx)
@@ -751,13 +735,12 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
 
     @property
     def ndim(self) -> int:
-        return 5 - len(self._natural_dropped_axes)
+        return 5
 
     @property
     def dims(self) -> tuple[str, ...]:
         from mbo_utilities.arrays._base import DIMS
-        dropped = self._natural_dropped_axes
-        return tuple(d for i, d in enumerate(DIMS) if i not in dropped)
+        return DIMS
 
     @property
     def metadata(self) -> dict:
@@ -774,29 +757,11 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
         return self._nframes
 
     def __getitem__(self, key):
-
-        # key interpretation:
-        #   len(key) <= natural_ndim  → natural-rank key: pad with slices
-        #     to natural_ndim, then rebuild a 5D key by inserting 0 at
-        #     each dropped (singleton) axis.
-        #   len(key) > natural_ndim   → legacy 5D key: pad with slices on
-        #     the right to reach 5. this keeps callers that still pass
-        #     explicit 5-length keys (e.g. `arr[0, 0, 0]` to get a Y,X
-        #     frame) working against singleton-heavy data.
-        dropped = self._natural_dropped_axes
-        natural_ndim = 5 - len(dropped)
+        # always-5D (v4): pad the key to a length-5 TCZYX tuple. axes
+        # indexed with an integer are squeezed from the result below
+        # (standard numpy semantics).
         key = _normalize_key(key, 5)
-        if len(key) <= natural_ndim:
-            key = key + (slice(None),) * (natural_ndim - len(key))
-            full = [None] * 5
-            for d in dropped:
-                full[d] = 0
-            kept = [i for i in range(5) if i not in dropped]
-            for slot, user_k in zip(kept, key):
-                full[slot] = user_k
-            key = tuple(full)
-        else:
-            key = key + (slice(None),) * (5 - len(key))
+        key = key + (slice(None),) * (5 - len(key))
 
         t_key, c_key, z_key, y_key, x_key = key
 
@@ -1194,7 +1159,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
         # padded Ly/Lx via the setter would have those values silently
         # overwritten on the very next `arr.metadata` read, before the
         # writer could see them. callers that need spatial dims should
-        # use `arr.shape` / `arr.shape5d` directly; downstream metadata
+        # use `arr.shape` directly; downstream metadata
         # consumers (OutputMetadata.to_dict) fill them in via setdefault
         # when missing, so removing the auto-fill costs nothing.
         return self._metadata
@@ -2199,3 +2164,13 @@ def open_scanimage(files: str | Path | list, **kwargs) -> ScanImageArray:
             return PiezoArray(files, **kwargs)
         kwargs.pop("average_frames", None)
         return SinglePlaneArray(files, **kwargs)
+
+
+# self-registration for imread() dispatch (v4). more specific layouts win
+# via higher PRIORITY; TiffArray is the last-resort fallback.
+register_array_class(LBMArray, priority=90)
+register_array_class(LBMPiezoArray, priority=90)
+register_array_class(PiezoArray, priority=80)
+register_array_class(SinglePlaneArray, priority=80)
+register_array_class(ScanImageArray, priority=70)
+register_array_class(TiffArray, priority=30)

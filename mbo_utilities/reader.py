@@ -34,6 +34,7 @@ from mbo_utilities.arrays.isoview import (
     IsoviewArray,
     detect_isoview_kind,
 )
+from mbo_utilities.lazy_array import _dispatch
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -157,6 +158,7 @@ def imread(
     # Stored as ``channel`` (zero-based) — picklable through reader_kwargs
     # so subprocess workers can re-create the wrap after their own imread.
     channel = kwargs.pop("channel", None)
+    squeeze = kwargs.pop("squeeze", False)
     arr = _imread_impl(inputs, **kwargs)
     if channel is not None:
         from mbo_utilities.arrays._channel_view import _ChannelView
@@ -165,8 +167,10 @@ def imread(
                 "imread(channel=%r): underlying array is %dD, returning unwrapped",
                 channel, getattr(arr, "ndim", "?"),
             )
-            return arr
-        return _ChannelView(arr, int(channel))
+        else:
+            arr = _ChannelView(arr, int(channel))
+    if squeeze and hasattr(arr, "squeeze"):
+        arr = arr.squeeze()
     return arr
 
 
@@ -179,6 +183,12 @@ def _imread_impl(
     if isinstance(inputs, np.ndarray):
         logger.debug(f"Wrapping numpy array with shape {inputs.shape} as NumpyArray")
         return NumpyArray(inputs, **_filter_kwargs(NumpyArray, kwargs))
+    # A SqueezedView is a display lens over a canonical 5D array; normalize
+    # back to that base so imread()/pipeline() operate on the real 5D array
+    # (the view drops axes the writer/pipeline rely on).
+    from mbo_utilities.squeeze import SqueezedView
+    if isinstance(inputs, SqueezedView):
+        return inputs.base
     # Pass through already-loaded lazy arrays (has _imwrite method)
     if hasattr(inputs, "_imwrite") and hasattr(inputs, "shape"):
         return inputs
@@ -187,6 +197,25 @@ def _imread_impl(
         p = Path(inputs)
         if not p.exists():
             raise ValueError(f"Input path does not exist: {p}")
+
+        # redirect an inner-zarr path (zarr.json / chunk file) to the store
+        # root so can_open() sees the store directory, matching the legacy
+        # redirect further down.
+        if not p.is_dir():
+            for ancestor in p.parents:
+                if ancestor.suffix.lower() == ".zarr" and ancestor.is_dir():
+                    logger.debug(f"Redirecting {p.name} -> parent zarr store {ancestor}")
+                    p = ancestor
+                    break
+
+        # v4 dispatch: the highest-PRIORITY registered class (built-in or a
+        # third-party plugin) whose can_open() accepts the path wins. Falls
+        # through to the legacy detection below for inputs no class claims
+        # (multi-file lists, .bin/.klb/.mp4, reg_tif folders, mixed dirs).
+        cls = _dispatch(p)
+        if cls is not None:
+            logger.debug(f"Dispatch selected {cls.__name__} for {p}")
+            return cls(p, **_filter_kwargs(cls, kwargs))
 
         # Suite2p outputs take priority over isoview ancestor matching.
         # detect_isoview_kind walks up parents looking for `.corrected` /

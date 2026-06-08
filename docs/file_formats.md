@@ -21,53 +21,48 @@ The raw metadata is made [OME](https://www.openmicroscopy.org/ome-xml/) and Imag
 
 Additional formats are made as-needed for specific tasks, e.g. Suite2p `.bin` and `.h5` for microscope calibrations.
 
-## The 5D contract
+## Dimensions
 
-Every array returned by `imread()` reports a canonical 5D **TCZYX** layout via `.shape5d`,
-regardless of how many dimensions the underlying file actually has on disk.
-The dimension order is fixed:
+`imread()` returns 5D **TCZYX** arrays. `.shape` is always length 5 and the
+order is fixed:
 
-| Axis | Index | Meaning            |
-|------|-------|--------------------|
-| T    | 0     | timepoints (frames)|
-| C    | 1     | channels           |
-| Z    | 2     | z-planes           |
-| Y    | 3     | image rows         |
-| X    | 4     | image columns      |
+| Axis | Index | Meaning             |
+|------|-------|---------------------|
+| T    | 0     | timepoints (frames) |
+| C    | 1     | channels            |
+| Z    | 2     | z-planes            |
+| Y    | 3     | image rows          |
+| X    | 4     | image columns       |
 
-A typical LBM volumetric scan (1574 frames, 14 z-planes, 550×448) looks like
-`shape5d == (1574, 1, 14, 550, 448)` — one channel, fourteen z-planes.
+A typical LBM volumetric scan (1574 frames, 14 z-planes, 550×448) reports
+`shape == (1574, 1, 14, 550, 448)` — one channel, fourteen z-planes.
 
-`.shape` may be the same as `.shape5d` (the default for ScanImage/Zarr/H5/Suite2p
-arrays) or it may be a *natural rank* view that drops singleton/missing dims —
-the only class that does this today is the generic `TiffArray`, which reports
-the rank of whatever's actually on disk (2D, 3D, 4D, or 5D). If you ever need
-to reason about layout in a class-agnostic way, use `.shape5d` and `.dims`
-(`('T', 'C', 'Z', 'Y', 'X')`) — they're stable.
+Size-1 axes are kept, not dropped. To drop them for inspection or display,
+use `arr.squeeze()` or `imread(path, squeeze=True)` — a view that still holds
+the 5D array underneath for writers and the viewer.
+
+`BinArray` is the one exception: it reports the rank you pass in
+(see [BinArray](#binarray)).
 
 ## Quick Reference
 
-The `shape5d` column shows what `.shape5d` reports for a typical file. The
-`.shape` column shows what plain `.shape` returns (only differs from `.shape5d`
-for the natural-rank `TiffArray`).
-
-| Input | Returns | `.shape5d` | `.shape` | Description |
-|-------|---------|------------|----------|-------------|
-| **`.tiff`** | | | | |
-| ↳ ScanImage raw | `LBMArray` | `(T, C, Z, Y, X)` | same | LBM with z-planes as channels |
-| | `PiezoArray` | `(T, C, Z, Y, X)` | same | Piezo z-stacks, optional averaging |
-| | `LBMPiezoArray` | `(T, C, Z, Y, X)` | same | LBM + piezo (pollen calibration) |
-| | `SinglePlaneArray` | `(T, C, Z, Y, X)` (Z=1) | same | Single-plane time series |
-| ↳ Standard/ImageJ | `TiffArray` | `(T, C, Z, Y, X)` | natural rank (2D–5D) | All TIFFs including ImageJ hyperstacks |
-| **`.bin`** | `BinArray` | `(T, C, Z, Y, X)` | user-supplied | Suite2p binary (requires shape) |
-| **`.h5`** | `H5Array` | `(T, C, Z, Y, X)` | same | HDF5 datasets |
-| **`.zarr`** | `ZarrArray` | `(T, C, Z, Y, X)` | same | Zarr v3 / OME-Zarr |
-| **`.npy`** | `NumpyArray` | `(T, C, Z, Y, X)` | same | Memory-mapped numpy |
-| **`np.ndarray`** | `NumpyArray` | `(T, C, Z, Y, X)` | same | In-memory wrapper |
-| **Directory** | | | | |
-| ↳ `ops.npy` | `Suite2pArray` | `(T, C, Z, Y, X)` (Z=1) | same | Suite2p single-plane |
-| ↳ `planeXX/ops.npy` | `Suite2pArray` | `(T, C, Z, Y, X)` | same | Suite2p volumetric |
-| ↳ `planeXX.tiff` | `TiffArray` | `(T, C, Z, Y, X)` | natural rank | Multi-plane TIFF volume |
+| Input | Returns | `shape` | Description |
+|-------|---------|---------|-------------|
+| **`.tiff`** | | | |
+| ↳ ScanImage raw | `LBMArray` | `(T, C, Z, Y, X)` | LBM with z-planes as channels |
+| | `PiezoArray` | `(T, C, Z, Y, X)` | Piezo z-stacks, optional averaging |
+| | `LBMPiezoArray` | `(T, C, Z, Y, X)` | LBM + piezo (pollen calibration) |
+| | `SinglePlaneArray` | `(T, C, Z, Y, X)` (Z=1) | Single-plane time series |
+| ↳ Standard/ImageJ | `TiffArray` | `(T, C, Z, Y, X)` | All TIFFs including ImageJ hyperstacks |
+| **`.bin`** | `BinArray` | as-passed, e.g. `(T, Y, X)` | Suite2p binary (requires shape) |
+| **`.h5`** | `H5Array` | `(T, C, Z, Y, X)` | HDF5 datasets |
+| **`.zarr`** | `ZarrArray` | `(T, C, Z, Y, X)` | Zarr v3 / OME-Zarr |
+| **`.npy`** | `NumpyArray` | `(T, C, Z, Y, X)` | Memory-mapped numpy |
+| **`np.ndarray`** | `NumpyArray` | `(T, C, Z, Y, X)` | In-memory wrapper |
+| **Directory** | | | |
+| ↳ `ops.npy` | `Suite2pArray` | `(T, C, Z, Y, X)` (Z=1) | Suite2p single-plane |
+| ↳ `planeXX/ops.npy` | `Suite2pArray` | `(T, C, Z, Y, X)` | Suite2p volumetric |
+| ↳ `planeXX.tiff` | `TiffArray` | `(T, C, Z, Y, X)` | Multi-plane TIFF volume |
 
 ### Detection Logic
 
@@ -128,8 +123,8 @@ Light Beads Microscopy with z-planes interleaved as ScanImage channels.
 
 ```python
 arr = mbo.imread("/path/to/lbm_data.tif")
-print(arr.shape5d)    # (T, C, Z, Y, X), e.g. (1574, 1, 14, 550, 448)
-print(arr.num_planes) # number of z-planes (= shape5d[2])
+print(arr.shape)    # (T, C, Z, Y, X), e.g. (1574, 1, 14, 550, 448)
+print(arr.num_planes) # number of z-planes (= shape[2])
 # note: dz must be user-supplied (not in ScanImage metadata for LBM)
 ```
 
@@ -140,7 +135,7 @@ Aquisitions using the ScanImage Piezo `hStackManager` produce z-stacks with opti
 
 ```python
 arr = mbo.imread("/path/to/piezo_data.tif")
-print(arr.shape5d)          # (T, C, Z, Y, X)
+print(arr.shape)          # (T, C, Z, Y, X)
 print(arr.frames_per_slice) # frames per z-position
 print(arr.can_average)      # True if averaging possible
 
@@ -158,7 +153,7 @@ the channel axis.
 ```python
 arr = mbo.imread("/path/to/pollen_calibration.tif")
 print(arr.stack_type)  # 'pollen'
-print(arr.shape5d)     # (T, C, Z, Y, X) — C = beamlets, Z = piezo positions
+print(arr.shape)     # (T, C, Z, Y, X) — C = beamlets, Z = piezo positions
 ```
 
 (singleplanearray)=
@@ -168,7 +163,7 @@ Single-plane time series (no z-stack).
 
 ```python
 arr = mbo.imread("/path/to/single_plane.tif")
-print(arr.shape5d)  # (T, C, Z=1, Y, X)
+print(arr.shape)  # (T, C, Z=1, Y, X)
 ```
 
 (tiffarray)=
@@ -177,30 +172,26 @@ print(arr.shape5d)  # (T, C, Z=1, Y, X)
 Universal TIFF reader for non-ScanImage files. Automatically handles standard TIFF stacks,
 ImageJ hyperstacks (interleaved TZYX), and multi-plane volumes (planeXX.tiff directories).
 
-`TiffArray` is the only array class that reports a *natural rank* `.shape` —
-it returns whatever the file actually has on disk (2D, 3D, 4D, or 5D). Use
-`.shape5d` to always get the canonical TCZYX layout.
+Whatever the file's on-disk rank, `.shape` is 5D TCZYX with singleton T/C/Z
+filled in:
 
 ```python
-# 2D tif → natural rank 2
+# 2D image
 arr = mbo.imread("/path/to/single_image.tif")
-print(arr.shape, arr.shape5d)
-# (Y, X)             (1, 1, 1, Y, X)
+print(arr.shape)  # (1, 1, 1, Y, X)
 
-# 3D stack → natural rank 3
+# 3D time series
 arr = mbo.imread("/path/to/tyx_stack.tif")
-print(arr.shape, arr.shape5d)
-# (T, Y, X)          (T, 1, 1, Y, X)
+print(arr.shape)  # (T, 1, 1, Y, X)
 
-# ImageJ hyperstack → natural rank 4 (auto-detected)
+# ImageJ hyperstack (auto-detected)
 arr = mbo.imread("/path/to/imagej_hyperstack.tif")
-print(arr.shape, arr.shape5d)
-# (T, Z, Y, X)       (T, 1, Z, Y, X)
+print(arr.shape)          # (T, 1, Z, Y, X)
 print(arr.is_volumetric)  # True
 
 # volumetric from directory of planeXX.tif files
 vol = mbo.imread("/path/to/tiff_output/")
-print(vol.shape5d)         # (T, 1, Z, Y, X)
+print(vol.shape)           # (T, 1, Z, Y, X)
 print(vol.is_volumetric)   # True
 ```
 
@@ -211,7 +202,7 @@ Suite2p binary files with full ops.npy context.
 
 ```python
 arr = mbo.imread("/path/to/suite2p/plane0")
-print(arr.shape5d)     # (T, 1, 1, Y, X) — single plane
+print(arr.shape)     # (T, 1, 1, Y, X) — single plane
 print(arr.raw_file)    # path to data_raw.bin
 print(arr.reg_file)    # path to data.bin
 
@@ -219,7 +210,7 @@ arr.switch_channel(use_raw=True)  # toggle raw/registered
 
 # volumetric (planeXX/ subdirs each with ops.npy)
 vol = mbo.imread("/path/to/suite2p_output/")
-print(vol.shape5d)  # (T, 1, Z, Y, X)
+print(vol.shape)  # (T, 1, Z, Y, X)
 ```
 
 Note: frame count is computed from actual file size, not ops.npy (which may be stale).
@@ -228,16 +219,16 @@ Note: frame count is computed from actual file size, not ops.npy (which may be s
 ### BinArray
 
 Direct binary file access when no ops.npy context is available. The user
-supplies the shape explicitly; the array adopts that as `.shape` and pads
-out to 5D for `.shape5d`.
+supplies the shape explicitly, and the array reports exactly that rank as
+`.shape` — it is the one array type whose `.shape` is not 5D.
 
 ```python
 from mbo_utilities.arrays import BinArray
 
 # requires explicit shape — any rank up to 5D
 arr = BinArray("/path/to/data.bin", shape=(1000, 512, 512))
-print(arr.shape)    # (1000, 512, 512)            — what you passed in
-print(arr.shape5d)  # (1000, 1, 1, 512, 512)      — canonical TCZYX
+print(arr.shape)  # (1000, 512, 512) — exactly what you passed in
+print(arr.nz)     # 1               — TCZYX sizes are still available
 
 # read/write via memmap
 arr[0] = new_frame
@@ -254,7 +245,7 @@ falling back to `/data` or the first available dataset.
 ```python
 arr = mbo.imread("/path/to/data.h5")
 print(arr.dataset_name)  # 'mov', 'data', or first available
-print(arr.shape5d)       # (T, C, Z, Y, X)
+print(arr.shape)       # (T, C, Z, Y, X)
 
 # specify dataset explicitly
 arr = mbo.imread("/path/to/data.h5", dataset="imaging_data")
@@ -267,7 +258,7 @@ Zarr v3 stores including OME-Zarr.
 
 ```python
 arr = mbo.imread("/path/to/data.zarr")
-print(arr.shape5d)   # (T, C, Z, Y, X)
+print(arr.shape)   # (T, C, Z, Y, X)
 print(arr.metadata)  # OME-NGFF attributes if present
 
 # multiple zarr stores stacked as z-planes
@@ -282,7 +273,7 @@ and it will resolve to the parent `.zarr` store automatically.
 
 Wraps `.npy` files (memory-mapped) or in-memory numpy arrays. Numpy input
 of any rank up to 5D is accepted; the missing dims are inferred from shape
-heuristics and recorded on `.shape5d`.
+heuristics and filled into the 5D `.shape`.
 
 ```python
 # from file
@@ -293,8 +284,7 @@ import numpy as np
 data = np.random.randn(100, 512, 512).astype(np.float32)
 arr = mbo.imread(data)
 
-print(arr.shape, arr.shape5d)
-# (100, 512, 512)    (100, 1, 1, 512, 512)
+print(arr.shape)  # (100, 1, 1, 512, 512)
 
 # enables imwrite to any format
 mbo.imwrite(arr, "output", ext=".zarr")
@@ -304,27 +294,24 @@ mbo.imwrite(arr, "output", ext=".zarr")
 
 All array types provide:
 
-| Property      | Description                                              |
-|---------------|----------------------------------------------------------|
-| `.shape`      | array dimensions (natural rank for `TiffArray`, else 5D) |
-| `.shape5d`    | always 5D `(T, C, Z, Y, X)` — use this for portability   |
-| `.dtype`      | data type                                                |
-| `.ndim`       | number of dims in `.shape` (`len(shape5d)` for 5D arrays)|
-| `.dims`       | dim labels, e.g. `('T', 'C', 'Z', 'Y', 'X')`             |
-| `.metadata`   | file/array metadata dict                                 |
-| `.num_planes` | number of z-planes (= `shape5d[2]`)                      |
+| Property      | Description                                          |
+|---------------|------------------------------------------------------|
+| `.shape`      | 5D `(T, C, Z, Y, X)` (`BinArray`: the rank you passed in) |
+| `.dtype`      | data type                                            |
+| `.ndim`       | number of dims in `.shape` (5, except `BinArray`)    |
+| `.dims`       | dim labels, e.g. `('T', 'C', 'Z', 'Y', 'X')`         |
+| `.nt` `.nc` `.nz` `.ny` `.nx` | individual TCZYX sizes               |
+| `.metadata`   | file/array metadata dict                             |
+| `.num_planes` | number of z-planes (= `.nz`)                         |
+
+The `.nt`/`.nc`/`.nz`/`.ny`/`.nx` accessors give individual sizes and are
+correct for every array type, including `BinArray`.
 
 Most array types also provide:
 
 | Property   | Description           |
 |------------|-----------------------|
 | `.close()` | release file handles  |
-
-The convention: if you're writing code that needs to work across array types,
-always reach for `.shape5d` and `.dims` rather than `.shape` and `.ndim`.
-`TiffArray` is the one class that varies — its `.shape` reflects whatever
-the file actually has on disk, which is convenient for ad-hoc inspection
-but breaks code that assumes a fixed rank.
 
 ScanImage-specific:
 

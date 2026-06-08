@@ -1,16 +1,17 @@
 """
-Natural-rank contract tests for TiffArray.
+5D-shape tests for TiffArray (v4).
 
-These tests pin the contracts the viewer pipeline depends on:
+Every array `imread()` returns is always 5D TCZYX (`ndim == 5`), with
+singleton T/C/Z axes kept, not squeezed. User-facing squeezing is opt-in
+(`arr.squeeze()` / `imread(squeeze=True)`).
 
-1. `shape`/`ndim`/`dims` report natural rank (singletons in T/C/Z dropped)
-2. `shape5d`/`nt`/`nc`/`nz`/`ny`/`nx` always report 5D for writers
-3. `__getitem__` accepts both natural-rank keys and legacy 5-length keys
-4. `np.asarray(arr)` honors natural rank (not a row of the 5D inflation)
-5. `arr.vmin`/`arr.vmax` work without crashing on every rank pattern
+These tests pin that behavior:
 
-Each bug we shipped between the 5D refactor and now would have been
-caught by one of these. New patterns belong here.
+1. `shape`/`ndim`/`dims` are always 5D TCZYX
+2. `nt`/`nc`/`nz`/`ny`/`nx` match `shape`
+3. `__getitem__` follows numpy 5D semantics (integer axes squeeze out)
+4. `np.asarray(arr)` returns a representative (Y, X) frame
+5. `arr.vmin`/`arr.vmax` work on every rank pattern and array class
 """
 
 from __future__ import annotations
@@ -73,133 +74,118 @@ def tiff_4d_tzyx(tmp_path):
     return vol_dir, data
 
 
-class TestTiffArrayNaturalRankShape:
-    """shape, ndim, dims report natural rank with singletons squeezed."""
+class TestTiffArray5DShape:
+    """shape, ndim, dims are always 5D TCZYX."""
 
     def test_2d_image(self, tiff_2d):
         path, data = tiff_2d
         arr = TiffArray(path)
-        assert arr.shape == data.shape
-        assert arr.ndim == 2
-        assert arr.dims == ("Y", "X")
-        # 5D contract still preserved
-        assert arr.shape5d == (1, 1, 1, *data.shape)
+        ny, nx = data.shape
+        assert arr.shape == (1, 1, 1, ny, nx)
+        assert arr.ndim == 5
+        assert arr.dims == ("T", "C", "Z", "Y", "X")
 
     def test_3d_time_series(self, tiff_3d_tyx):
         path, data = tiff_3d_tyx
         arr = TiffArray(path)
-        assert arr.shape == data.shape
-        assert arr.ndim == 3
-        assert arr.dims == ("T", "Y", "X")
-        assert arr.shape5d == (data.shape[0], 1, 1, data.shape[1], data.shape[2])
+        nt, ny, nx = data.shape
+        assert arr.shape == (nt, 1, 1, ny, nx)
+        assert arr.ndim == 5
 
     def test_3d_zstack_no_time(self, tiff_3d_zyx):
         path, nz = tiff_3d_zyx
         arr = TiffArray(path)
-        # T=1, C=1 dropped → (Z, Y, X)
-        assert arr.ndim == 3
-        assert arr.shape[0] == nz
-        assert arr.dims == ("Z", "Y", "X")
-        assert arr.shape5d[0] == 1  # T squeezed in natural, kept in shape5d
-        assert arr.shape5d[2] == nz
+        # T=1, C=1, Z=nz
+        assert arr.ndim == 5
+        assert arr.shape[0] == 1
+        assert arr.shape[2] == nz
+        assert arr.dims == ("T", "C", "Z", "Y", "X")
 
     def test_4d_volume_time_series(self, tiff_4d_tzyx):
         path, data = tiff_4d_tzyx
         arr = TiffArray(path)
-        assert arr.shape == data.shape
-        assert arr.ndim == 4
-        assert arr.dims == ("T", "Z", "Y", "X")
-        assert arr.shape5d == (data.shape[0], 1, data.shape[1], data.shape[2], data.shape[3])
+        nt, nz, ny, nx = data.shape
+        assert arr.shape == (nt, 1, nz, ny, nx)
+        assert arr.ndim == 5
 
 
-class TestTiffArrayShape5DInvariants:
-    """shape5d / nt / nc / nz / ny / nx are stable regardless of natural rank."""
-
-    @pytest.mark.parametrize("fixture_name", [
-        "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
-    ])
-    def test_shape5d_always_length_5(self, request, fixture_name):
-        fixture = request.getfixturevalue(fixture_name)
-        path = fixture[0]
-        arr = TiffArray(path)
-        assert len(arr.shape5d) == 5
+class TestTiffArray5DInvariants:
+    """nt / nc / nz / ny / nx match shape and shape is always length 5."""
 
     @pytest.mark.parametrize("fixture_name", [
         "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
     ])
-    def test_named_accessors_match_shape5d(self, request, fixture_name):
+    def test_shape_always_length_5(self, request, fixture_name):
         fixture = request.getfixturevalue(fixture_name)
         path = fixture[0]
         arr = TiffArray(path)
-        s5 = arr.shape5d
-        assert (arr.nt, arr.nc, arr.nz, arr.ny, arr.nx) == s5
+        assert len(arr.shape) == 5
+        assert arr.ndim == 5
 
-
-class TestTiffArrayNaturalRankIndexing:
-    """__getitem__ supports both natural-rank and legacy 5D keys."""
-
-    def test_2d_full_slice(self, tiff_2d):
-        path, data = tiff_2d
+    @pytest.mark.parametrize("fixture_name", [
+        "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
+    ])
+    def test_named_accessors_match_shape(self, request, fixture_name):
+        fixture = request.getfixturevalue(fixture_name)
+        path = fixture[0]
         arr = TiffArray(path)
-        out = np.asarray(arr[:])
-        assert out.shape == data.shape
-        np.testing.assert_array_equal(out.astype(data.dtype), data)
+        assert (arr.nt, arr.nc, arr.nz, arr.ny, arr.nx) == arr.shape
 
-    def test_2d_subregion(self, tiff_2d):
-        path, data = tiff_2d
-        arr = TiffArray(path)
-        out = np.asarray(arr[10:30, 5:25])
-        assert out.shape == (20, 20)
-        np.testing.assert_array_equal(out.astype(data.dtype), data[10:30, 5:25])
 
-    def test_2d_legacy_5d_key_returns_frame(self, tiff_2d):
-        """`arr[0, 0, 0]` from 5D-era callers must still return a (Y, X) frame.
+class TestTiffArray5DIndexing:
+    """__getitem__ follows numpy 5D semantics: integer axes squeeze out."""
 
-        Regression: my first natural-rank __getitem__ silently dropped
-        the third index, mis-routing arr[0,0,0] to a single pixel and
-        crashing _compute_frame_vminmax.
-        """
+    def test_2d_full_frame(self, tiff_2d):
         path, data = tiff_2d
         arr = TiffArray(path)
         frame = np.asarray(arr[0, 0, 0])
         assert frame.shape == data.shape
+        np.testing.assert_array_equal(frame.astype(data.dtype), data)
 
-    def test_2d_legacy_5d_key_with_spatial_slice(self, tiff_2d):
+    def test_2d_spatial_subregion(self, tiff_2d):
         path, data = tiff_2d
         arr = TiffArray(path)
-        out = np.asarray(arr[0, 0, 0, 10:20, 5:15])
-        assert out.shape == (10, 10)
+        out = np.asarray(arr[0, 0, 0, 10:30, 5:25])
+        assert out.shape == (20, 20)
+        np.testing.assert_array_equal(out.astype(data.dtype), data[10:30, 5:25])
 
-    def test_3d_tyx_index_t(self, tiff_3d_tyx):
+    def test_int_on_one_axis_squeezes_only_that_axis(self, tiff_3d_tyx):
         path, data = tiff_3d_tyx
         arr = TiffArray(path)
+        # arr[5] indexes T → (C, Z, Y, X)
         out = np.asarray(arr[5])
+        assert out.shape == (1, 1, *data.shape[1:])
+
+    def test_tyx_frame(self, tiff_3d_tyx):
+        path, data = tiff_3d_tyx
+        arr = TiffArray(path)
+        out = np.asarray(arr[5, 0, 0])
         assert out.shape == data.shape[1:]
         np.testing.assert_array_equal(out.astype(data.dtype), data[5])
 
-    def test_3d_zyx_index_z(self, tiff_3d_zyx):
+    def test_zyx_plane(self, tiff_3d_zyx):
         path, nz = tiff_3d_zyx
         arr = TiffArray(path)
-        # natural rank (Z, Y, X) — first index is Z
-        plane = np.asarray(arr[0])
+        plane = np.asarray(arr[0, 0, 3])
         assert plane.ndim == 2
-        assert plane.shape == arr.shape[1:]
+        assert plane.shape == (arr.ny, arr.nx)
 
-    def test_4d_tzyx_natural_index(self, tiff_4d_tzyx):
+    def test_tzyx_frame(self, tiff_4d_tzyx):
         path, data = tiff_4d_tzyx
         arr = TiffArray(path)
-        out = np.asarray(arr[3, 1])
+        out = np.asarray(arr[3, 0, 1])
         assert out.shape == data.shape[2:]
         np.testing.assert_array_equal(out.astype(data.dtype), data[3, 1])
 
+    def test_full_slice_keeps_5d(self, tiff_3d_tyx):
+        path, data = tiff_3d_tyx
+        arr = TiffArray(path)
+        out = np.asarray(arr[:])
+        assert out.shape == arr.shape
+
 
 class TestTiffArrayNumpyProtocol:
-    """np.asarray / vmin / vmax / astype must honor natural rank.
-
-    Regression: __array__ returned self[0] (a single row) for natural 2D
-    arrays. _compute_frame_vminmax used self[0, 0, 0] hardcoded to 5D.
-    Both broke when TiffArray started reporting natural rank.
-    """
+    """np.asarray returns a representative (Y, X) frame; vmin/vmax never crash."""
 
     @pytest.mark.parametrize("fixture_name", [
         "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
@@ -214,20 +200,17 @@ class TestTiffArrayNumpyProtocol:
         assert np.isfinite(vmax)
         assert vmin <= vmax
 
-    def test_2d_asarray_returns_full_image(self, tiff_2d):
-        path, data = tiff_2d
+    @pytest.mark.parametrize("fixture_name", [
+        "tiff_2d", "tiff_3d_tyx", "tiff_3d_zyx", "tiff_4d_tzyx"
+    ])
+    def test_asarray_returns_yx_frame(self, request, fixture_name):
+        fixture = request.getfixturevalue(fixture_name)
+        path = fixture[0]
         arr = TiffArray(path)
         materialized = np.asarray(arr)
-        # __array__ for 2D should return the whole image, not a row
+        # __array__ returns a single (Y, X) representative frame
         assert materialized.ndim == 2
-        assert materialized.shape == data.shape
-
-    def test_3d_tyx_asarray_returns_first_frame(self, tiff_3d_tyx):
-        path, data = tiff_3d_tyx
-        arr = TiffArray(path)
-        materialized = np.asarray(arr)
-        # 3D+: __array__ returns first slice along outer dim → (Y, X)
-        assert materialized.shape == data.shape[1:]
+        assert materialized.shape == (arr.ny, arr.nx)
 
 
 class TestVminVmaxAcrossArrayClasses:
@@ -235,11 +218,8 @@ class TestVminVmaxAcrossArrayClasses:
 
     Regression: each non-TIFF class (`ZarrArray`, `H5Array`, `NumpyArray`,
     `Suite2pArray`) used to define its own `_compute_frame_vminmax` with a
-    hardcoded `self[0, 0, 0]` index. The TiffArray fix to `__array__`
-    didn't propagate to those copies, and the user hit a zarr crash with
-    "cannot select an axis to squeeze out which has size not equal to one".
-    The methods now live on `ReductionMixin`, so this test pins coverage
-    across every class that inherits from it.
+    hardcoded `self[0, 0, 0]` index. The methods now live on `ReductionMixin`,
+    so this test pins coverage across every class that inherits from it.
     """
 
     def test_zarr_array(self, tmp_path):

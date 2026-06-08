@@ -428,10 +428,10 @@ def _write_bin(path, data, *, overwrite: bool = False, metadata=None, **kwargs):
             raise ValueError("Metadata must contain 'nframes' or 'num_frames'.")
 
         # stamp the ACTUAL chunk dims into metadata so write_ops records
-        # what's really on disk. shape5d and the metadata["shape"] from
-        # _imwrite_base can differ from the chunk — e.g. ScanImage's
-        # shape5d uses ROI metadata (550) but process_rois returns the
-        # real stitched height (542). when axial shifts are applied, the
+        # what's really on disk. the array's 5D shape and the
+        # metadata["shape"] from _imwrite_base can differ from the chunk —
+        # e.g. ScanImage's shape uses ROI metadata (550) but process_rois
+        # returns the real stitched height (542). when axial shifts are applied, the
         # chunk already has padded dims, so this is correct for both cases.
         metadata["Ly"] = Ly
         metadata["Lx"] = Lx

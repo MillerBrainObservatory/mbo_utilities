@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from mbo_utilities import log
+from mbo_utilities.lazy_array import LazyArray
 from mbo_utilities.arrays.features._dim_labels import get_dims
-from mbo_utilities._writers import _write_plane, _write_volumetric_tiff, _write_volumetric_zarr
 from numpy.exceptions import AxisError
 
 if TYPE_CHECKING:
@@ -37,78 +37,15 @@ def get_dtype(dtype):
 DIMS = ("T", "C", "Z", "Y", "X")
 
 
-class Shape5DMixin:
+class Shape5DMixin(LazyArray):
+    """Backwards-compatible alias for the 5D accessors, now on `LazyArray`.
+
+    The accessors (`_shape5d`, `nt`/`nc`/`nz`/`ny`/`nx`,
+    `source_path`) were folded into `LazyArray` in v4. This subclass is
+    retained so existing `class FooArray(..., Shape5DMixin)` declarations
+    keep working and become `LazyArray` instances; it is removed once every
+    array class inherits `LazyArray` directly.
     """
-    mixin providing always-5D shape accessors.
-
-    array classes that include this mixin must implement `_shape5d()`
-    returning a 5-tuple (T, C, Z, Y, X) with singletons for unused dims.
-
-    provides named size accessors (nt, nc, nz, ny, nx) and a shape5d
-    property so consumers never need to guess dimension positions.
-    """
-
-    def _shape5d(self) -> tuple[int, int, int, int, int]:
-        """return the 5D TCZYX shape. subclasses must implement this."""
-        raise NotImplementedError
-
-    @property
-    def shape5d(self) -> tuple[int, int, int, int, int]:
-        """shape as 5D TCZYX, always length 5."""
-        return self._shape5d()
-
-    @property
-    def nt(self) -> int:
-        """number of timepoints."""
-        return self._shape5d()[0]
-
-    @property
-    def nc(self) -> int:
-        """number of channels."""
-        return self._shape5d()[1]
-
-    @property
-    def nz(self) -> int:
-        """number of z-planes."""
-        return self._shape5d()[2]
-
-    @property
-    def ny(self) -> int:
-        """spatial height."""
-        return self._shape5d()[3]
-
-    @property
-    def nx(self) -> int:
-        """spatial width."""
-        return self._shape5d()[4]
-
-    @property
-    def source_path(self) -> Path | None:
-        """canonical path `imread()` uses to reconstruct this array.
-
-        default implementation derives it from `self.filenames` (list or
-        single path) or falls back to `self.path`. subclasses whose files
-        span per-plane subdirectories (e.g. volumetric Suite2p) must
-        override — a file path like `.../plane01/data.bin` is not
-        equivalent to its parent directory once passed through imread.
-        """
-        filenames = getattr(self, "filenames", None)
-        if filenames is None:
-            # fallback for arrays that use a different attribute name
-            # (NumpyArray → `.path`, IsoView* → `.base_path`).
-            path = getattr(self, "path", None) or getattr(self, "base_path", None)
-            return Path(path) if path else None
-        if isinstance(filenames, (str, Path)):
-            return Path(filenames)
-        paths = [str(p) for p in filenames]
-        if not paths:
-            return None
-        if len(paths) == 1:
-            return Path(paths[0])
-        try:
-            return Path(commonpath(paths))
-        except ValueError:
-            return Path(paths[0]).parent
 
 
 def _normalize_key(key, ndim):
@@ -120,6 +57,41 @@ def _normalize_key(key, ndim):
         n_missing = ndim - (len(key) - 1)
         key = key[:idx] + (slice(None),) * max(n_missing, 0) + key[idx + 1:]
     return key
+
+
+# axes of canonical 5D TCZYX that a natural-rank array of the given ndim
+# does NOT have (front-padded as singletons by _shape5d). used to map a
+# 5D index onto the underlying lower-rank array.
+_SKIP_BY_RAW_NDIM = {
+    5: (),
+    4: (1,),          # C
+    3: (1, 2),        # C, Z
+    2: (0, 1, 2),     # T, C, Z
+    1: (0, 1, 2, 3),  # T, C, Z, Y
+}
+
+
+def _index_5d_into_raw(data, key, raw_ndim):
+    """Index a natural-rank `data` with a 5D TCZYX `key`.
+
+    The array presents singleton T/C/Z axes that `data` lacks; those axes
+    are dropped from the key before indexing, then re-inserted (size 1) on
+    the result for any that were sliced rather than integer-indexed, so the
+    output keeps numpy 5D semantics.
+    """
+    key = _normalize_key(key, 5)
+    key = key + (slice(None),) * (5 - len(key))
+    skip = _SKIP_BY_RAW_NDIM.get(raw_ndim, ())
+    raw_key = tuple(k for i, k in enumerate(key) if i not in skip)
+    out = np.asarray(data[raw_key])
+    out_axis = 0
+    for i in range(5):
+        if isinstance(key[i], (int, np.integer)):
+            continue  # integer index drops this axis
+        if i in skip:
+            out = np.expand_dims(out, axis=out_axis)
+        out_axis += 1
+    return out
 
 
 def supports_roi(obj):
@@ -328,6 +300,14 @@ def _imwrite_base(
     Path
         Output path (file for tiff, directory for other formats).
     """
+    # imported here, not at module top, to avoid a circular import:
+    # _writers -> metadata -> arrays -> _base -> _writers
+    from mbo_utilities._writers import (
+        _write_plane,
+        _write_volumetric_tiff,
+        _write_volumetric_zarr,
+    )
+
     outpath = Path(outpath)
     outpath.mkdir(parents=True, exist_ok=True)
 
@@ -349,8 +329,13 @@ def _imwrite_base(
 
     md = _sanitize_metadata(md)
 
-    num_planes = arr.shape5d[2]
-    num_channels = getattr(arr, "num_color_channels", 1)
+    num_planes = arr._shape5d()[2]
+    # prefer num_color_channels (ScanImage/IsoView), else the always-5D
+    # `.nc` accessor — TiffArray and other readers only expose the latter,
+    # so the old `getattr(..., 1)` silently wrote channel 0 only.
+    num_channels = getattr(arr, "num_color_channels", None)
+    if num_channels is None:
+        num_channels = getattr(arr, "nc", 1)
 
     def _norm_sel(val):
         """normalize a selection kwarg to list[int] or None (=all)."""
@@ -371,7 +356,7 @@ def _imwrite_base(
     if ext_clean in ("tiff", "tif", "zarr", "h5", "hdf5") and frames_list is None:
         _num_frames = kwargs.get("num_frames")
         if _num_frames is not None:
-            total_T = int(arr.shape5d[0])
+            total_T = int(arr._shape5d()[0])
             frames_list = list(range(1, min(int(_num_frames), total_T) + 1))
 
     # tiff: use volumetric writer
@@ -501,8 +486,8 @@ def _imwrite_base(
         )
 
     # other formats: use per-plane streaming writer (bin, npy)
-    # always 5D TCZYX. Use shape5d so natural-rank arrays still report the
-    # correct T/Z sizes (arr.shape[0] is T for 4D, but Y for 2D natural).
+    # use _shape5d() so BinArray (natural rank) and _ChannelView (4D) still
+    # report the correct T/Z/Y/X regardless of their public .shape rank.
     # build 0-based channel indices to iterate. if the user selected
     # specific channels, iterate those; otherwise iterate all channels
     # the array actually has. the old code only wrote channel 0 when
@@ -512,11 +497,12 @@ def _imwrite_base(
     else:
         channels_0idx = list(range(num_channels))
 
-    nframes = arr.shape5d[0]  # T
-    Ly, Lx = arr.shape5d[3], arr.shape5d[4]
+    s5 = arr._shape5d()
+    nframes = s5[0]  # T
+    Ly, Lx = s5[3], s5[4]
 
     # validate num_planes against Z dimension
-    actual_z_size = arr.shape5d[2]
+    actual_z_size = s5[2]
     if num_planes > actual_z_size:
         num_planes = actual_z_size
 
@@ -679,14 +665,16 @@ class TiffReaderMixin:
         return self
 
     def __array__(self, dtype=None, copy=None):
-        """Return a representative frame (prevents accidental full load).
+        """Return a representative (Y, X) frame (prevents accidental full load).
 
-        for 2D data the whole image IS the frame; self[0] would return
-        a single row. for 3D+ we take self[0] as the first slice along
-        the outer dim.
+        v4 arrays are always 5D TCZYX, so the first frame is self[0, 0, 0].
+        for legacy natural-rank shapes: 2D is the whole image; 3D/4D take
+        the first slice along the outer dim.
         """
         ndim = getattr(self, "ndim", None)
-        if ndim == 2:
+        if ndim == 5:
+            data = np.asarray(self[0, 0, 0])
+        elif ndim == 2:
             data = np.asarray(self[:])
         else:
             data = np.asarray(self[0])
