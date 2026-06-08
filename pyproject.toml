@@ -57,7 +57,7 @@ mbo = "mbo_utilities.cli:main"
 pollen = "pollen.pollen_calibration_mbo:main"
 docs = "scripts.build_docs:main"
 
-# v4 pluggable array API: imread() dispatch loads every class in this group.
+# imread() dispatch loads every class in this group.
 # Third-party packages declare the same group to add formats without editing
 # mbo_utilities (see docs/forking.md). Built-ins also self-register on import.
 [project.entry-points."mbo_utilities.lazy_arrays"]
@@ -114,9 +114,9 @@ default-groups = ["dev", "isoview"]
 # Local dev: editable sibling checkouts. Honored by uv lock/sync, so CI (no sibling
 # checkouts) must pass --no-sources to resolve isoview / lbm_suite2p_python from PyPI.
 # uv build also strips them (--no-sources) so published wheels resolve from the registry.
-[tool.uv.sources]
-isoview = { path = "../isoview", editable = true }
-lbm_suite2p_python = { path = "../LBM-Suite2p-Python", editable = true }
+# [tool.uv.sources]
+# isoview = { path = "../isoview", editable = true }
+# lbm_suite2p_python = { path = "../LBM-Suite2p-Python", editable = true }
 
 
 [tool.ruff]
