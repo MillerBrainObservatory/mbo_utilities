@@ -30,9 +30,6 @@ from mbo_utilities.metadata import get_param
 logger = log.get("worker.tasks")
 
 
-from mbo_utilities.arrays._channel_view import _ChannelView
-
-
 def _auto_workers(num_planes: int, *, use_gpu: bool = False) -> int:
     """Pick a worker count from hardware capacity and dataset size.
 
@@ -560,12 +557,6 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         reader_kwargs["channel"] = int(channel) - 1
         logger.info(f"Single-channel extraction: channel {channel} (zero-based: {channel - 1})")
 
-        # register _ChannelView as a recognized lazy array type in lsp's
-        # subprocess workers (they'll re-import on imread).
-        import lbm_suite2p_python.utils as _lsp_utils
-        if "_ChannelView" not in _lsp_utils._LAZY_ARRAY_TYPES:
-            _lsp_utils._LAZY_ARRAY_TYPES = _lsp_utils._LAZY_ARRAY_TYPES + ("_ChannelView",)
-
     # Resolve workers: pass-through user choice, but honour 0/None as
     # "auto" using hardware capacity. lsp also has its own auto path,
     # but ours additionally bounds by available RAM and respects a GPU
@@ -614,6 +605,24 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
                 logger.info(f"force_rastermap: removed {removed} cached model.npy file(s)")
         except Exception as _e:
             logger.warning(f"force_rastermap pre-clean failed: {_e}")
+
+    # cellpose anatomical detection loads the shared cpsam checkpoint. once
+    # the pipeline fans out to parallel plane workers, each would download it
+    # to the same path concurrently and corrupt the file. fetch it once here,
+    # in this single parent process, before fan-out.
+    algo = str(ops.get("algorithm", "")).lower()
+    try:
+        anatomical_on = int(ops.get("anatomical_only", 0) or 0) > 0
+    except (TypeError, ValueError):
+        anatomical_on = False
+    custom_model = ops.get("pretrained_model")
+    uses_default_model = not custom_model or str(custom_model).endswith("cpsam")
+    if (algo == "cellpose" or anatomical_on) and uses_default_model:
+        try:
+            from mbo_utilities._cellpose_model import ensure_cellpose_model
+            ensure_cellpose_model(logger=logger)
+        except Exception as _e:
+            logger.warning(f"cellpose model prefetch failed: {_e}")
 
     try:
         monitor.update(0.1, "Running Suite2p...")

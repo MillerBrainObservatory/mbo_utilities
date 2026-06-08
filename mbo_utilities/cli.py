@@ -1359,6 +1359,31 @@ def init(data_path, output_dir, overwrite):
     click.echo(f"\nOpen with:\n  jupyter lab {dest}")
 
 
+@main.command("download-models")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Re-download even if already present.",
+)
+def download_models(force):
+    r"""
+    Download/repair the cellpose model used by suite2p detection.
+
+    \b
+    Examples:
+      mbo download-models           # download if missing or corrupt
+      mbo download-models --force   # re-download
+    """
+    from mbo_utilities._cellpose_model import ensure_cellpose_model
+
+    path = ensure_cellpose_model(force=force)
+    if path:
+        click.secho(f"cellpose model ready: {path}", fg="green")
+    else:
+        click.secho("cellpose model unavailable (pip install cellpose)", fg="red")
+        raise click.Abort
+
+
 @main.command("shortcut")
 @click.option(
     "--name",

@@ -7,12 +7,18 @@ after their own ``imread`` call.
 
 from __future__ import annotations
 
+from mbo_utilities.lazy_array import LazyArray
 
-class _ChannelView:
+
+class _ChannelView(LazyArray):
     """4D TZYX view of a single channel from 5D TCZYX data.
 
     Wraps a lazy array and presents it as 4D by fixing the channel index.
     Used to feed single-channel data to pipelines that expect TZYX input.
+
+    Subclasses ``LazyArray`` so ``isinstance(obj, LazyArray)`` recognizes it
+    everywhere (including spawned pipeline workers), while overriding
+    ``shape``/``ndim`` to keep the 4D surface.
     """
 
     def __init__(self, arr, channel_0idx: int):
@@ -63,7 +69,7 @@ class _ChannelView:
 
     @property
     def num_channels(self):
-        return self._arr.shape[2]
+        return 1
 
     @property
     def dims(self):

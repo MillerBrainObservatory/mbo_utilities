@@ -62,6 +62,15 @@ class SqueezedView:
         return self._base.dtype
 
     @property
+    def metadata(self):
+        """Metadata of the underlying 5D array (describes the canonical source)."""
+        return getattr(self._base, "metadata", {})
+
+    @metadata.setter
+    def metadata(self, value):
+        self._base.metadata = value
+
+    @property
     def dims(self) -> tuple[str, ...] | None:
         base_dims = getattr(self._base, "dims", None)
         if base_dims:

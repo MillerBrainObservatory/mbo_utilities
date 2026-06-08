@@ -183,6 +183,12 @@ def _imread_impl(
     if isinstance(inputs, np.ndarray):
         logger.debug(f"Wrapping numpy array with shape {inputs.shape} as NumpyArray")
         return NumpyArray(inputs, **_filter_kwargs(NumpyArray, kwargs))
+    # A SqueezedView is a display lens over a canonical 5D array; normalize
+    # back to that base so imread()/pipeline() operate on the real 5D array
+    # (the view drops axes the writer/pipeline rely on).
+    from mbo_utilities.squeeze import SqueezedView
+    if isinstance(inputs, SqueezedView):
+        return inputs.base
     # Pass through already-loaded lazy arrays (has _imwrite method)
     if hasattr(inputs, "_imwrite") and hasattr(inputs, "shape"):
         return inputs

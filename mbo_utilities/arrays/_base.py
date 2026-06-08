@@ -330,7 +330,12 @@ def _imwrite_base(
     md = _sanitize_metadata(md)
 
     num_planes = arr._shape5d()[2]
-    num_channels = getattr(arr, "num_color_channels", 1)
+    # prefer num_color_channels (ScanImage/IsoView), else the always-5D
+    # `.nc` accessor — TiffArray and other readers only expose the latter,
+    # so the old `getattr(..., 1)` silently wrote channel 0 only.
+    num_channels = getattr(arr, "num_color_channels", None)
+    if num_channels is None:
+        num_channels = getattr(arr, "nc", 1)
 
     def _norm_sel(val):
         """normalize a selection kwarg to list[int] or None (=all)."""
