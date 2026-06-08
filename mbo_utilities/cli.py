@@ -553,14 +553,123 @@ def convert(
     result = imwrite(data, output_path, **imwrite_kwargs)
     click.secho(f"\nDone! Output saved to: {result}", fg="green")
 
+def _info_num(v):
+    """Compact number formatting: 30.0 -> '30', 0.5 -> '0.5'. None -> None."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return str(v)
+    if isinstance(v, float):
+        if v != v:  # nan
+            return None
+        return f"{v:g}"
+    return str(v)
+
+
+def _info_md(md, name):
+    """get_param value, or None when the key is truly absent.
+
+    get_param falls back to a parameter's registered default (e.g. dx=1.0),
+    which would mask missing values; a distinct sentinel detects real absence.
+    """
+    from mbo_utilities.metadata import get_param
+
+    sentinel = object()
+    val = get_param(md, name, default=sentinel)
+    return None if val is sentinel else val
+
+
+def _info_dim_sizes(data):
+    """Map of dim label (T/C/Z/Y/X) -> size, from shape + dims labels."""
+    dims = getattr(data, "dims", None)
+    shape = getattr(data, "shape", ()) or ()
+    out = {}
+    if dims and len(dims) == len(shape):
+        for d, s in zip(dims, shape):
+            out[str(d).upper()] = int(s)
+    return out
+
+
+def _info_find_ops_dirs(root, max_depth=2):
+    """Directories at/under root (inclusive) that contain ops.npy."""
+    from pathlib import Path
+
+    skip_suffixes = {".zarr", ".corrected", ".fused", ".registered"}
+    found = []
+    seen = set()
+
+    def _add(p):
+        if p not in seen:
+            seen.add(p)
+            found.append(p)
+
+    try:
+        if (root / "ops.npy").exists():
+            _add(root)
+
+        def _walk(d, depth):
+            if depth > max_depth:
+                return
+            for child in sorted(d.iterdir()):
+                if not child.is_dir() or child.suffix.lower() in skip_suffixes:
+                    continue
+                if (child / "ops.npy").exists():
+                    _add(child)
+                _walk(child, depth + 1)
+
+        _walk(Path(root), 1)
+    except (OSError, PermissionError):
+        pass
+    return found
+
+
+def _info_segmentation_counts(ops_dir):
+    """(n_rois, n_cells) from stat.npy / iscell.npy, or (None, None)."""
+    import numpy as np
+    from mbo_utilities.file_io import load_npy
+
+    stat_path = ops_dir / "stat.npy"
+    if not stat_path.exists():
+        return None, None
+    try:
+        n_rois = len(load_npy(stat_path))
+    except Exception:
+        return None, None
+    n_cells = None
+    iscell_path = ops_dir / "iscell.npy"
+    if iscell_path.exists():
+        try:
+            iscell = np.asarray(load_npy(iscell_path))
+            n_cells = int(iscell[:, 0].astype(bool).sum())
+        except Exception:
+            n_cells = None
+    return n_rois, n_cells
+
+
+def _info_kv(label, value, unit=""):
+    """Print an aligned label/value line; skip when value is None/empty."""
+    if value is None or value == "":
+        return
+    line = f"  {label:<15} {value}"
+    if unit:
+        line += f" {unit}"
+    click.echo(line)
+
+
 @main.command()
 @click.argument("input_path", type=click.Path(exists=True))
 @click.option(
     "--metadata/--no-metadata",
     default=True,
-    help="Show metadata.",
+    help="Show imaging/acquisition metadata sections.",
 )
-def info(input_path, metadata):
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="Also dump the full raw metadata dict.",
+)
+def info(input_path, metadata, show_all):
     r"""
     Show information about an imaging dataset.
 
@@ -569,46 +678,137 @@ def info(input_path, metadata):
       mbo info /data/raw.tiff
       mbo info /data/volume.zarr
       mbo info /data/suite2p/plane0
+      mbo info /data/raw --all
     """
+    from pathlib import Path
     from mbo_utilities import imread
 
     click.echo(f"Loading: {input_path}")
     data = imread(input_path)
+    md = getattr(data, "metadata", None) or {}
+    sizes = _info_dim_sizes(data)
 
-    click.echo("\nArray Information:")
-    click.echo(f"  Type:  {type(data).__name__}")
-    click.echo(f"  Shape: {data.shape}")
-    click.echo(f"  Dtype: {data.dtype}")
-    click.echo(f"  Ndim:  {data.ndim}")
+    dims = getattr(data, "dims", None)
+    shape_str = str(tuple(data.shape))
+    if dims and len(dims) == len(data.shape):
+        shape_str += f"  [{', '.join(dims)}]"
 
-    if hasattr(data, "filenames"):
-        click.echo(f"  Files: {len(data.filenames)}")
-        if len(data.filenames) <= 5:
-            for f in data.filenames:
-                click.echo(f"    - {f}")
+    click.echo("")
+    click.secho(str(input_path), bold=True)
+    _info_kv("Type", type(data).__name__)
+    _info_kv("Shape", shape_str)
+    _info_kv("Dtype", str(data.dtype))
+
+    if metadata:
+        fs = _info_md(md, "fs")
+        dx = _info_md(md, "dx")
+        dy = _info_md(md, "dy")
+        dz = _info_md(md, "dz")
+        ny = sizes.get("Y", data.shape[-2] if data.ndim >= 2 else None)
+        nx = sizes.get("X", data.shape[-1] if data.ndim >= 1 else None)
+
+        click.secho("\nImaging", fg="cyan")
+        _info_kv("Frame rate", _info_num(fs), "Hz")
+        if dx is not None or dy is not None:
+            _info_kv("Pixel size", f"{_info_num(dx)} x {_info_num(dy)}", "um")
+        _info_kv("Z step", _info_num(dz), "um")
+        if ny is not None and nx is not None:
+            _info_kv("Frame size", f"{ny} x {nx}", "px (Y x X)")
+            if dx is not None and dy is not None:
+                _info_kv("FOV", f"{_info_num(dy * ny)} x {_info_num(dx * nx)}", "um")
+
+        timepoints = sizes.get("T") or _info_md(md, "num_timepoints")
+        zplanes = sizes.get("Z") or _info_md(md, "num_zplanes")
+        channels = sizes.get("C") or _info_md(md, "num_color_channels")
+        mrois = _info_md(md, "num_mrois")
+
+        avg = None
+        if isinstance(md.get("si"), dict):
+            try:
+                from mbo_utilities.metadata.scanimage import get_log_average_factor
+                avg = get_log_average_factor(md)
+            except Exception:
+                avg = None
+
+        click.secho("\nAcquisition", fg="cyan")
+        _info_kv("Stack type", _info_md(md, "stack_type"))
+        _info_kv("Timepoints", _info_num(timepoints))
+        _info_kv("Z-planes", _info_num(zplanes))
+        _info_kv("Color channels", _info_num(channels))
+        _info_kv("mROIs", _info_num(mrois))
+        if avg and avg > 1:
+            _info_kv("Averaging", f"{avg}x")
+        if fs and timepoints:
+            _info_kv("Duration", f"{timepoints / fs:.1f}", "s")
+
+    try:
+        vmin = data.vmin
+        vmax = data.vmax
+        if vmin is not None and vmax is not None:
+            _info_kv("Value range", f"[{_info_num(float(vmin))}, {_info_num(float(vmax))}]")
+    except Exception:
+        pass
+
+    filenames = getattr(data, "filenames", None)
+    if filenames:
+        names = [Path(f).name for f in filenames]
+        collide = len(set(names)) < len(names)
+
+        def _file_label(f):
+            p = Path(f)
+            return f"{p.parent.name}/{p.name}" if collide else p.name
+
+        click.secho(f"\nFiles ({len(filenames)})", fg="cyan")
+        shown = filenames if len(filenames) <= 5 else filenames[:3]
+        for f in shown:
+            click.echo(f"  - {_file_label(f)}")
+        if len(filenames) > 5:
+            click.echo(f"  ... and {len(filenames) - 3} more")
+
+    input_obj = Path(input_path)
+    scan_root = input_obj if input_obj.is_dir() else input_obj.parent
+    ops_dirs = _info_find_ops_dirs(scan_root)
+
+    click.secho("\nResults", fg="cyan")
+    if ops_dirs:
+        total_rois = total_cells = seg_planes = 0
+        have_seg = False
+        for d in ops_dirs:
+            n_rois, n_cells = _info_segmentation_counts(d)
+            if n_rois is not None:
+                have_seg = True
+                seg_planes += 1
+                total_rois += n_rois
+                if n_cells is not None:
+                    total_cells += n_cells
+        have_reg = any((d / "data.bin").exists() for d in ops_dirs)
+        have_raw = any((d / "data_raw.bin").exists() for d in ops_dirs)
+
+        _info_kv("Suite2p", f"{len(ops_dirs)} folder(s)")
+        if have_reg:
+            _info_kv("Registration", "data.bin present")
+        elif have_raw:
+            _info_kv("Registration", "data_raw.bin only (not registered)")
+        if have_seg:
+            _info_kv("Segmentation", f"{total_rois} ROIs ({total_cells} cells), {seg_planes} plane(s)")
         else:
-            for f in data.filenames[:3]:
-                click.echo(f"    - {f}")
-            click.echo(f"    ... and {len(data.filenames) - 3} more")
+            _info_kv("Segmentation", "not run (no stat.npy)")
+    else:
+        click.echo("  none found")
 
-    if hasattr(data, "min") and hasattr(data, "max"):
-        try:
-            click.echo(f"  Min:   {data.min:.4f}")
-            click.echo(f"  Max:   {data.max:.4f}")
-        except Exception:
-            pass
-
-    if metadata and hasattr(data, "metadata"):
-        md = data.metadata
-        if md:
-            click.echo("\nMetadata:")
-            important_keys = ["num_timepoints", "nframes", "num_frames", "Ly", "Lx", "fs", "num_rois", "plane"]
-            for key in important_keys:
-                if key in md:
-                    click.echo(f"  {key}: {md[key]}")
-            other_keys = [k for k in md if k not in important_keys]
-            if other_keys:
-                click.echo(f"  ... and {len(other_keys)} more keys")
+    if show_all and md:
+        click.secho("\nAll metadata", fg="cyan")
+        for k in sorted(md, key=str):
+            v = md[k]
+            if isinstance(v, dict):
+                click.echo(f"  {k}: {{...{len(v)} keys}}")
+            elif isinstance(v, (list, tuple)) and len(v) > 8:
+                click.echo(f"  {k}: [{len(v)} items]")
+            else:
+                s = str(v)
+                if len(s) > 80:
+                    s = s[:77] + "..."
+                click.echo(f"  {k}: {s}")
 
 
 @main.command("formats")
