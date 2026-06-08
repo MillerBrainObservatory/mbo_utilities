@@ -6,11 +6,6 @@ orphan: true
 
 A place to render images so that they can be linked/referenced to with inline citations.
 
-```{figure} _images/59ecfde48cd23041425a7f28e6809434e66eb282
-:alt: 59ecfde48cd23041425a7f28e6809434e66eb282
-:name: 59ecfde48cd23041425a7f28e6809434e66eb282
-```
-
 ```{figure} _images/assembly_1.png
 :alt: assembly_1
 :name: assembly_1

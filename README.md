@@ -107,6 +107,8 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 ## Usage
 
+To get started quickly, `mbo init path/to/data` will download the starter notebooks and auto-fill your data path.
+
 The [user-guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) covers usage in a jupyter notebook.
 The [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/cli.html) provides a more in-depth overview of the CLI commands.
 The [GUI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/gui_guide.html) provides a more in-depth overview of the GUI.
@@ -114,12 +116,13 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usa
 
 | Command | Description |
 |---------|-------------|
+| `mbo init` | Create starter notebooks (mbo + LBM-Suite2p user guides) |
 | `mbo /path/to/data.tiff` | View a supported file/folder |
 | `mbo info /path/to/data.tiff` | Show file info and metadata |
 | `mbo convert input.tiff output.zarr` | Convert between formats |
 | `mbo scanphase /path/to/data.tiff` | Run scan-phase analysis |
-| `mbo init` | Create starter notebooks (mbo + LBM-Suite2p user guides) |
 | `mbo formats` | List supported formats |
+| `mbo shortcut` | Create a desktop shortcut for a local installation |
 | `mbo pollen` | Pollen calibration tool (WIP) |
 | `mbo pollen path/to/data` | Pollen calibration - Skip data collection |
 
@@ -128,6 +131,8 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usa
 ### Miller Brain Suite
 
 Launch an interactive GPU-accelerated viewer for exploring large imaging datasets. Supports all MBO file formats with real-time visualization.
+
+Note again, `mbo` is how 
 
 ```bash
 mbo                    # launch GUI

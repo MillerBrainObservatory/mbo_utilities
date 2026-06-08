@@ -271,3 +271,29 @@ div.admonition.tip { border-left-color: #c3e88d !important; }
 div.admonition.tip > .admonition-title { color: #c3e88d !important; }
 div.admonition.seealso { border-left-color: #89ddff !important; }
 div.admonition.seealso > .admonition-title { color: #89ddff !important; }
+
+
+/* forced-dark coverage for headings and sphinx-design components */
+
+/* headings inherit body color; pin them light so they stay visible in dark mode */
+.bd-article h1, .bd-article h2, .bd-article h3,
+.bd-article h4, .bd-article h5, .bd-article h6,
+.bd-article h1 a.headerlink, .bd-article h2 a.headerlink,
+.bd-article h3 a.headerlink, .bd-article h4 a.headerlink,
+.bd-article h5 a.headerlink, .bd-article h6 a.headerlink {
+  color: var(--pst-color-text-base) !important;
+}
+
+/* sphinx-design cards/grids (e.g. the dff "Blog-Post Takeaways" card) default to
+   light-theme colors, which are invisible on the forced-dark page */
+html, html[data-theme="light"], html[data-theme="dark"] {
+  --sd-color-card-background: #1e1e1e !important;
+  --sd-color-card-border: #333 !important;
+  --sd-color-card-text: #e0e0e0 !important;
+  --sd-color-card-header: #2d2d2d !important;
+}
+.sd-card, .sd-card-body, .sd-card-header, .sd-card-footer, .sd-card-title {
+  background-color: var(--pst-color-surface) !important;
+  color: var(--pst-color-text-base) !important;
+  border-color: var(--pst-color-border) !important;
+}

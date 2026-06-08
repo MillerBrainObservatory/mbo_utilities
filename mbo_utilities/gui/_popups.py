@@ -18,7 +18,12 @@ from mbo_utilities.gui._metadata import draw_metadata_inspector
 from mbo_utilities.gui._options_popup import _ensure_gpu_list
 from mbo_utilities.gui.panels.debug_log import draw_scope
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
-from mbo_utilities.preferences import get_gpu_index
+from mbo_utilities.preferences import (
+    get_gpu_index,
+    set_gpu_index,
+    get_compute_gpu,
+    set_compute_gpu,
+)
 
 
 _SYS_TITLE = imgui.ImVec4(0.5, 0.8, 1.0, 1.0)
@@ -65,14 +70,12 @@ def _meter_color(frac: float) -> Any:
 def _draw_meter(label: str, frac: float, pct: str, caption_s: str = "") -> None:
     """A slim usage bar: dim label, then bar + percentage + optional caption.
 
-    The bar fills the available width minus the percentage and caption.
+    The bar is a fixed half of the panel width so every meter (CPU and each
+    GPU) lines up at the same width regardless of caption length.
     """
     imgui.text_colored(_SYS_LABEL, label)
     frac = min(max(frac, 0.0), 1.0)
-    spacing = imgui.get_style().item_spacing.x
-    pct_w = imgui.calc_text_size(pct).x
-    cap_w = imgui.calc_text_size(caption_s).x if caption_s else 0.0
-    bar_w = max(60.0, imgui.get_content_region_avail().x - pct_w - cap_w - spacing * 2)
+    bar_w = max(80.0, imgui.get_content_region_avail().x * 0.5)
     bar_h = imgui.get_text_line_height() * 0.7
     imgui.push_style_color(imgui.Col_.plot_histogram, _meter_color(frac))
     imgui.progress_bar(frac, ImVec2(bar_w, bar_h), "")
@@ -107,13 +110,120 @@ def _draw_gpu_meter(d: dict) -> None:
     _draw_meter(f"GPU {d.get('index', '?')}: {d.get('name', '?')}", frac, pct, caption_s)
 
 
+def _cpu_temp() -> float | None:
+    """Best-effort CPU package temperature in C, or None.
+
+    psutil.sensors_temperatures is Linux/FreeBSD only; on Windows it is
+    absent and this returns None, so the meter simply omits the temp like
+    a GPU that doesn't report one.
+    """
+    try:
+        import psutil
+        fn = getattr(psutil, "sensors_temperatures", None)
+        if fn is None:
+            return None
+        temps = fn() or {}
+        for key in ("coretemp", "k10temp", "cpu_thermal", "acpitz"):
+            entries = temps.get(key)
+            if entries:
+                return float(entries[0].current)
+        for entries in temps.values():
+            if entries:
+                return float(entries[0].current)
+    except Exception:
+        return None
+    return None
+
+
+def _draw_cpu_meter(cpu_pct: float) -> None:
+    """Total CPU as a usage meter, formatted like the GPU meters (RAM
+    used/total and temperature in the caption)."""
+    caption = []
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        used = (vm.total - vm.available) / 1024**3
+        total = vm.total / 1024**3
+        caption.append(f"{used:.1f}/{total:.1f} GB")
+    except Exception:
+        pass
+    temp = _cpu_temp()
+    if temp is not None:
+        caption.append(f"{temp:.0f}C")
+    caption_s = ("  " + " · ".join(caption)) if caption else ""
+    _draw_meter("CPU", cpu_pct / 100.0, f"{cpu_pct:.0f}%", caption_s)
+
+
+def _draw_gpu_selectors(parent: Any, devices: list, show_render: bool) -> None:
+    """Inline GPU pickers for multi-GPU systems.
+
+    Render adapter change applies on next launch (wgpu can't hot-swap).
+    Compute device is applied live via CUDA_VISIBLE_DEVICES so newly
+    started jobs use it, and persisted for future launches.
+    """
+    labels = getattr(parent, "_options_gpu_labels", []) or []
+    multi_render = show_render and len(labels) > 1
+    multi_compute = len(devices) > 1
+    if not (multi_render or multi_compute):
+        return
+
+    imgui.spacing()
+    bar_w = max(80.0, imgui.get_content_region_avail().x * 0.5)
+
+    if multi_render:
+        if not hasattr(parent, "_options_gpu_idx"):
+            parent._options_gpu_idx = get_gpu_index()
+        imgui.text_colored(_SYS_LABEL, "Render GPU")
+        imgui.set_next_item_width(bar_w)
+        ui_idx = parent._options_gpu_idx + 1  # 0 == auto
+        changed, new_ui = imgui.combo("##sys_render_gpu", ui_idx, labels)
+        if changed:
+            parent._options_gpu_idx = new_ui - 1
+            set_gpu_index(parent._options_gpu_idx)
+        imgui.same_line()
+        imgui.text_disabled("next launch")
+
+    if multi_compute:
+        options = ["auto", "cpu"] + [
+            f"{int(d.get('index', i))}: {d.get('name', '?')}"
+            for i, d in enumerate(devices)
+        ]
+        cur = get_compute_gpu().strip().lower()
+        if cur.isdigit():
+            sel = next(
+                (2 + i for i, d in enumerate(devices)
+                 if str(int(d.get("index", i))) == cur),
+                0,
+            )
+        elif cur in ("cpu", "off", "false", "no", "none"):
+            sel = 1
+        else:
+            sel = 0
+        imgui.text_colored(_SYS_LABEL, "Compute GPU")
+        imgui.set_next_item_width(bar_w)
+        changed, new_sel = imgui.combo("##sys_compute_gpu", sel, options)
+        if changed:
+            import os as _os
+            if new_sel == 0:
+                set_compute_gpu("auto")
+            elif new_sel == 1:
+                set_compute_gpu("cpu")
+                _os.environ["CUDA_VISIBLE_DEVICES"] = ""
+            else:
+                dev = str(int(devices[new_sel - 2].get("index", new_sel - 2)))
+                set_compute_gpu(dev)
+                _os.environ["CUDA_VISIBLE_DEVICES"] = dev
+        imgui.same_line()
+        imgui.text_disabled("new jobs")
+
+
 def _draw_system_info_header(parent: Any) -> None:
     """Compact system-capacity header for the Process Console.
 
-    Shows: CPU cores, live available/total RAM, the selected render GPU
-    adapter (from preferences), and one live-usage entry per physical GPU.
-    Live RAM is cheap to probe each frame (~µs syscall); per-GPU usage comes
-    from nvidia-smi and is refreshed on a throttle (~1.5s), not every frame.
+    Shows: CPU cores, a CPU usage meter (with live RAM and temperature),
+    one live-usage meter per physical GPU, and — on multi-GPU systems —
+    render/compute GPU pickers. Per-GPU usage and CPU% come from a ~1.5s
+    throttle (nvidia-smi is a subprocess); RAM is read with the meter.
     """
     if not imgui.collapsing_header("System", imgui.TreeNodeFlags_.default_open):
         return
@@ -140,21 +250,18 @@ def _draw_system_info_header(parent: Any) -> None:
     gpu_devices_live = parent._sys_gpu_devices
     cpu_pct = getattr(parent, "_sys_cpu_pct", None)
 
-    # CPU + RAM via psutil (live RAM each frame).
+    # CPU core counts via psutil (static). Live RAM moves to the CPU meter.
     try:
         import psutil
         cpu_phys = psutil.cpu_count(logical=False)
         cpu_log = psutil.cpu_count(logical=True)
-        vm = psutil.virtual_memory()
         cpu_str = (
             f"{cpu_phys}p / {cpu_log}t"
             if cpu_phys else f"{cpu_log or '?'}"
         )
-        ram_str = f"{vm.available/1024**3:.1f} / {vm.total/1024**3:.1f} GB"
     except ImportError:
         import os as _os
         cpu_str = f"{_os.cpu_count() or '?'}"
-        ram_str = "?"
 
     adapters = getattr(parent, "_options_gpu_adapters", []) or []
 
@@ -208,8 +315,10 @@ def _draw_system_info_header(parent: Any) -> None:
                 imgui.text(v)
 
         _row("CPU cores:", cpu_str)
-        _row("RAM (avail/total):", ram_str)
-        _row("GPU (selected):", selected_str, value_color=_SYS_ACCENT)
+        # render adapter shown as text only when there's nothing to pick;
+        # the multi-GPU picker below replaces it otherwise.
+        if len(gpu_names) <= 1:
+            _row("GPU (selected):", selected_str, value_color=_SYS_ACCENT)
         if not gpu_devices_live:
             _row("GPU (available):", gpus_str)
 
@@ -218,9 +327,11 @@ def _draw_system_info_header(parent: Any) -> None:
     if cpu_pct is not None or gpu_devices_live:
         imgui.spacing()
         if cpu_pct is not None:
-            _draw_meter("CPU usage", cpu_pct / 100.0, f"{cpu_pct:.0f}%")
+            _draw_cpu_meter(cpu_pct)
         for d in gpu_devices_live:
             _draw_gpu_meter(d)
+
+    _draw_gpu_selectors(parent, gpu_devices_live, len(gpu_names) > 1)
 
     imgui.spacing()
     imgui.spacing()
