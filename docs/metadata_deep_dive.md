@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Metadata Handling Deep Dive
 
 This document provides an in-depth breakdown of how metadata, options, and planar/volumetric data are handled in `mbo_utilities`.

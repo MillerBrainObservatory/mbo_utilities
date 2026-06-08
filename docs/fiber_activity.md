@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Fiber Activity Detection
 
 The fiber activity pipeline detects and extracts fluorescence activity from neurite-like structures in timelapse calcium imaging data.

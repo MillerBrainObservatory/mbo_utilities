@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Adding a format (forking the LazyArray API)
 
 `imread()` dispatches to the highest-`PRIORITY` registered `LazyArray`

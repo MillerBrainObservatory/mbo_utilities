@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Zarr I/O & metadata audit
 
 Map of every function involved in zarr reading, writing, chunk/shard layout,
