@@ -28,10 +28,7 @@ uv pip install mbo_utilities
 mbo
 
 # convert data
-mbo convert input.tiff output.zarr
-
-# analyze scan-phase
-mbo scanphase /path/to/data
+mbo convert /data/raw output/ -e .zarr
 ```
 
 ## Resources
