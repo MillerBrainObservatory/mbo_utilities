@@ -339,11 +339,22 @@ class ProcessManager:
             child_env.setdefault("PYTHONUTF8", "1")
 
             if sys.platform == "win32":
-                # DETACHED_PROCESS (0x00000008) | CREATE_NEW_PROCESS_GROUP (0x00000200) | CREATE_NO_WINDOW (0x08000000)
-                creationflags = 0x00000008 | 0x00000200 | 0x08000000
+                # CREATE_NO_WINDOW hides the console; CREATE_NEW_PROCESS_GROUP
+                # detaches it from the GUI's Ctrl-C group so it outlives the
+                # GUI. DETACHED_PROCESS is deliberately NOT combined with
+                # CREATE_NO_WINDOW — they are conflicting console-disposition
+                # flags and together Windows pops a blank console window.
+                creationflags = (
+                    subprocess.CREATE_NO_WINDOW
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
                 proc = subprocess.Popen(
                     cmd,
                     creationflags=creationflags,
+                    startupinfo=startupinfo,
                     stdin=subprocess.DEVNULL,
                     stdout=f_out,
                     stderr=f_out,
