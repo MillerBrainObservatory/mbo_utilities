@@ -898,6 +898,7 @@ def _build_isoview_processing_config(args: dict):
         "crop_width",
         "crop_height",
         "crop_depth",
+        "tile_crops",
     ):
         val = args.get(key)
         if val is not None:
@@ -922,6 +923,18 @@ def _build_isoview_processing_config(args: dict):
         d = config_kwargs.get(key)
         if isinstance(d, dict):
             config_kwargs[key] = {int(k): int(v) for k, v in d.items()}
+
+    # tile_crops: {"SPM##": {crop_param: {camera: value}}} — only the camera
+    # (leaf) keys are int; JSON stringifies them, so coerce back.
+    tc = config_kwargs.get("tile_crops")
+    if isinstance(tc, dict):
+        config_kwargs["tile_crops"] = {
+            str(spm): {
+                str(param): {int(cam): int(v) for cam, v in (cams or {}).items()}
+                for param, cams in (params or {}).items()
+            }
+            for spm, params in tc.items()
+        }
 
     return ProcessingConfig(**config_kwargs)
 

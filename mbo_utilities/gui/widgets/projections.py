@@ -82,6 +82,7 @@ class ProjectionsViewer(Widget):
         # discovery cache (lazy, sourced from arr.projections())
         self._projections: dict | None = None
         self._stack_type: str | None = None
+        self._is_tiled: bool = False
 
         # per-image state
         self._array_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
@@ -140,6 +141,7 @@ class ProjectionsViewer(Widget):
             return False
         self._projections = result
         self._stack_type = str((arr.metadata or {}).get("stack_type", ""))
+        self._is_tiled = bool(getattr(arr, "is_tiled", False))
         # initialize selection to the first plausible entry
         axes = result.get("axes") or []
         views = result.get("views") or []
@@ -280,10 +282,11 @@ class ProjectionsViewer(Widget):
         max_t = max(tps_per_view.values()) if tps_per_view else 0
         axes_str = ", ".join(a.upper() for a in axes)
 
+        unit = "tiles" if self._is_tiled else "timepoints"
         imgui.text_colored(_WHITE, f"{len(files)} files")
         imgui.text_colored(_WHITE, f"axes: {axes_str}")
         imgui.text_colored(_WHITE, f"views: {', '.join(views)}")
-        imgui.text_colored(_WHITE, f"timepoints: {max_t}")
+        imgui.text_colored(_WHITE, f"{unit}: {max_t}")
 
     def _draw_popup_selectors(self) -> None:
         """Axis / View / Timepoint selectors inside the popup viewer."""
@@ -328,12 +331,14 @@ class ProjectionsViewer(Widget):
 
         imgui.set_next_item_width(220)
         cur_pos = tps.index(self._timepoint)
+        if self._is_tiled:
+            slider_label = "Tile##projections"
+            value_fmt = f"%d / {len(tps) - 1}  (SPM{tps[0]:02d}-{tps[-1]:02d})"
+        else:
+            slider_label = "T##projections"
+            value_fmt = f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})"
         changed, new_pos = imgui.slider_int(
-            "T##projections",
-            cur_pos,
-            0,
-            len(tps) - 1,
-            f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})",
+            slider_label, cur_pos, 0, len(tps) - 1, value_fmt,
         )
         if changed:
             self._timepoint = tps[int(new_pos)]

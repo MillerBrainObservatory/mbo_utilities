@@ -985,6 +985,12 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
         imgui.spacing()
+        if bool(getattr(arr, "is_tiled", False)):
+            # Tiled: crops are per-(tile, camera). The flat numeric editor
+            # below can't express that, so route editing to the crop window.
+            imgui.text_disabled("Per-tile crops — edit in the crop window.")
+            imgui.text_colored(_SUBSECTION_COLOR, crop_state.summary(arr))
+            return
         crops = crop_state.get_crops(arr)
         for camera in cameras:
             existing = crops.get(camera) or {}

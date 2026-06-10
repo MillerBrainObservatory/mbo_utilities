@@ -889,26 +889,38 @@ def _scan_flat_projections(proj_dir: Path) -> dict | None:
     """Scan a flat ``*.{raw,corrected}.projections/`` directory.
 
     Files look like ``SPM##_TM##_CM##.{xy,xz,yz}Projection.tif`` with no
-    nested TM folders. Returns the standard
-    ``{"axes", "views", "files"}`` dict or ``None`` when empty.
+    nested TM folders. Tiled acquisitions (single TM, multiple SPM) key
+    each slot by its SPM so every spatial tile gets its own slot,
+    mirroring :func:`_scan_raw`; timelapse keys by TM. Returns the
+    standard ``{"axes", "views", "files"}`` dict or ``None`` when empty.
     """
-    axes: set[str] = set()
-    views: set[str] = set()
-    files: dict[tuple[str, str, int], Path] = {}
     if not proj_dir.is_dir():
         return None
+    parsed: list[tuple[int, int, int, str, Path]] = []
+    spm_set: set[int] = set()
+    tm_set: set[int] = set()
     for f in proj_dir.iterdir():
         if not f.is_file():
             continue
         m = _PROJ_FLAT_RE.match(f.name)
         if not m:
             continue
-        _, tm, cm, axis = m.groups()
-        axis = axis.lower()
-        view = f"CM{int(cm):02d}"
+        spm, tm, cm, axis = m.groups()
+        spm, tm, cm = int(spm), int(tm), int(cm)
+        spm_set.add(spm)
+        tm_set.add(tm)
+        parsed.append((spm, tm, cm, axis.lower(), f))
+    if not parsed:
+        return None
+    use_spm = len(tm_set) == 1 and len(spm_set) > 1
+    axes: set[str] = set()
+    views: set[str] = set()
+    files: dict[tuple[str, str, int], Path] = {}
+    for spm, tm, cm, axis, f in parsed:
+        view = f"CM{cm:02d}"
         axes.add(axis)
         views.add(view)
-        files[(axis, view, int(tm))] = f
+        files[(axis, view, spm if use_spm else tm)] = f
     return _finalize_projections(axes, views, files)
 
 
@@ -1849,10 +1861,16 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         out_shape = (len(t_indices), len(c_indices), z_size, y_size, x_size)
         result = np.empty(out_shape, dtype=self._dtype)
 
-        # narrow zarr reads only pay off when one (t, view) is hit per call;
-        # bulk reads (zstats striding T at fixed Z) benefit from the cached
-        # full volume so the same (t, view) isn't re-decompressed at every Z.
+        # _read_slab reads only the requested slab and never fills the
+        # whole-volume cache. route single (t, view) reads through it, and
+        # any single-plane read (z is an int) regardless of how many
+        # timepoints are asked for. zstats strides T at a fixed Z; without
+        # the single-plane carve-out each sampled timepoint would cache a
+        # full Z*Y*X volume that is never released. genuine multi-plane
+        # bulk reads still cache the full volume so the same (t, view) is
+        # not re-decompressed at every Z.
         single_tv = len(t_indices) == 1 and len(c_indices) == 1
+        single_plane = isinstance(z_key, (int, np.integer))
 
         for ti, t_idx in enumerate(t_indices):
             for ci, c_idx in enumerate(c_indices):
@@ -1862,7 +1880,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
                     result[ti, ci] = 0
                     continue
 
-                if single_tv:
+                if single_tv or single_plane:
                     slab = self._read_slab(path, t_idx, c_idx, z_key, y_key, x_key)
                 else:
                     vol = self._read_volume(path, t_idx, c_idx)
