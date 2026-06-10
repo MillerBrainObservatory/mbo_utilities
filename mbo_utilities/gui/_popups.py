@@ -368,7 +368,13 @@ def draw_tools_popups(parent: Any):
             data_arr = parent.image_widget.data[0]
             # Check if data has metadata (numpy arrays don't)
             if hasattr(data_arr, "metadata"):
-                metadata = data_arr.metadata
+                # user-set values from the metadata editor (e.g. isoview fs)
+                # live on parent._custom_metadata and don't persist into the
+                # array's computed metadata — merge them so the viewer reflects
+                # what the user entered.
+                metadata = dict(data_arr.metadata or {})
+                custom = getattr(parent, "_custom_metadata", None) or {}
+                metadata.update({k: v for k, v in custom.items() if v is not None})
                 draw_metadata_inspector(metadata, data_array=data_arr)
             else:
                 imgui.text("No metadata available")

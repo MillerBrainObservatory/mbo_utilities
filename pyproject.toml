@@ -49,7 +49,9 @@ dependencies = [
 	"napari-animation",
 	"numba>=0.60.0",
 	"suite2p>=1.0.0.1",
+	"torch",
 	"lbm_suite2p_python>=3.0.8",
+	"isoview",
 ]
 
 [project.scripts]
@@ -111,13 +113,19 @@ all = ["mbo_utilities[rastermap,isoview]"]
 [tool.uv]
 default-groups = ["dev", "isoview"]
 
-# Local dev: editable sibling checkouts. Honored by uv lock/sync, so CI (no sibling
-# checkouts) must pass --no-sources to resolve isoview / lbm_suite2p_python from PyPI.
-# uv build also strips them (--no-sources) so published wheels resolve from the registry.
-# [tool.uv.sources]
-# isoview = { path = "../isoview", editable = true }
-# lbm_suite2p_python = { path = "../LBM-Suite2p-Python", editable = true }
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
+[tool.uv.sources]
+isoview = { path = "../isoview" }
+torch = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
 [tool.ruff]
 line-length = 88

@@ -142,10 +142,44 @@ class ProcessInfo:
             return False
 
     def kill(self) -> bool:
-        """Attempt to kill the process."""
+        """Kill the process and its descendants (task-spawned pool / plane
+        workers, multiprocessing Manager).
+
+        Terminate gracefully first, then force-kill survivors. Children are
+        signalled before the parent so they are not reparented mid-kill.
+        Falls back to taskkill /T / SIGKILL if psutil is unavailable.
+        """
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
+
+        if psutil is not None:
+            try:
+                parent = psutil.Process(self.pid)
+            except psutil.NoSuchProcess:
+                return True  # already gone
+            try:
+                procs = parent.children(recursive=True)
+            except psutil.NoSuchProcess:
+                procs = []
+            procs.append(parent)
+            for p in procs:
+                try:
+                    p.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            _, alive = psutil.wait_procs(procs, timeout=5)
+            for p in alive:
+                try:
+                    p.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            return True
+
         try:
             if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/PID", str(self.pid)], check=True, capture_output=True)
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.pid)], check=True, capture_output=True)
             else:
                 os.kill(self.pid, 9)  # SIGKILL
             return True

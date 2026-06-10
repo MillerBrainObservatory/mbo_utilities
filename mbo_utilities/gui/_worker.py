@@ -23,6 +23,10 @@ from mbo_utilities.gui.tasks import TASKS
 # max minutes with no progress change before worker self-terminates
 MAX_STALL_MINUTES = 120
 
+# Windows Job Object handle, kept alive for the worker's lifetime so the
+# job is not closed (and its members killed) prematurely. See _contain_in_job.
+_JOB_HANDLE = None
+
 
 def setup_logging(log_file: str | None = None) -> logging.Logger:
     """Setup logging for worker process.
@@ -188,6 +192,91 @@ def _start_watchdog(uuid: str | None, logger: logging.Logger, log_file: str | No
     t.start()
 
 
+def _contain_in_job():
+    """Windows: assign this worker to a Job Object that terminates all
+    members when the job handle closes.
+
+    Processes a task spawns (ProcessPoolExecutor / multiprocessing Manager /
+    suite2p plane workers) inherit the job, so they are reaped when the worker
+    exits for any reason — clean exit, crash, taskkill, or the watchdog's
+    os._exit. The job is created and held by the worker (not the gui), so it
+    does not affect the worker's own survival of gui closure.
+
+    Returns the job handle (caller must keep it alive) or None when
+    unavailable: non-Windows, or the process is already in a job that forbids
+    nesting (pre-Windows 8). Best-effort — never raises.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        class _BASIC(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+                ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _IO(ctypes.Structure):
+            _fields_ = [
+                (n, ctypes.c_ulonglong)
+                for n in (
+                    "ReadOperationCount", "WriteOperationCount",
+                    "OtherOperationCount", "ReadTransferCount",
+                    "WriteTransferCount", "OtherTransferCount",
+                )
+            ]
+
+        class _EXT(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BASIC),
+                ("IoInfo", _IO),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+        ]
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+
+        JobObjectExtendedLimitInformation = 9
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _EXT()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(
+            job, JobObjectExtendedLimitInformation,
+            ctypes.byref(info), ctypes.sizeof(info),
+        ):
+            k32.CloseHandle(job)
+            return None
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            k32.CloseHandle(job)
+            return None
+        return job
+    except Exception:
+        return None
+
+
 def main():
     """Main entry point for worker subprocess."""
     # force line buffering so print() output appears in logs immediately,
@@ -241,6 +330,13 @@ def main():
     logger = setup_logging(log_file)
 
     logger.info(f"Worker started: task={task_type}, pid={os.getpid()}")
+
+    # contain task-spawned children (pools, Manager, plane workers) so they
+    # are reaped when this worker exits for any reason, including os._exit.
+    global _JOB_HANDLE
+    _JOB_HANDLE = _contain_in_job()
+    if sys.platform == "win32":
+        logger.debug(f"job containment: {'on' if _JOB_HANDLE else 'unavailable'}")
 
     # watchdog kills this process if it stalls for too long
     _start_watchdog(uuid, logger, log_file)

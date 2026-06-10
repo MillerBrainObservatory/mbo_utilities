@@ -1411,9 +1411,10 @@ wheels = [
 [[package]]
 name = "isoview"
 version = "0.1.8"
-source = { registry = "https://pypi.org/simple" }
+source = { directory = "../isoview" }
 dependencies = [
     { name = "cellpose" },
+    { name = "click" },
     { name = "dask", extra = ["array"] },
     { name = "fsspec" },
     { name = "glfw" },
@@ -1436,10 +1437,39 @@ dependencies = [
     { name = "xmltodict" },
     { name = "zarr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/1a/24056bea15e169bc4ee1a2723b948dd6cb24f071b2639efaa4499863ace2/isoview-0.1.8.tar.gz", hash = "sha256:228ef97ad3783f62468df31c1a7a8cf468d18bf7465e6a9543fe84dcee584a12", size = 2740438, upload-time = "2026-06-04T20:04:17.743Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/b6/d49a7444f6fa148180362ca7baa936c5067f2895370f6cc36b24431b7487/isoview-0.1.8-py3-none-any.whl", hash = "sha256:4ca516dfb6543249aa2635957faa51262de17f7e9ab745ae9a2f8597c994eaae", size = 97344, upload-time = "2026-06-04T20:04:16.628Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "cellpose", specifier = ">=3.0.0" },
+    { name = "click", specifier = ">=8.0" },
+    { name = "dask", extras = ["array"], specifier = ">=2024.1.0" },
+    { name = "fsspec", specifier = ">=2023.12.0" },
+    { name = "glfw", specifier = ">=2.8.0" },
+    { name = "h5py", specifier = ">=3.10.0" },
+    { name = "imageio", specifier = ">=2.31.0" },
+    { name = "ipywidgets", specifier = ">=8.1.0" },
+    { name = "jupyterlab", marker = "extra == 'notebook'" },
+    { name = "matplotlib", specifier = ">=3.7.0" },
+    { name = "mbo-fastplotlib", extras = ["notebook", "imgui"] },
+    { name = "mbo-utilities", extras = ["rastermap"], specifier = ">=3.0.7" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
+    { name = "numpy", specifier = ">=1.26.0,<3.0" },
+    { name = "ome-zarr", specifier = ">=0.9.0" },
+    { name = "opencv-python", specifier = ">=4.8.0" },
+    { name = "pyklb", specifier = ">=0.3.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.280" },
+    { name = "scikit-image", specifier = ">=0.22.0" },
+    { name = "scikit-learn", specifier = ">=1.3.0" },
+    { name = "scipy", specifier = ">=1.11.0" },
+    { name = "tifffile", specifier = ">=2023.7.0" },
+    { name = "tqdm", specifier = ">=4.66.0" },
+    { name = "trackpy", specifier = ">=0.7" },
+    { name = "xmltodict", specifier = ">=0.13.0" },
+    { name = "zarr", specifier = ">=3.0.0" },
 ]
+provides-extras = ["notebook", "dev"]
 
 [[package]]
 name = "jedi"
@@ -2048,6 +2078,7 @@ dependencies = [
     { name = "imgui-bundle" },
     { name = "ipykernel" },
     { name = "ipywidgets" },
+    { name = "isoview" },
     { name = "jupyter-rfb" },
     { name = "jupyterlab" },
     { name = "lbm-suite2p-python" },
@@ -2136,7 +2167,8 @@ requires-dist = [
     { name = "ipykernel" },
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipywidgets", specifier = ">=8.0.0,<9" },
-    { name = "isoview", marker = "extra == 'isoview'" },
+    { name = "isoview", directory = "../isoview" },
+    { name = "isoview", marker = "extra == 'isoview'", directory = "../isoview" },
     { name = "jupyter-rfb", specifier = ">=0.5.1" },
     { name = "jupyterlab", specifier = ">=4.2.6" },
     { name = "jupytext", marker = "extra == 'docs'" },
@@ -2195,7 +2227,7 @@ dev = [
     { name = "pygetwindow", specifier = ">=0.0.9" },
     { name = "pytest", specifier = ">=8.4.2" },
 ]
-isoview = [{ name = "isoview" }]
+isoview = [{ name = "isoview", directory = "../isoview" }]
 
 [[package]]
 name = "mdit-py-plugins"

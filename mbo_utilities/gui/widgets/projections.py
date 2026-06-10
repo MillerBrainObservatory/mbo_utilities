@@ -55,6 +55,16 @@ def _timepoints_for(group: dict, axis: str, view: str) -> list[int]:
     )
 
 
+def _timepoints_for_axis(group: dict, axis: str) -> list[int]:
+    """Union of tiles/timepoints across all views for ``axis``.
+
+    Used for the slider so a tile acquired on only some cameras (e.g. a
+    dropped CM0/CM1) still appears; the image area shows "no projection
+    for current selection" when the active view lacks that tile.
+    """
+    return sorted({t for (a, v, t) in group["files"] if a == axis})
+
+
 class ProjectionsViewer(Widget):
     """Browse XY/XZ/YZ projections produced for the loaded isoview stack."""
 
@@ -147,8 +157,8 @@ class ProjectionsViewer(Widget):
         views = result.get("views") or []
         self._axis = axes[0] if axes else None
         self._view = views[0] if views else None
-        if self._axis and self._view:
-            tps = _timepoints_for(result, self._axis, self._view)
+        if self._axis:
+            tps = _timepoints_for_axis(result, self._axis)
             self._timepoint = tps[0] if tps else None
         return True
 
@@ -318,11 +328,14 @@ class ProjectionsViewer(Widget):
             self._view = views[new_idx]
             self._on_selection_changed()
 
-        tps = _timepoints_for(g, self._axis, self._view)
+        # Union across views so a tile present on only some cameras is
+        # still reachable; the image area reports when the active view
+        # lacks the selected tile.
+        tps = _timepoints_for_axis(g, self._axis)
         if not tps:
             imgui.text_colored(
                 STATUS_ERROR_COLOR,
-                f"no {self._axis} for {self._view}",
+                f"no {self._axis} projections",
             )
             return
         if self._timepoint not in tps:

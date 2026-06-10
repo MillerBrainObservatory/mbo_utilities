@@ -850,7 +850,8 @@ _CORRECTED_RE = re.compile(
     r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _FUSED_RE = re.compile(
-    r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
+    # CM##_CM## is a fused camera pair; a lone CM## is a single-camera view.
+    r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_CM(\d+))?_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
     r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _RAW_STACK_RE = re.compile(
@@ -859,11 +860,11 @@ _RAW_STACK_RE = re.compile(
 _KLB_TM_RE = re.compile(r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)\.klb$")
 
 _PROJ_FLAT_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)(?:_CHN\d+)?\.(xy|xz|yz)Projection\.tif$",
+    r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_CHN\d+)?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_FUSED_RE = re.compile(
-    r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
+    r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_CM(\d+))?_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_VW_ONLY_RE = re.compile(
@@ -906,7 +907,8 @@ def _scan_flat_projections(proj_dir: Path) -> dict | None:
         if not m:
             continue
         spm, tm, cm, axis = m.groups()
-        spm, tm, cm = int(spm), int(tm), int(cm)
+        spm, cm = int(spm), int(cm)
+        tm = int(tm) if tm is not None else 0
         spm_set.add(spm)
         tm_set.add(tm)
         parsed.append((spm, tm, cm, axis.lower(), f))
@@ -1124,7 +1126,8 @@ def _scan_fused(method_dir: Path):
             # tile gets its own timepoint; timelapse keys by the TM dir.
             slot = tm_from_dir if tm_from_dir is not None else int(m.group(1))
             chn = int(m.group(6)) if m.group(6) is not None else -1
-            key = (int(m.group(3)), int(m.group(4)), int(m.group(5)), chn)
+            cam1 = int(m.group(4)) if m.group(4) is not None else -1
+            key = (int(m.group(3)), cam1, int(m.group(5)), chn)
             by_tm.setdefault(slot, {})[key] = f
             views.add(key)
 
@@ -1818,14 +1821,10 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             meta.setdefault("dz", float(meta["axial_step"]))
         elif "y_step" in meta:
             meta.setdefault("dz", float(meta["y_step"]))
-        # fs is the T-axis rate. For volumetric lightsheet, that's the
-        # volume rate (vps = fps / zplanes), not the per-plane camera
-        # rate (fps = 1000/exposure_time_ms). Fall back to fps only when
-        # zplanes is unknown / vps wasn't derived.
-        if "vps" in meta:
-            meta.setdefault("fs", float(meta["vps"]))
-        elif "fps" in meta:
-            meta.setdefault("fs", float(meta["fps"]))
+        # fs (the T-axis rate) is not reliably encoded in the acquisition
+        # XML, so it is left unset for the user to enter via the metadata
+        # editor. vps/fps stay available for reference but no longer seed
+        # fs automatically.
         if self._camera_metadata:
             # The GUI metadata viewer renders a dedicated "Cameras" panel
             # from metadata["cameras"]. Surface per-camera fields there;

@@ -109,7 +109,8 @@ def _build_projection_index(
 
     Keyed by the camera (CM##) directly — no view collapsing — so each
     of the cameras gets its own preview. The timepoint slider walks the
-    intersection of the per-camera timepoint sets.
+    union of the per-camera timepoint sets, so a tile present on only some
+    cameras still appears.
     """
     if not projections:
         return {}
@@ -135,16 +136,18 @@ def _build_projection_index(
 
 
 def _common_timepoints(index: dict[int, dict[int, Path]]) -> list[int]:
-    """Sorted list of timepoints present for every view."""
+    """Every tile/timepoint present in ANY camera (union).
+
+    Union, not intersection: a tile acquired on only some cameras (e.g. a
+    dropped CM0/CM1) must still appear so the user can crop the cameras
+    that exist. Panels for cameras lacking that tile render blank.
+    """
     if not index:
         return []
-    sets = [set(d.keys()) for d in index.values()]
-    if not sets:
-        return []
-    common = sets[0]
-    for s in sets[1:]:
-        common &= s
-    return sorted(common)
+    tps: set[int] = set()
+    for d in index.values():
+        tps |= set(d.keys())
+    return sorted(tps)
 
 
 def _ensure_window_state(parent: Any) -> None:

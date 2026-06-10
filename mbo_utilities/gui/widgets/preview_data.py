@@ -1163,6 +1163,17 @@ class PreviewDataWidget(EdgeWindow):
         gap_ms = (t0 - prev) * 1000.0 if prev is not None else 0.0
         self._last_frame_t = t0
 
+        # Surface the Projections widget once the background raw-projection
+        # worker has written its output (widget list is otherwise only built
+        # on load). Cheap: gated to one refresh per raw dir.
+        try:
+            from mbo_utilities.gui.widgets.pipelines.isoview import (
+                maybe_refresh_raw_projections,
+            )
+            maybe_refresh_raw_projections(self)
+        except Exception:
+            self.logger.debug("raw projection refresh skipped", exc_info=True)
+
         draw_menu_bar(self)
         t1 = time.perf_counter()
         self._viewer.draw()

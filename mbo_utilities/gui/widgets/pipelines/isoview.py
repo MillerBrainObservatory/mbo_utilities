@@ -67,32 +67,6 @@ def _default_workers() -> int:
     return max(1, min(4, cpu // 2))
 
 
-def _auto_detect_spark_jar() -> str:
-    """Find a bigstitcher-spark fat JAR built locally, else return empty."""
-    home = Path.home()
-    candidates = list((home / "repos" / "BigStitcher-Spark" / "target").glob(
-        "BigStitcher-Spark-*-SNAPSHOT.jar"
-    ))
-    # prefer non-sources, non-tests jars
-    real = [
-        p for p in candidates
-        if "sources" not in p.name and "tests" not in p.name
-    ]
-    return str(real[0]) if real else ""
-
-
-def _auto_detect_spark_jdk() -> str:
-    """Find a portable JDK 11 in the conventional side-dir, else empty."""
-    home = Path.home()
-    candidates = sorted(
-        (home / "repos" / "bigstitcher-spark-build").glob("jdk-11*")
-    )
-    for p in candidates:
-        if (p / "bin" / "java.exe").is_file() or (p / "bin" / "java").is_file():
-            return str(p)
-    return ""
-
-
 def _input_w() -> float:
     """Default width for numeric inputs in the popup."""
     return hello_imgui.em_size(8)
@@ -155,18 +129,6 @@ _RUN_LABELS = {
     _MODE_CORRECT: "Run correct_stack",
     _MODE_FUSE: "Run multi_fuse",
     _MODE_STITCHER: "Export XML",
-}
-
-# VW00 orientation profiles for the BigStitcher export. A Profile seeds the
-# editable rotations + flips in the Orientation box; the resulting ops are
-# forwarded to generate_bigstitcher_xml(orientation=...). "default" (normal
-# cameras) and "rotated" are empirically verified; both assume the R_X(-90)
-# pose the pipeline bakes onto VW90 (the -90 X cancels it). "none" = no
-# transform. Rotations are (sign, axis, magnitude-degrees); flips are axes.
-_STITCHER_ORIENT_PROFILES: dict[str, dict] = {
-    "none": {"rotations": [], "flips": []},
-    "default": {"rotations": [("-", "X", 90), ("-", "Z", 90)], "flips": []},
-    "rotated": {"rotations": [("-", "X", 90)], "flips": []},
 }
 
 # Forced output-dir prefix per pipeline step. The Output-options field is the
@@ -271,6 +233,41 @@ def maybe_spawn_raw_projections(parent: Any) -> None:
             parent.logger.info(f"raw projections worker spawned PID {pid}")
 
 
+def maybe_refresh_raw_projections(parent: Any) -> None:
+    """Rebuild the preview widget list once a background raw-projections
+    worker finishes, so the Projections widget appears without reloading.
+
+    The widget list is built only on dataset load; a worker that writes
+    projections afterwards leaves :class:`ProjectionsViewer` excluded
+    until something refreshes. Runs once per raw dir.
+    """
+    spawned = getattr(parent, "_iso_raw_proj_spawned", None)
+    if not spawned:
+        return
+    refreshed = getattr(parent, "_iso_raw_proj_refreshed", None)
+    if refreshed is None:
+        refreshed = parent._iso_raw_proj_refreshed = set()
+    pending = spawned - refreshed
+    if not pending:
+        return
+
+    from mbo_utilities.gui.widgets.process_manager import get_process_manager
+    pm = get_process_manager()
+    procs = pm.get_all()
+    for raw_dir in list(pending):
+        alive = any(
+            p.task_type == "isoview_raw_projections"
+            and (p.args or {}).get("raw_dir") == raw_dir
+            and p.is_alive()
+            for p in procs
+        )
+        if alive:
+            continue
+        refreshed.add(raw_dir)
+        if hasattr(parent, "_refresh_widgets"):
+            parent._refresh_widgets()
+
+
 def _available_modes(arr: Any) -> list[str]:
     """Modes the widget can offer for ``arr``.
 
@@ -348,86 +345,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         # the suffix + a filename preview.
         self._stitcher_output_path: str = ""
         self._stitcher_suffix: str = ""
-        # Opt-in feature-based coarse alignment (3D blob detection +
-        # pairwise-difference histogram). When False, only the
-        # calibration affines are emitted; the user runs BigStitcher's
-        # interest-point registration after opening the XML. Off by
-        # default: with orientation "none" the views are still orthogonal,
-        # so the blob clouds don't correspond and the histogram peak is a
-        # near-arbitrary offset that flings VW00 far from VW90.
-        self._stitcher_coarse_align: bool = False
 
         # Lay out tiles using acquisition stage positions (stage_x/y/z from
         # each SPM's XML) as a per-tile Translation. Off by default — tiles
         # land at the world origin and you'd run BigStitcher's "Move Tiles
         # To Regular Grid" / registration instead.
         self._stitcher_bake_tile_positions: bool = False
-
-        # VW00 reorientation for the BigStitcher export (applied to VW00
-        # only; VW90 keeps its pipeline pose). An editable op list: a
-        # Profile (None/Normal/Rotated) seeds these, then they can be
-        # tweaked for one-offs. Rotations are {"sign","axis","deg"} dicts
-        # applied in row order (innermost first); flips (axis letters)
-        # applied after.
-        self._stitcher_rotations: list[dict] = []
-        self._stitcher_flips: list[str] = []
-
-        # bigstitcher-spark registration step (opt-in via separate "Run
-        # registration" button — mutates the exported dataset.xml).
-        # ``spark_root`` is either the executables directory produced
-        # by bigstitcher-spark's install script, or a fat JAR file.
-        # ``java_home`` overrides the system Java (Spark 3.3.x requires
-        # Java 8-17; >=21 fails at runtime). Defaults auto-detect the
-        # built JAR + JDK 11 in ~/repos/ if present.
-        self._stitcher_spark_root: str = _auto_detect_spark_jar()
-        self._stitcher_spark_java_home: str = _auto_detect_spark_jdk()
-        # Defaults mirror the Fiji BigStitcher bead workflow that drives
-        # the orthogonal-IsoView coarse→fine registration: DoG σ=1.8 /
-        # t=0.008, PRECISE_TRANSLATION descriptor match with AFFINE+RIGID
-        # regularization (λ=0.10), then ICP refinement, with the solver
-        # using the TWO_ROUND_ITERATIVE 5.0×/7.0px "RELAXED" preset.
-        # For cellular fluorescence (calcium imaging, spheroids), bump
-        # σ to 3-4 and threshold to ~0.0005-0.001 via the popup.
-        self._stitcher_spark_label: str = "beads"
-        self._stitcher_spark_sigma: float = 1.8
-        self._stitcher_spark_threshold: float = 0.008
-        self._stitcher_spark_min_intensity: float = 0.0
-        self._stitcher_spark_max_intensity: float = 65535.0
-        self._stitcher_spark_downsample_xy: int = 1
-        self._stitcher_spark_downsample_z: int = 1
-        self._stitcher_spark_max_spots: int = 5000
-        self._stitcher_spark_dog_type: str = "MAX"
-        self._stitcher_spark_localization: str = "QUADRATIC"
-
-        self._stitcher_spark_match_algorithm: str = "PRECISE_TRANSLATION"
-        self._stitcher_spark_transformation_model: str = "AFFINE"
-        self._stitcher_spark_regularization_model: str = "RIGID"
-        self._stitcher_spark_lambda: float = 0.10
-        self._stitcher_spark_view_scope: str = "ALL_AGAINST_ALL"
-        self._stitcher_spark_ip_scope: str = "OVERLAPPING_ONLY"
-        self._stitcher_spark_num_neighbors: int = 3
-        self._stitcher_spark_redundancy: int = 1
-        self._stitcher_spark_significance: float = 3.0
-        self._stitcher_spark_limit_search_radius: bool = False
-        self._stitcher_spark_search_radius: float = 100.0
-        self._stitcher_spark_coarse_ransac_max_error: float = 5.0
-        self._stitcher_spark_coarse_ransac_min_inliers: int = 12
-
-        # ICP refinement (second pass).
-        self._stitcher_spark_do_icp_refine: bool = True
-        self._stitcher_spark_icp_iterations: int = 100
-        self._stitcher_spark_icp_max_error: float = 5.0
-        self._stitcher_spark_icp_use_ransac: bool = True
-        self._stitcher_spark_icp_ransac_max_error: float = 3.0
-        self._stitcher_spark_icp_ransac_min_inliers: int = 12
-        self._stitcher_spark_icp_ransac_iterations: int = 200
-
-        # Global solver (run after each match round).
-        self._stitcher_spark_solver_method: str = "TWO_ROUND_ITERATIVE"
-        self._stitcher_spark_solver_relative_threshold: float = 5.0
-        self._stitcher_spark_solver_absolute_threshold: float = 7.0
-
-        self._stitcher_spark_dialog: Any = None
 
         # Per-step output suffix shared by correct/fuse/stitcher dirs.
         # Empty string yields the canonical names (.corrected, .fused,
@@ -506,9 +429,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         """
         return {
             "blending_method": "geometric",
-            "blending_range": 20,
+            "blending_range": 4,
             "transition_plane": -1,  # -1 = None (center) in the UI
-            "front_flag": 2,
+            "front_flag": 1,
             "flip_z": False,
             "flip_horizontal": True,
             "flip_vertical": False,
@@ -855,7 +778,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._draw_popup_columns([
             ("I/O options", self._draw_consolidate_io_box),
             ("Codec", self._draw_consolidate_codec_box),
-            ("Microscope (override XML)",
+            ("Acquisition (override XML)",
              self._draw_microscope_overrides_box, True),
         ])
 
@@ -863,12 +786,11 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._draw_popup_columns([
             ("I/O options", self._draw_correct_io_box),
             ("Segmentation", self._draw_correct_segmentation_box),
-            ("Pixel correction", self._draw_correct_advanced_box),
+            ("Dead pixel correction", self._draw_correct_advanced_box),
         ])
         imgui.spacing()
         self._draw_popup_columns([
-            ("Shared", self._draw_correct_shared_box),
-            ("Microscope (override XML)",
+            ("Acquisition (override XML)",
              self._draw_microscope_overrides_box, True),
         ])
 
@@ -881,9 +803,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         ])
         imgui.spacing()
         self._draw_popup_columns([
-            ("Crop bounds", self._draw_fuse_crop_box),
             ("Registration search", self._draw_fuse_search_box, True),
-            ("Microscope (override XML)",
+            ("Acquisition (override XML)",
              self._draw_microscope_overrides_box, True),
         ])
 
@@ -891,9 +812,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         """Per-view editor switcher.
 
         Only the boxes tagged "editing VW##" follow this combo — Fusion,
-        View transforms, and Registration search. Crop bounds edits all
-        views in one stacked panel; I/O options and Microscope overrides
-        are dataset-wide.
+        View transforms, and Registration search. I/O options and
+        Microscope overrides are dataset-wide.
         """
         if not self._fuse_view_ids:
             return
@@ -915,8 +835,7 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "transforms, and registration-search params.\n"
                 "Follows this combo:  Fusion · View transforms · "
                 "Registration search.\n"
-                "Crop bounds is per-view too but shows all views at "
-                "once. I/O options + Microscope are dataset-wide.\n"
+                "I/O options + Microscope are dataset-wide.\n"
                 "The active view's blending method names the fused "
                 "output sub-folder."
             )
@@ -945,289 +864,16 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.text_colored(color, text)
         imgui.spacing()
 
-    def _draw_fuse_crop_box(self) -> None:
-        """Crop-bounds editor inside the Fuse Parameters popup.
-
-        Edit closes this popup and hands off to the floating crop window
-        (preview + drags); when that window closes the popup is
-        reopened. Manual numeric entries below the buttons write
-        straight into ``_isoview_crop_state`` so they're picked up by
-        the floating window the next time Edit is pressed.
-        """
-        self._draw_view_scope_badge("all_views")
-        from mbo_utilities.gui import _isoview_crop_state as crop_state
-        from mbo_utilities.gui.widgets import isoview_crop as crop_window
-
-        arr = self._get_array()
-        shape = getattr(arr, "shape", None) if arr is not None else None
-        if not shape or len(shape) != 5:
-            imgui.text_disabled("(no compatible dataset)")
-            return
-        _, _, nz, ny, nx = shape
-
-        cameras = crop_window.cameras_for_crop(arr)
-        if not cameras:
-            cameras = [0, 1, 2, 3]
-
-        with tooltip_marks_right():
-            if imgui.button("Edit...##fuse_crop_edit", imgui.ImVec2(_BTN_W, 0)):
-                self._show_settings_popup = False
-                imgui.close_current_popup()
-                self._reopen_settings_after_crop = True
-                crop_window.open_window(self.parent)
-            imgui.same_line()
-            if imgui.button("Clear##fuse_crop_clear", imgui.ImVec2(_BTN_W, 0)):
-                crop_state.clear(arr)
-            set_tooltip(
-                "Edit opens the side-by-side crop window. Manual values "
-                "below are reactive — typing them then clicking Edit "
-                "pre-loads them into the preview."
-            )
-
-        imgui.spacing()
-        if bool(getattr(arr, "is_tiled", False)):
-            # Tiled: crops are per-(tile, camera). The flat numeric editor
-            # below can't express that, so route editing to the crop window.
-            imgui.text_disabled("Per-tile crops — edit in the crop window.")
-            imgui.text_colored(_SUBSECTION_COLOR, crop_state.summary(arr))
-            return
-        crops = crop_state.get_crops(arr)
-        for camera in cameras:
-            existing = crops.get(camera) or {}
-            bounds = {
-                "Z": existing.get("z", (0, nz)),
-                "Y": existing.get("y", (0, ny)),
-                "X": existing.get("x", (0, nx)),
-            }
-            limits = {"Z": (0, nz), "Y": (0, ny), "X": (0, nx)}
-            imgui.text_colored(_SUBSECTION_COLOR, f"CM{camera:02d}")
-            imgui.indent(12)
-            changed = False
-            new_bounds: dict[str, tuple[int, int]] = {}
-            for axis in ("Z", "Y", "X"):
-                lo, hi = bounds[axis]
-                vmin, vmax = limits[axis]
-                new_lo, new_hi = self._draw_axis_inputs(
-                    camera, axis, lo, hi, vmin, vmax,
-                )
-                new_bounds[axis] = (new_lo, new_hi)
-                if (new_lo, new_hi) != (lo, hi):
-                    changed = True
-            imgui.unindent(12)
-            if changed:
-                crop_state.set_camera_bounds(
-                    arr, camera,
-                    z=new_bounds["Z"], y=new_bounds["Y"], x=new_bounds["X"],
-                    shape=(nz, ny, nx),
-                )
-            imgui.spacing()
-
-    def _draw_axis_inputs(
-        self, view: int, axis: str, lo: int, hi: int, vmin: int, vmax: int,
-    ) -> tuple[int, int]:
-        """One row: ``{axis}: [lo] [hi]  /max``. Clamps lo<hi inline."""
-        imgui.text(f"{axis}:")
-        imgui.same_line()
-        imgui.set_next_item_width(72)
-        _, lo_new = imgui.input_int(
-            f"##fuse_crop_vw{view}_{axis}_lo", int(lo), 0, 0,
-        )
-        imgui.same_line()
-        imgui.set_next_item_width(72)
-        _, hi_new = imgui.input_int(
-            f"##fuse_crop_vw{view}_{axis}_hi", int(hi), 0, 0,
-        )
-        imgui.same_line()
-        imgui.text_disabled(f"/ {vmax}")
-        lo_new = max(int(vmin), min(int(lo_new), int(vmax) - 1))
-        hi_new = max(lo_new + 1, min(int(hi_new), int(vmax)))
-        return int(lo_new), int(hi_new)
-
     def _draw_stitcher_popup_rows(self) -> None:
-        """BigStitcher Parameters popup, laid out in Suite2p-style boxes.
-
-        Row 1 (open): Orientation · View transforms · Microscope. Row 2-3
-        (collapsing, advanced): detection / runtime / matching / solver.
-        """
+        """BigStitcher Parameters popup, laid out in Suite2p-style boxes."""
         self._draw_popup_columns([
-            ("Orientation", self._draw_stitcher_orientation_box),
             ("View transforms", self._draw_stitcher_transforms_box),
-            ("Microscope (override XML)",
+            ("Acquisition (override XML)",
              self._draw_microscope_overrides_box, True),
         ])
-        imgui.spacing()
-        self._draw_popup_columns([
-            ("Interest point detection",
-             self._draw_stitcher_spark_detect_box, True),
-            ("Spark runtime", self._draw_stitcher_spark_runtime_box, True),
-            ("Coarse match (descriptor)",
-             self._draw_stitcher_spark_match_box, True),
-        ])
-        imgui.spacing()
-        self._draw_popup_columns([
-            ("Fine match (ICP)", self._draw_stitcher_spark_icp_box, True),
-            ("Global solver", self._draw_stitcher_spark_solver_box, True),
-        ])
-
-    def _orient_toggle(self, label: str, active: bool, width: float = 0.0) -> bool:
-        """Highlighted selection button; returns True when clicked."""
-        if active:
-            imgui.push_style_color(
-                imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
-            imgui.push_style_color(
-                imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
-            imgui.push_style_color(
-                imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
-        clicked = imgui.button(label, imgui.ImVec2(width, 0))
-        if active:
-            imgui.pop_style_color(3)
-        return clicked
-
-    def _load_orient_profile(self, name: str) -> None:
-        """Seed the editable rotations + flips from a profile."""
-        prof = _STITCHER_ORIENT_PROFILES.get(name, {"rotations": [], "flips": []})
-        self._stitcher_rotations = [
-            {"sign": s, "axis": a, "deg": int(d)} for (s, a, d) in prof["rotations"]
-        ]
-        self._stitcher_flips = list(prof["flips"])
-
-    def _orient_profile_match(self) -> "str | None":
-        """Name of the profile matching the current edits, or None."""
-        cur_rot = [
-            (r["sign"], r["axis"], int(r["deg"])) for r in self._stitcher_rotations
-        ]
-        cur_flip = list(self._stitcher_flips)
-        for name, prof in _STITCHER_ORIENT_PROFILES.items():
-            if cur_rot == [tuple(x) for x in prof["rotations"]] and (
-                cur_flip == list(prof["flips"])
-            ):
-                return name
-        return None
-
-    def _compose_orientation_ops(self) -> list:
-        """VW00 orientation op list for generate_bigstitcher_xml.
-
-        Rotations (row order, innermost first) then flips. Rotation ->
-        ["rot", axis, signed degrees]; flip -> ["flip", axis].
-        """
-        ops: list = []
-        for rot in self._stitcher_rotations:
-            deg = int(rot["deg"])
-            if rot["sign"] == "-":
-                deg = -deg
-            ops.append(["rot", rot["axis"], deg])
-        for axis in self._stitcher_flips:
-            ops.append(["flip", axis])
-        return ops
-
-    def _draw_stitcher_orientation_box(self) -> None:
-        """VW00 reorientation for the export (applied to VW00 only).
-
-        A Profile seeds the editable rotations + flips below; tweak them
-        for one-offs. None = no transform. VW90 keeps its pipeline pose.
-        """
-        _hint("Applied to VW00")
-        imgui.spacing()
-
-        # Profile: load a preset into the editable controls below.
-        match = self._orient_profile_match()
-        imgui.align_text_to_frame_padding()
-        imgui.text("Profile")
-        imgui.same_line(hello_imgui.em_size(7))
-        for k, (name, label) in enumerate(
-            (("none", "None"), ("default", "Normal"), ("rotated", "Rotated"))
-        ):
-            if k > 0:
-                imgui.same_line()
-            if self._orient_toggle(f"{label}##orient_profile_{name}", match == name):
-                self._load_orient_profile(name)
-        imgui.spacing()
-
-        # Rotations — editable list seeded by the profile.
-        imgui.text("Rotations")
-        axes = ["X", "Y", "Z"]
-        degs = ["90", "180", "270"]
-        remove_idx = -1
-        for i, rot in enumerate(self._stitcher_rotations):
-            imgui.push_id(i)
-            if imgui.button(
-                f"{rot['sign']}##sign", imgui.ImVec2(hello_imgui.em_size(2.2), 0)
-            ):
-                rot["sign"] = "-" if rot["sign"] == "+" else "+"
-            imgui.same_line()
-            imgui.set_next_item_width(hello_imgui.em_size(3.6))
-            ai = axes.index(rot["axis"]) if rot["axis"] in axes else 0
-            changed, ai = imgui.combo("##axis", ai, axes)
-            if changed:
-                rot["axis"] = axes[ai]
-            imgui.same_line()
-            imgui.set_next_item_width(hello_imgui.em_size(5.0))
-            cur_deg = str(int(rot["deg"]))
-            di = degs.index(cur_deg) if cur_deg in degs else 0
-            changed, di = imgui.combo("##deg", di, degs)
-            if changed:
-                rot["deg"] = int(degs[di])
-            imgui.same_line()
-            imgui.text("deg")
-            imgui.same_line()
-            if imgui.small_button("x##rm"):
-                remove_idx = i
-            imgui.pop_id()
-        if remove_idx >= 0:
-            del self._stitcher_rotations[remove_idx]
-        if imgui.small_button("+ add##orient_add_rot"):
-            self._stitcher_rotations.append({"sign": "-", "axis": "X", "deg": 90})
-        imgui.same_line()
-        if imgui.small_button("clear##orient_clear_rot"):
-            self._stitcher_rotations = []
-        imgui.spacing()
-
-        # Flip — Horizontal/Vertical/Depth toggle = flip X/Y/Z.
-        imgui.align_text_to_frame_padding()
-        imgui.text("Flip")
-        imgui.same_line(hello_imgui.em_size(7))
-        for k, (label, axis) in enumerate(
-            (("Horizontal (X)", "X"), ("Vertical (Y)", "Y"), ("Depth (Z)", "Z"))
-        ):
-            if k > 0:
-                imgui.same_line()
-            if self._orient_toggle(
-                f"{label}##orient_flip_{axis}", axis in self._stitcher_flips
-            ):
-                if axis in self._stitcher_flips:
-                    self._stitcher_flips.remove(axis)
-                else:
-                    self._stitcher_flips.append(axis)
-        imgui.spacing()
-
-        # Live summary of the composed VW00 transform.
-        ops = self._compose_orientation_ops()
-        if ops:
-            parts = []
-            for op in ops:
-                if op[0] == "rot":
-                    parts.append(f"{op[2]:+d} {op[1]}")
-                else:
-                    parts.append(f"flip {op[1]}")
-            imgui.text_disabled("VW00: " + ", ".join(parts))
-        else:
-            imgui.text_disabled("VW00: no transform")
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
-            _, self._stitcher_coarse_align = imgui.checkbox(
-                "Coarse align (blob features)", self._stitcher_coarse_align,
-            )
-            set_tooltip(
-                "Opt-in. Runs a feature-based coarse registration "
-                "(3D blob detection in both views, pairwise-difference "
-                "histogram in shared world space) and bakes the "
-                "resulting translation into VW00's calibration as a "
-                "second ViewTransform. Off by default — when off, "
-                "only the per-view calibration affines are written "
-                "and you'd run BigStitcher's interest-point "
-                "registration manually to align the views."
-            )
             _, self._stitcher_bake_tile_positions = imgui.checkbox(
                 "Bake tile stage positions",
                 self._stitcher_bake_tile_positions,
@@ -1238,475 +884,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "land at the origin."
             )
 
-    def _draw_stitcher_spark_runtime_box(self) -> None:
-        """Spark JAR / JDK paths — set once per machine, rarely re-tuned."""
-        with tooltip_marks_right():
-            _text_disabled_wrapped("Spark JAR or executables dir:")
-            # Reserve room for the folder-browse button so the input
-            # field doesn't push the icon off the right edge of the
-            # column. Inner_spacing + button width on the right.
-            style = imgui.get_style()
-            btn_w = imgui.calc_text_size(fa.ICON_FA_FOLDER_OPEN).x \
-                + 2 * style.frame_padding.x
-            avail_x = imgui.get_content_region_avail().x
-            imgui.set_next_item_width(
-                max(40.0, avail_x - style.item_inner_spacing.x - btn_w)
-            )
-            _, self._stitcher_spark_root = imgui.input_text(
-                "##spark_root", self._stitcher_spark_root or "",
-            )
-            imgui.same_line(0, style.item_inner_spacing.x)
-            if imgui.button(fa.ICON_FA_FOLDER_OPEN + "##spark_root_browse"):
-                default = self._stitcher_spark_root or str(Path.home())
-                try:
-                    self._stitcher_spark_dialog = pfd.select_folder(
-                        "Select bigstitcher-spark executables dir", default,
-                    )
-                except Exception:
-                    self._stitcher_spark_dialog = None
-            set_tooltip(
-                "Path to bigstitcher-spark — either the directory "
-                "produced by its ./install script (containing "
-                "detect-interestpoints, match-interestpoints, solver "
-                "scripts) or a fat JAR (mvn -P fatjar)."
-            )
-
-            _text_disabled_wrapped(
-                "Java home (JDK 8-17 — Spark 3.3 incompat with 21+):"
-            )
-            imgui.set_next_item_width(-1)
-            _, self._stitcher_spark_java_home = imgui.input_text(
-                "##spark_java_home", self._stitcher_spark_java_home or "",
-            )
-            set_tooltip(
-                "Path to a JDK 8-17 install (Spark 3.3.x requires it; "
-                "Java >=21 fails at runtime). Leave blank to use the "
-                "system default `java` on PATH."
-            )
-
-    def _draw_stitcher_spark_detect_box(self) -> None:
-        """Difference-of-Gaussian detection parameters. The two knobs
-        users actually retune between runs are ``sigma`` (feature size
-        in voxels at the downsampled scale) and ``threshold`` (peak
-        cutoff after normalization). Defaults are bead-tuned — for
-        calcium-imaging / cellular data sigma ~3-4 and threshold
-        ~0.0005-0.001 usually find enough features.
-        """
-        with tooltip_marks_right():
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_label = imgui.input_text(
-                "Label", self._stitcher_spark_label or "beads",
-            )
-            set_tooltip(
-                "Interest-point label written into the XML (`-l`). "
-                "Distinct labels let multiple detection runs coexist "
-                "in the same dataset."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_sigma = imgui.input_float(
-                "DoG sigma", self._stitcher_spark_sigma, 0.1, 1.0, "%.2f",
-            )
-            set_tooltip(
-                "Difference-of-Gaussian sigma (`-s`), in voxels at "
-                "the downsampled scale. Match your typical feature "
-                "diameter / ~2.355 (Gaussian FWHM relation). 1.8 for "
-                "beads, 3-4 for cell bodies, larger for blobs."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_threshold = imgui.input_float(
-                "DoG threshold", self._stitcher_spark_threshold,
-                0.0005, 0.005, "%.4f",
-            )
-            set_tooltip(
-                "DoG response threshold (`-t`) after intensity "
-                "normalization. Lower = more (and weaker) detections. "
-                "0.008 = bead default, 0.001-0.002 for cellular data. "
-                "Aim for 100-500 points/view in the worker log."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_min_intensity = imgui.input_float(
-                "Min intensity", self._stitcher_spark_min_intensity,
-                0.0, 100.0, "%.1f",
-            )
-            set_tooltip(
-                "Block normalization minimum (`--minIntensity`). "
-                "Mandatory — Spark blocks can't auto-detect this. "
-                "Use 0 unless you have a hot background."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_max_intensity = imgui.input_float(
-                "Max intensity", self._stitcher_spark_max_intensity,
-                0.0, 1000.0, "%.1f",
-            )
-            set_tooltip(
-                "Block normalization maximum (`--maxIntensity`). "
-                "65535 for uint16, 255 for uint8. The DoG threshold "
-                "applies to the [0, 1]-normalized signal."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_downsample_xy = imgui.input_int(
-                "Downsample XY", self._stitcher_spark_downsample_xy, 1, 1,
-            )
-            set_tooltip(
-                "`-dsxy`. Detection is performed on this downsampled "
-                "resolution; results are then re-projected. 2 is "
-                "usually fine and 4x faster than 1."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_downsample_z = imgui.input_int(
-                "Downsample Z", self._stitcher_spark_downsample_z, 1, 1,
-            )
-            set_tooltip(
-                "`-dsz`. Z downsampling. Usually 1 for already-"
-                "anisotropic light-sheet data."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_max_spots = imgui.input_int(
-                "Limit detection", self._stitcher_spark_max_spots, 100, 1000,
-            )
-            set_tooltip(
-                "`--maxSpots`. Cap per-view detections to the N "
-                "brightest. 5000 matches the Fiji bead workflow; 0 "
-                "removes the limit."
-            )
-
-            types = ["MAX", "MIN", "BOTH"]
-            try:
-                idx = types.index(self._stitcher_spark_dog_type)
-            except ValueError:
-                idx = 0
-            imgui.set_next_item_width(_input_w())
-            changed, new_idx = imgui.combo("Peak type", idx, types)
-            if changed:
-                self._stitcher_spark_dog_type = types[new_idx]
-            set_tooltip(
-                "`--type`. MAX = bright peaks (beads, cells), MIN = "
-                "dark spots, BOTH = both."
-            )
-
-            locs = ["QUADRATIC", "NONE"]
-            try:
-                idx = locs.index(self._stitcher_spark_localization)
-            except ValueError:
-                idx = 0
-            imgui.set_next_item_width(_input_w())
-            changed, new_idx = imgui.combo("Localization", idx, locs)
-            if changed:
-                self._stitcher_spark_localization = locs[new_idx]
-            set_tooltip(
-                "`--localization`. Subpixel refinement of peak "
-                "centers. Use QUADRATIC unless detections look noisy."
-            )
-
-    def _draw_stitcher_spark_match_box(self) -> None:
-        """Pairwise matching algorithm + solver model. These change
-        much less often than detection params — set once per dataset
-        type, leave alone.
-
-        Labels live above each combo (not to the right) so the long
-        enum previews like ``PRECISE_TRANSLATION`` aren't clipped by
-        a narrow column.
-        """
-        with tooltip_marks_right():
-            algos = [
-                "PRECISE_TRANSLATION", "FAST_TRANSLATION",
-                "FAST_ROTATION", "ICP",
-            ]
-            try:
-                idx = algos.index(self._stitcher_spark_match_algorithm)
-            except ValueError:
-                idx = 0
-            _text_disabled_wrapped("Match algorithm")
-            imgui.set_next_item_width(-1)
-            changed, new_idx = imgui.combo(
-                "##spark_match_algo", idx, algos,
-            )
-            if changed:
-                self._stitcher_spark_match_algorithm = algos[new_idx]
-            set_tooltip(
-                "`-m`. PRECISE_TRANSLATION = high-accuracy descriptor "
-                "matcher, needs >=12 points/view. FAST_TRANSLATION = "
-                "geometric hashing, tolerates very different content. "
-                "FAST_ROTATION = handles small rotations between "
-                "views. ICP = refinement after coarse alignment."
-            )
-
-            tms = ["AFFINE", "RIGID", "TRANSLATION"]
-            try:
-                idx = tms.index(self._stitcher_spark_transformation_model)
-            except ValueError:
-                idx = 0
-            _text_disabled_wrapped("Transformation")
-            imgui.set_next_item_width(-1)
-            changed, new_idx = imgui.combo(
-                "##spark_match_tm", idx, tms,
-            )
-            if changed:
-                self._stitcher_spark_transformation_model = tms[new_idx]
-            set_tooltip(
-                "`-tm`. Solver's per-view transformation model. "
-                "AFFINE allows shear/anisotropic scaling; RIGID is "
-                "rotation+translation only; TRANSLATION is pure shift."
-            )
-
-            rms = ["RIGID", "AFFINE", "TRANSLATION", "IDENTITY", "NONE"]
-            try:
-                idx = rms.index(self._stitcher_spark_regularization_model)
-            except ValueError:
-                idx = 0
-            _text_disabled_wrapped("Regularize with")
-            imgui.set_next_item_width(-1)
-            changed, new_idx = imgui.combo(
-                "##spark_match_rm", idx, rms,
-            )
-            if changed:
-                self._stitcher_spark_regularization_model = rms[new_idx]
-            set_tooltip(
-                "`-rm`. Regularization model. Blends the main "
-                "transformation toward a simpler one (lambda=0.1 by "
-                "default). RIGID keeps the affine close to a rigid "
-                "transform — good for two-view orthogonal stitching."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_lambda = imgui.input_float(
-                "Lambda", self._stitcher_spark_lambda, 0.01, 0.1, "%.2f",
-            )
-            set_tooltip(
-                "`--lambda`. Regularization strength. 0.10 = Fiji "
-                "default; higher pulls the affine closer to the "
-                "regularization model (Rigid)."
-            )
-
-            view_scopes = ["ALL_AGAINST_ALL", "OVERLAPPING_ONLY"]
-            try:
-                idx = view_scopes.index(self._stitcher_spark_view_scope)
-            except ValueError:
-                idx = 0
-            _text_disabled_wrapped("Compare views")
-            imgui.set_next_item_width(-1)
-            changed, new_idx = imgui.combo(
-                "##spark_view_scope", idx, view_scopes,
-            )
-            if changed:
-                self._stitcher_spark_view_scope = view_scopes[new_idx]
-            set_tooltip(
-                "`-vr`. ALL_AGAINST_ALL = every pair tested (Fiji's "
-                "default for orthogonal IsoView). OVERLAPPING_ONLY = "
-                "only pairs whose current bounds overlap."
-            )
-
-            ip_scopes = ["OVERLAPPING_ONLY", "ALL"]
-            try:
-                idx = ip_scopes.index(self._stitcher_spark_ip_scope)
-            except ValueError:
-                idx = 0
-            _text_disabled_wrapped("Compare IPs")
-            imgui.set_next_item_width(-1)
-            changed, new_idx = imgui.combo(
-                "##spark_ip_scope", idx, ip_scopes,
-            )
-            if changed:
-                self._stitcher_spark_ip_scope = ip_scopes[new_idx]
-            set_tooltip(
-                "`-ipfr`. Which IPs to test per pair. Fiji's \"all "
-                "interest points of overlapping views\" maps to "
-                "OVERLAPPING_ONLY."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_num_neighbors = imgui.input_int(
-                "Neighbors", self._stitcher_spark_num_neighbors, 1, 1,
-            )
-            set_tooltip(
-                "`-n`. Descriptor neighborhood size (PRECISE_TRANSLATION "
-                "only). 3 = Fiji default."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_redundancy = imgui.input_int(
-                "Redundancy", self._stitcher_spark_redundancy, 1, 1,
-            )
-            set_tooltip(
-                "`-r`. Descriptor redundancy. 1 = Fiji default."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_significance = imgui.input_float(
-                "Significance", self._stitcher_spark_significance,
-                0.1, 1.0, "%.2f",
-            )
-            set_tooltip(
-                "`-s`. How much better the best descriptor match must "
-                "be vs the second best. 3.0 = Fiji default."
-            )
-
-            _, self._stitcher_spark_limit_search_radius = imgui.checkbox(
-                "Limit search radius",
-                self._stitcher_spark_limit_search_radius,
-            )
-            set_tooltip(
-                "`-sr`. When off, descriptor search is unbounded. "
-                "Turn on for densely-packed beads to suppress far "
-                "false matches."
-            )
-            if self._stitcher_spark_limit_search_radius:
-                imgui.set_next_item_width(_input_w())
-                _, self._stitcher_spark_search_radius = imgui.input_float(
-                    "Search radius (px)",
-                    self._stitcher_spark_search_radius, 10.0, 50.0, "%.1f",
-                )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_coarse_ransac_max_error = imgui.input_float(
-                "RANSAC max error (px)",
-                self._stitcher_spark_coarse_ransac_max_error,
-                1.0, 5.0, "%.1f",
-            )
-            set_tooltip(
-                "`-rme`. RANSAC residual cutoff for the coarse "
-                "descriptor pass. 5 px = Fiji default; bump to 20 if "
-                "the first round produces too few correspondences."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_coarse_ransac_min_inliers = imgui.input_int(
-                "RANSAC min inliers",
-                self._stitcher_spark_coarse_ransac_min_inliers, 1, 4,
-            )
-            set_tooltip(
-                "`-rmni`. Minimum inlier count for a successful pair. "
-                "12 matches Fiji's affine min × inlier factor 3."
-            )
-
-    def _draw_stitcher_spark_icp_box(self) -> None:
-        """ICP refinement (the fine half of the coarse → fine workflow)."""
-        with tooltip_marks_right():
-            _, self._stitcher_spark_do_icp_refine = imgui.checkbox(
-                "Run ICP refinement",
-                self._stitcher_spark_do_icp_refine,
-            )
-            set_tooltip(
-                "Off = stop after the coarse descriptor pass + solve. "
-                "On = follow with `-m ICP` + a second solve. Fiji's "
-                "default beads workflow uses both."
-            )
-            if not self._stitcher_spark_do_icp_refine:
-                return
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_icp_iterations = imgui.input_int(
-                "ICP iterations",
-                self._stitcher_spark_icp_iterations, 10, 50,
-            )
-            set_tooltip(
-                "`-iit`. Max ICP iterations per pair. 100 = Fiji "
-                "default; spark CLI default is 200."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_icp_max_error = imgui.input_float(
-                "ICP max correspondence dist (px)",
-                self._stitcher_spark_icp_max_error,
-                1.0, 5.0, "%.1f",
-            )
-            set_tooltip(
-                "`-ime`. Maximum distance (in px) for ICP closest-"
-                "point pairing. 5.0 = Fiji default."
-            )
-
-            _, self._stitcher_spark_icp_use_ransac = imgui.checkbox(
-                "RANSAC every ICP iteration",
-                self._stitcher_spark_icp_use_ransac,
-            )
-            set_tooltip(
-                "`--icpUseRANSAC`. Re-filter correspondences with "
-                "RANSAC at every iteration. Fiji workflow: on."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_icp_ransac_max_error = imgui.input_float(
-                "ICP RANSAC max error (px)",
-                self._stitcher_spark_icp_ransac_max_error,
-                0.5, 2.0, "%.1f",
-            )
-            set_tooltip(
-                "`-rme` during ICP. 3.0 = Fiji default; spark CLI "
-                "default is 2.5."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_icp_ransac_min_inliers = imgui.input_int(
-                "ICP RANSAC min inliers",
-                self._stitcher_spark_icp_ransac_min_inliers, 1, 4,
-            )
-            set_tooltip(
-                "`-rmni` during ICP. 12 = Fiji workflow."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_icp_ransac_iterations = imgui.input_int(
-                "ICP RANSAC iterations",
-                self._stitcher_spark_icp_ransac_iterations, 50, 100,
-            )
-            set_tooltip(
-                "`-rit` during ICP. 200 = Fiji default."
-            )
-
-    def _draw_stitcher_spark_solver_box(self) -> None:
-        """Global optimization solver — runs once after each match round."""
-        with tooltip_marks_right():
-            methods = [
-                "TWO_ROUND_ITERATIVE", "TWO_ROUND_SIMPLE",
-                "ONE_ROUND_ITERATIVE", "ONE_ROUND_SIMPLE",
-            ]
-            try:
-                idx = methods.index(self._stitcher_spark_solver_method)
-            except ValueError:
-                idx = 0
-            _text_disabled_wrapped("Strategy")
-            imgui.set_next_item_width(-1)
-            changed, new_idx = imgui.combo(
-                "##spark_solver_method", idx, methods,
-            )
-            if changed:
-                self._stitcher_spark_solver_method = methods[new_idx]
-            set_tooltip(
-                "`--method`. TWO_ROUND_ITERATIVE = Fiji's \"Two-Round: "
-                "Handle unconnected tiles, remove wrong links RELAXED\" "
-                "preset; TWO_ROUND_SIMPLE = same without iterative "
-                "wrong-link removal; ONE_ROUND_* skip the second round."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_solver_relative_threshold = imgui.input_float(
-                "Relative threshold (×)",
-                self._stitcher_spark_solver_relative_threshold,
-                0.5, 1.0, "%.1f",
-            )
-            set_tooltip(
-                "`--relativeThreshold`. Drops a link when its error "
-                "exceeds this many × the average. 5.0× = Fiji RELAXED."
-            )
-
-            imgui.set_next_item_width(_input_w())
-            _, self._stitcher_spark_solver_absolute_threshold = imgui.input_float(
-                "Absolute threshold (px)",
-                self._stitcher_spark_solver_absolute_threshold,
-                0.5, 1.0, "%.1f",
-            )
-            set_tooltip(
-                "`--absoluteThreshold`. Drops a link with error above "
-                "this many px. 7.0 px = Fiji RELAXED."
-            )
-
     def _draw_consolidate_io_box(self) -> None:
         """Consolidate I/O options for the Parameters popup."""
         with tooltip_marks_right():
@@ -1714,7 +891,8 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Pyramid", self._consolidate_pyramid,
             )
             set_tooltip(
-                "Generate the OME-NGFF resolution pyramid (recommended)."
+                "Build the OME-NGFF pyramid for fast zoomed-out viewing. "
+                "Adds write time + disk."
             )
 
             if self._consolidate_pyramid:
@@ -1741,13 +919,19 @@ class IsoviewPipelineWidget(PipelineWidget):
             changed, new_idx = imgui.combo("Compressor", idx, compressors)
             if changed:
                 self._consolidate_compressor = compressors[new_idx]
-            set_tooltip("Inner-chunk compression codec.")
+            set_tooltip(
+                "Inner-chunk codec. zstd = best size/speed; "
+                "none = fastest, biggest."
+            )
 
             imgui.set_next_item_width(_input_w())
             _, self._consolidate_compression_level = imgui.input_int(
                 "Level", self._consolidate_compression_level, 1, 1,
             )
-            set_tooltip("Compression level (0–9).")
+            set_tooltip(
+                "0–9. Higher = smaller files, slower writes; "
+                "gains taper past ~5."
+            )
 
     def _draw_correct_io_box(self) -> None:
         """Correct-mode I/O options for the Parameters popup. The
@@ -1765,7 +949,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             if changed:
                 self._output_format = formats[new_idx]
             set_tooltip(
-                "Volume container format written per (timepoint, camera)."
+                "Container per (timepoint, camera). zarr = chunked + "
+                "pyramids; tif/klb for legacy tools."
             )
 
             if self._output_format == "zarr":
@@ -1778,13 +963,19 @@ class IsoviewPipelineWidget(PipelineWidget):
                 c_changed, c_new = imgui.combo("Compressor", cidx, compressors)
                 if c_changed:
                     self._compression = compressors[c_new]
-                set_tooltip("Codec applied inside the volume containers.")
+                set_tooltip(
+                "Inner-chunk codec. zstd = best size/speed; "
+                "none = fastest writes, biggest files."
+            )
 
                 imgui.set_next_item_width(_input_w())
                 _, self._compression_level = imgui.input_int(
                     "Level", self._compression_level, 1, 1,
                 )
-                set_tooltip("Compression level (0–9; higher = smaller / slower).")
+                set_tooltip(
+                    "0–9. Higher = smaller files, slower writes; "
+                    "gains taper past ~5."
+                )
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -1792,15 +983,15 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
             self._workers = max(1, min(_MAX_WORKERS, new_workers))
             set_tooltip(
-                "Parallel workers for timepoint/tile processing.\n"
-                "Sequential = 1. Bottleneck is RAM, not cores: each "
-                "worker holds a full 3D camera volume in memory. Start "
-                f"at 2–4 and watch RAM before raising (soft cap {_MAX_WORKERS})."
+                "Parallel timepoint/tile workers. RAM-bound, not "
+                "CPU-bound: each holds a full 3D volume.\n"
+                f"Start 2–4 and watch RAM (soft cap {_MAX_WORKERS})."
             )
 
             _, self._pyramid = imgui.checkbox("Pyramid", self._pyramid)
             set_tooltip(
-                "Generate the resolution pyramid (zarr / OME-TIFF only)."
+                "Downsampled levels for fast zoomed-out viewing "
+                "(zarr / OME-TIFF). Adds write time + disk."
             )
 
             if self._pyramid:
@@ -1808,7 +999,11 @@ class IsoviewPipelineWidget(PipelineWidget):
                 _, self._pyramid_max_layers = imgui.input_int(
                     "Pyramid levels", self._pyramid_max_layers, 1, 1,
                 )
-                set_tooltip("Max pyramid levels beyond the full-res /0.")
+                set_tooltip(
+                    "Extra downsample levels beyond full-res. More = "
+                    "smoother zoom-out + more disk; stops when an axis "
+                    "< 64 px."
+                )
 
     def _draw_correct_segmentation_box(self) -> None:
         with tooltip_marks_right():
@@ -1829,29 +1024,36 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Apply mask to volume", self._correct_apply_seg_mask,
             )
             set_tooltip(
-                "Zero out background pixels in the saved volume using "
-                "the segmentation mask. Matches MATLAB segmentFlag == 1."
+                "Zero background pixels in the saved volume (irreversible).\n"
+                "Off keeps full intensities; the mask is saved separately."
             )
 
             _, self._correct_do_tenengrad = imgui.checkbox(
                 "Tenengrad diagnostic", self._correct_do_tenengrad,
             )
             set_tooltip(
-                "Per-Z sharpness plot per camera pair. Useful for "
-                "picking a transition_plane or blending_range later."
+                "Extra per-Z sharpness plot per camera pair (small added "
+                "time).\nUse it to set transition_plane / blending_range "
+                "for Fuse."
             )
 
             imgui.set_next_item_width(_input_w())
             _, self._correct_gauss_kernel = imgui.input_int(
                 "Gaussian kernel", self._correct_gauss_kernel, 1, 1,
             )
-            set_tooltip("Square kernel size for the Gaussian pre-filter.")
+            set_tooltip(
+                "Pre-blur window (px) before thresholding.\n"
+                "Larger = smoother masks, fewer specks, a bit slower."
+            )
 
             imgui.set_next_item_width(_input_w())
             _, self._correct_gauss_sigma = imgui.input_float(
                 "Gaussian sigma", self._correct_gauss_sigma, 0.1, 1.0, "%.2f",
             )
-            set_tooltip("Sigma for the Gaussian pre-filter (in pixels).")
+            set_tooltip(
+                "Pre-blur strength (px).\n"
+                "Higher = smoother foreground; too high merges nearby objects."
+            )
 
             imgui.set_next_item_width(_input_w())
             _, self._correct_segment_threshold = imgui.input_float(
@@ -1860,22 +1062,39 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("segment_threshold", "Threshold")
-            set_tooltip("Foreground threshold after Gaussian smoothing (0–1).")
+            set_tooltip(
+                "Foreground cutoff on the smoothed image (0–1).\n"
+                "Lower keeps more as signal; raise if background leaks in."
+            )
 
             imgui.set_next_item_width(_input_w())
             _, self._correct_mask_percentile = imgui.input_float(
                 "Mask percentile", self._correct_mask_percentile,
                 0.1, 1.0, "%.2f",
             )
-            set_tooltip("Percentile (0–100) used to threshold the mask.")
+            set_tooltip(
+                "Baseline percentile for the mask (0–100).\n"
+                "Higher = stricter foreground (drops dim signal)."
+            )
 
             imgui.set_next_item_width(_input_w())
             _, self._correct_splitting = imgui.input_int(
                 "Splitting", self._correct_splitting, 1, 5,
             )
             set_tooltip(
-                "Block size (along Z) for memory-bounded Gaussian "
-                "filtering.\nSmaller = less RAM, more block edges."
+                "Y-axis slabs for the segmentation filter.\n"
+                "Raise to cut peak RAM (10→20 roughly halves the filter's "
+                "working buffer), ~5–10% slower from slab overlap."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._correct_subsample_factor = imgui.input_int(
+                "Subsample factor", self._correct_subsample_factor, 1, 10,
+            )
+            set_tooltip(
+                "Percentile sampling stride — uses every Nth voxel "
+                "(100 ≈ 1%).\nHigher = faster, slightly noisier. Shared by "
+                "segmentation + background."
             )
 
     def _draw_correct_advanced_box(self) -> None:
@@ -1883,13 +1102,19 @@ class IsoviewPipelineWidget(PipelineWidget):
             _, self._correct_median_kernel_enabled = imgui.checkbox(
                 "Median filter", self._correct_median_kernel_enabled,
             )
-            set_tooltip("Dead-pixel correction via per-plane median filter.")
+            set_tooltip(
+                "Replace hot/dead pixels with a per-plane median.\n"
+                "Off if the camera is already corrected."
+            )
             if self._correct_median_kernel_enabled:
                 imgui.set_next_item_width(_input_w())
                 _, self._correct_median_kernel_size = imgui.input_int(
                     "Kernel (N×N)", self._correct_median_kernel_size, 1, 1,
                 )
-                set_tooltip("Square kernel size for the median filter.")
+                set_tooltip(
+                    "Median window (px). Larger removes bigger clusters "
+                    "but softens detail and is slower."
+                )
 
             imgui.set_next_item_width(_input_w())
             _, self._correct_background_percentile = imgui.input_float(
@@ -1898,20 +1123,8 @@ class IsoviewPipelineWidget(PipelineWidget):
                 0.5, 5.0, "%.2f",
             )
             set_tooltip(
-                "Percentile (0–100) used to estimate the camera "
-                "background intensity."
-            )
-
-    def _draw_correct_shared_box(self) -> None:
-        with tooltip_marks_right():
-            imgui.set_next_item_width(_input_w())
-            _, self._correct_subsample_factor = imgui.input_int(
-                "Subsample factor", self._correct_subsample_factor, 1, 10,
-            )
-            set_tooltip(
-                "Stride for percentile estimation.\n"
-                "Used by both segmentation and pixel correction.\n"
-                "Higher = faster but noisier."
+                "Percentile for the camera background floor (0–100).\n"
+                "Raise if a dark haze remains; too high clips dim signal."
             )
 
     def _draw_fuse_io_box(self) -> None:
@@ -1932,7 +1145,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             if changed:
                 self._output_format = formats[new_idx]
             set_tooltip(
-                "Volume container format written per (timepoint, camera)."
+                "Container per (timepoint, camera). zarr = chunked + "
+                "pyramids; tif/klb for legacy tools."
             )
 
             if self._output_format == "zarr":
@@ -1945,13 +1159,19 @@ class IsoviewPipelineWidget(PipelineWidget):
                 c_changed, c_new = imgui.combo("Compressor", cidx, compressors)
                 if c_changed:
                     self._compression = compressors[c_new]
-                set_tooltip("Codec applied inside the volume containers.")
+                set_tooltip(
+                "Inner-chunk codec. zstd = best size/speed; "
+                "none = fastest writes, biggest files."
+            )
 
                 imgui.set_next_item_width(_input_w())
                 _, self._compression_level = imgui.input_int(
                     "Level", self._compression_level, 1, 1,
                 )
-                set_tooltip("Compression level (0–9).")
+                set_tooltip(
+                "0–9. Higher = smaller files, slower writes; "
+                "gains taper past ~5."
+            )
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -1959,16 +1179,15 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
             self._workers = max(1, min(_MAX_WORKERS, new_workers))
             set_tooltip(
-                "Parallel workers for timepoint/tile processing.\n"
-                "Bottleneck is RAM, not cores: each worker holds both "
-                "camera volumes plus a same-size output. Adaptive "
-                "blending roughly doubles per-worker footprint vs "
-                f"geometric — start at 2–4 with adaptive (soft cap {_MAX_WORKERS})."
+                "Parallel workers. RAM-bound: each holds both camera "
+                "volumes + the output; adaptive blending uses more.\n"
+                f"Start 2–4 (soft cap {_MAX_WORKERS})."
             )
 
             _, self._pyramid = imgui.checkbox("Pyramid", self._pyramid)
             set_tooltip(
-                "Generate the resolution pyramid (zarr / OME-TIFF only)."
+                "Downsampled levels for fast zoomed-out viewing "
+                "(zarr / OME-TIFF). Adds write time + disk."
             )
 
             if self._pyramid:
@@ -1976,12 +1195,16 @@ class IsoviewPipelineWidget(PipelineWidget):
                 _, self._pyramid_max_layers = imgui.input_int(
                     "Pyramid levels", self._pyramid_max_layers, 1, 1,
                 )
-                set_tooltip("Max pyramid levels beyond the full-res /0.")
+                set_tooltip(
+                    "Extra downsample levels beyond full-res. More = "
+                    "smoother zoom-out + more disk; stops when an axis "
+                    "< 64 px."
+                )
 
     def _draw_fuse_blending_box(self) -> None:
         self._draw_view_scope_badge("per_view")
         with tooltip_marks_right():
-            methods = ["geometric", "adaptive", "auto", "average"]
+            methods = ["geometric", "adaptive", "average"]
             try:
                 idx = methods.index(self._fv("blending_method"))
             except ValueError:
@@ -1993,9 +1216,9 @@ class IsoviewPipelineWidget(PipelineWidget):
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("blending_method", "Blending method")
             set_tooltip(
-                "  geometric  fixed transition plane\n"
-                "  adaptive   per-XY tenengrad-driven blend\n"
-                "  auto       picks geometric / adaptive based on data\n"
+                "  geometric  fixed transition plane (fastest)\n"
+                "  adaptive   per-XY tenengrad blend (sharper, more "
+                "RAM/time)\n"
                 "  average    plain mean (no blending)."
             )
 
@@ -2007,7 +1230,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("blending_range", "Blending range")
             set_tooltip(
-                "Transition zone width in Z-planes for geometric blending."
+                "Z-plane width of the blend seam (geometric).\n"
+                "Wider = smoother seam, more mixing of both cameras."
             )
 
             imgui.set_next_item_width(_input_w())
@@ -2018,7 +1242,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
             self._emp_label("transition_plane", "Transition plane")
             set_tooltip(
-                "Z-index for geometric blending.\n−1 = use volume center."
+                "Z-index where the cameras hand off (geometric).\n"
+                "−1 = volume center; read it off the Tenengrad plot."
             )
 
             imgui.set_next_item_width(_input_w())
@@ -2056,16 +1281,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             self._set_fv("flip_vertical", new_fv)
             set_tooltip("Flip the second camera vertically before fusion.")
 
-            rotations = ["0", "+90 (cw)", "−90 (ccw)"]
-            idx = {0: 0, 1: 1, -1: 2}.get(int(self._fv("rotation")), 0)
-            imgui.set_next_item_width(_input_w())
-            r_changed, r_new = imgui.combo("Rotation", idx, rotations)
-            if r_changed:
-                self._set_fv("rotation", {0: 0, 1: 1, 2: -1}[r_new])
-            set_tooltip(
-                "Rotation applied to the second camera before fusion."
-            )
-
     def _draw_fuse_search_box(self) -> None:
         self._draw_view_scope_badge("per_view")
         with tooltip_marks_right():
@@ -2081,8 +1296,9 @@ class IsoviewPipelineWidget(PipelineWidget):
                 )
                 self._set_fv(key, new_val)
                 set_tooltip(
-                    "Pixel offsets searched along X during camera-pair "
-                    "registration\n(start, stop, step)."
+                    "Pixel offset grid searched along X to align the pair "
+                    "(start, stop, step).\nWider range or smaller step = "
+                    "more robust, slower (cost ∝ range/step)."
                 )
 
             imgui.spacing()
@@ -2098,8 +1314,9 @@ class IsoviewPipelineWidget(PipelineWidget):
                 )
                 self._set_fv(key, new_val)
                 set_tooltip(
-                    "Pixel offsets searched along Y during camera-pair "
-                    "registration\n(start, stop, step)."
+                    "Pixel offset grid searched along Y to align the pair "
+                    "(start, stop, step).\nWider range or smaller step = "
+                    "more robust, slower (cost ∝ range/step)."
                 )
 
     def _draw_microscope_overrides_box(self) -> None:
@@ -2255,10 +1472,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             if _is_method_dir(sr):
                 method = sr.name
 
-        # VW00 reorientation: editable rotations + flips seeded by the
-        # Profile. Empty list = no transform.
-        orientation: list = self._compose_orientation_ops()
-
         # output_suffix must match the loaded tree's variant: isoview
         # derives config.fused_dir from input_dir.name stripped + ".fused"
         # + output_suffix, so passing the wrong (or empty) suffix makes it
@@ -2270,9 +1483,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             "method": method,
             "output_suffix": self._iso_tree_suffix(input_dir),
             "stitcher_suffix": self._stitcher_suffix,
-            "coarse_align": self._stitcher_coarse_align,
             "bake_tile_positions": self._stitcher_bake_tile_positions,
-            "orientation": orientation,
             "overwrite": self._overwrite,
             "specimens": [int(specimen)],
             "timepoints": list(getattr(arr, "_timepoints", []) or []),
@@ -2282,105 +1493,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             "isoview_bigstitcher", args,
             description=f"BigStitcher XML: {input_dir.name}",
             output_path=self._current_output_path() or str(input_dir),
-        )
-
-    def _submit_spark_register(self, arr: Any) -> None:
-        """Run bigstitcher-spark's detect → match → solve pipeline against
-        the dataset.xml previously emitted by :meth:`_submit_stitcher`.
-        """
-        if not self._stitcher_spark_root:
-            self._last_status = (
-                "Set the bigstitcher-spark executables dir (or fat JAR) "
-                "first."
-            )
-            return
-
-        # Stitcher tree is a sibling of the loaded corrected/fused tree
-        # (<rawstem><stitcher_suffix>/), derived without the raw root.
-        stitcher_root = self._iso_stitcher_dest(arr)
-        if stitcher_root is None:
-            self._last_status = (
-                "Cannot locate a corrected/fused tree to register."
-            )
-            return
-
-        # New export writes <stitcher_root>/dataset.xml directly; legacy
-        # exports nested it under a <method>/ subfolder.
-        xml_candidates = sorted(stitcher_root.glob("dataset.xml")) or sorted(
-            stitcher_root.glob("*/dataset.xml")
-        )
-        if not xml_candidates:
-            self._last_status = (
-                f"No dataset.xml under {stitcher_root}. Run Export first."
-            )
-            return
-        xml_path = xml_candidates[0]
-
-        max_spots = int(self._stitcher_spark_max_spots)
-        search_radius = (
-            float(self._stitcher_spark_search_radius)
-            if self._stitcher_spark_limit_search_radius
-            else None
-        )
-        args = {
-            "xml_path": str(xml_path),
-            "spark_root": self._stitcher_spark_root,
-            "java_home": self._stitcher_spark_java_home or None,
-            "label": self._stitcher_spark_label,
-            # detection
-            "sigma": float(self._stitcher_spark_sigma),
-            "threshold": float(self._stitcher_spark_threshold),
-            "min_intensity": float(self._stitcher_spark_min_intensity),
-            "max_intensity": float(self._stitcher_spark_max_intensity),
-            "downsample_xy": int(self._stitcher_spark_downsample_xy),
-            "downsample_z": int(self._stitcher_spark_downsample_z),
-            "max_spots": max_spots if max_spots > 0 else None,
-            "dog_type": self._stitcher_spark_dog_type,
-            "localization": self._stitcher_spark_localization,
-            # coarse match
-            "coarse_method": self._stitcher_spark_match_algorithm,
-            "transformation_model": self._stitcher_spark_transformation_model,
-            "regularization_model": self._stitcher_spark_regularization_model,
-            "lambda_reg": float(self._stitcher_spark_lambda),
-            "view_registration_scope": self._stitcher_spark_view_scope,
-            "interestpoints_for_reg": self._stitcher_spark_ip_scope,
-            "num_neighbors": int(self._stitcher_spark_num_neighbors),
-            "redundancy": int(self._stitcher_spark_redundancy),
-            "significance": float(self._stitcher_spark_significance),
-            "search_radius": search_radius,
-            "coarse_ransac_max_error": float(
-                self._stitcher_spark_coarse_ransac_max_error
-            ),
-            "coarse_ransac_min_inliers": int(
-                self._stitcher_spark_coarse_ransac_min_inliers
-            ),
-            # ICP refine
-            "do_icp_refine": bool(self._stitcher_spark_do_icp_refine),
-            "icp_iterations": int(self._stitcher_spark_icp_iterations),
-            "icp_max_error": float(self._stitcher_spark_icp_max_error),
-            "icp_use_ransac": bool(self._stitcher_spark_icp_use_ransac),
-            "icp_ransac_max_error": float(
-                self._stitcher_spark_icp_ransac_max_error
-            ),
-            "icp_ransac_min_inliers": int(
-                self._stitcher_spark_icp_ransac_min_inliers
-            ),
-            "icp_ransac_iterations": int(
-                self._stitcher_spark_icp_ransac_iterations
-            ),
-            # solver
-            "solver_method": self._stitcher_spark_solver_method,
-            "solver_relative_threshold": float(
-                self._stitcher_spark_solver_relative_threshold
-            ),
-            "solver_absolute_threshold": float(
-                self._stitcher_spark_solver_absolute_threshold
-            ),
-        }
-        self._spawn(
-            "isoview_bigstitcher_register", args,
-            description=f"BigStitcher-Spark register: {xml_path.parent.name}",
-            output_path=str(xml_path.parent),
         )
 
     def _submit_correct(self, arr: Any) -> None:
@@ -2739,10 +1851,15 @@ class IsoviewPipelineWidget(PipelineWidget):
             ("Shape", shape_text, None, None),
             ("Data state", str(arr.kind), None, None),
         ]
-        # Frame rate: isoview metadata does not encode fs. Always show the
-        # row in red with a hint to set it via the metadata editor (Shift+M)
-        # so the missing value is obvious instead of silently absent.
-        fs_val = get_param(md, "fs")
+        # Frame rate: isoview metadata does not encode fs. Read the exact
+        # ``fs`` key only (NOT get_param, whose aliases resolve the
+        # reference camera rate ``fps`` as fs). Prefer a user-set value
+        # from the metadata editor (Shift+M); when unset, show the row in
+        # red with a hint so the missing value is obvious.
+        custom = getattr(self.parent, "_custom_metadata", None) or {}
+        fs_val = custom.get("fs")
+        if fs_val is None:
+            fs_val = md.get("fs")
         if fs_val is None:
             rows.append((
                 "Frame rate",
@@ -2938,6 +2055,44 @@ class IsoviewPipelineWidget(PipelineWidget):
             else:
                 setattr(self, ow_attr, False)
         imgui.spacing()
+        imgui.spacing()
+
+    def _draw_iso_crop_readout(self, arr: Any) -> None:
+        """Crop-bounds Run-tab block — corrected (fuse) data only.
+
+        Mirrors the segmentation / dead-pixel readouts: Edit opens the
+        floating crop window, Clear resets, and the summary shows the
+        current per-camera bounds. Trailing separator emitted inline.
+        """
+        if getattr(arr, "kind", None) != "corrected":
+            return
+        from mbo_utilities.gui import _isoview_crop_state as crop_state
+        from mbo_utilities.gui.widgets import isoview_crop as crop_window
+
+        imgui.text_colored(_SUBSECTION_COLOR, "Crop bounds")
+        set_tooltip(
+            "Per-camera crop applied at fuse time. Edit opens the "
+            "side-by-side crop window with draggable bounds.",
+            align="right",
+        )
+        imgui.spacing()
+        if imgui.button("Edit...##iso_crop_edit", imgui.ImVec2(_BTN_W, 0)):
+            crop_window.open_window(self.parent)
+        imgui.same_line()
+        if imgui.button("Clear##iso_crop_clear", imgui.ImVec2(_BTN_W, 0)):
+            crop_state.clear(arr)
+        imgui.push_style_color(
+            imgui.Col_.text, imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
+        )
+        imgui.push_text_wrap_pos(0.0)
+        try:
+            imgui.text_unformatted(crop_state.summary(arr))
+        finally:
+            imgui.pop_text_wrap_pos()
+            imgui.pop_style_color()
+        imgui.spacing()
+        imgui.spacing()
+        imgui.separator()
         imgui.spacing()
 
     def _draw_iso_segment_readout(self, arr: Any) -> None:
@@ -3241,6 +2396,10 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.separator()
         imgui.spacing()
 
+        # CROP BOUNDS — corrected (fuse) only. Edit opens the floating
+        # crop window. Mirrors the seg/dead-pixel readouts below.
+        self._draw_iso_crop_readout(arr)
+
         # SEGMENTATION — adaptive threshold + gauss params (non-fused
         # only). Emits its own trailing separator when content is drawn.
         self._draw_iso_segment_readout(arr)
@@ -3272,26 +2431,14 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.separator()
         imgui.spacing()
 
-        # RUN — big green, centered. In BigStitcher mode, the export
-        # button sits side-by-side with the Spark "Run registration"
-        # button, both centered as a pair. Per-button width shrinks
-        # below _RUN_W when the side panel is too narrow to fit both
-        # at full size — so the right button never gets clipped.
+        # RUN — big green, centered.
         has_path = bool(self._current_output_path())
         run_label = _RUN_LABELS.get(self._selected_mode or "", "Run")
-        is_stitcher = self._selected_mode == _MODE_STITCHER
-        spark_ready = bool(self._stitcher_spark_root) if is_stitcher else False
-        spacing_x = imgui.get_style().item_spacing.x
         avail = imgui.get_content_region_avail().x
-        if is_stitcher:
-            btn_w = max(80.0, min(_RUN_W, (avail - spacing_x) / 2.0))
-            total_w = btn_w * 2 + spacing_x
-        else:
-            btn_w = min(_RUN_W, max(80.0, avail))
-            total_w = btn_w
-        if avail > total_w:
+        btn_w = min(_RUN_W, max(80.0, avail))
+        if avail > btn_w:
             imgui.set_cursor_pos_x(
-                imgui.get_cursor_pos_x() + (avail - total_w) * 0.5
+                imgui.get_cursor_pos_x() + (avail - btn_w) * 0.5
             )
         with _green_button():
             if not has_path:
@@ -3308,41 +2455,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
         if clicked and has_path:
             self._submit_active(arr)
-
-        register_clicked = False
-        if is_stitcher:
-            imgui.same_line()
-            if not spark_ready:
-                imgui.begin_disabled()
-            register_clicked = imgui.button(
-                "Run registration##spark_run",
-                imgui.ImVec2(btn_w, 0),
-            )
-            if not spark_ready:
-                imgui.end_disabled()
-                if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-                    imgui.set_tooltip(
-                        "Set the bigstitcher-spark path in the "
-                        "Parameters popup first."
-                    )
-            if register_clicked and spark_ready:
-                self._submit_spark_register(arr)
-
-            # Poll the spark_root folder picker dialog if open.
-            dlg = self._stitcher_spark_dialog
-            if dlg is not None:
-                try:
-                    ready = dlg.ready(0)
-                except TypeError:
-                    ready = dlg.ready()
-                if ready:
-                    try:
-                        result = dlg.result()
-                    except Exception:
-                        result = ""
-                    if result:
-                        self._stitcher_spark_root = result
-                    self._stitcher_spark_dialog = None
 
         if self._last_status:
             imgui.spacing()

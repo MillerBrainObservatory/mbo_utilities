@@ -807,6 +807,7 @@ def task_isoview(args: dict, logger: logging.Logger) -> None:
         # cap at 0.99 — actual finalize() pushes to 1.0 on success.
         monitor.update(min(total_frac, 0.99), f"{stage}: {current}/{total}")
 
+    t_start = time.monotonic()
     try:
         out = consolidate_isoview(
             input_path,
@@ -818,6 +819,10 @@ def task_isoview(args: dict, logger: logging.Logger) -> None:
             compressor=compressor,
             compression_level=compression_level,
             progress_callback=cb,
+        )
+        _record_isoview_runtime(
+            "consolidate", time.monotonic() - t_start,
+            _isoview_config_root(input_path), logger,
         )
         monitor.finish(f"Wrote {out}")
         logger.info(f"isoview consolidator wrote {out}")
@@ -939,6 +944,69 @@ def _build_isoview_processing_config(args: dict):
     return ProcessingConfig(**config_kwargs)
 
 
+def _format_runtime(seconds: float) -> str:
+    """Compact H/M/S runtime string (e.g. ``1h 3m 7s``)."""
+    total = int(round(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+def _isoview_config_root(path) -> "Path | None":
+    """Dataset root holding ``isoview_config.json`` for a corrected/fused
+    tree path (its parent). Returns ``None`` when no tree is found."""
+    if not path:
+        return None
+    p = Path(path)
+    for anc in (p, *p.parents):
+        name = anc.name
+        for suf in (".corrected", ".fused"):
+            idx = name.find(suf)
+            if idx >= 0:
+                rest = name[idx + len(suf):]
+                if rest == "" or rest.startswith("_"):
+                    return anc.parent
+    return None
+
+
+def _record_isoview_runtime(
+    step: str, elapsed: float, config_root, logger: logging.Logger,
+) -> None:
+    """Log the step's total wall-clock runtime and append it to the
+    dataset's ``isoview_config.json`` under a ``runtimes`` section.
+
+    ``config_root`` is the directory holding ``isoview_config.json``
+    (``config.input_dir.parent`` for the pipeline steps); ``None`` logs
+    the runtime without persisting it.
+    """
+    logger.info(
+        f"Total runtime ({step}): {_format_runtime(elapsed)} ({elapsed:.1f}s)"
+    )
+    if config_root is None:
+        return
+    try:
+        from isoview.config import CONFIG_FILENAME
+    except Exception:
+        CONFIG_FILENAME = "isoview_config.json"
+    try:
+        cfg_path = Path(config_root) / CONFIG_FILENAME
+        data: dict = {}
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                data = json.load(f)
+        data.setdefault("runtimes", {})[step] = round(float(elapsed), 1)
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(cfg_path, "w") as f:
+            json.dump(data, f, indent=2)
+        logger.info(f"isoview_config runtime saved: {cfg_path}")
+    except Exception as e:
+        logger.warning(f"could not save runtime to isoview_config: {e}")
+
+
 class _ForwardingHandler(logging.Handler):
     """Mirror records to a fixed list of target handlers at our own level.
 
@@ -1025,6 +1093,7 @@ def task_correct_stack(args: dict, logger: logging.Logger) -> None:
     monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing correct_stack...")
 
+    t_start = time.monotonic()
     try:
         config = _build_isoview_processing_config(args)
         logger.info(
@@ -1035,6 +1104,10 @@ def task_correct_stack(args: dict, logger: logging.Logger) -> None:
         logger.info(f"isoview per-run log: {config.output_dir}/correct.log")
         monitor.update(0.05, "Running correct_stack (see log file for details)...")
         correct_stack(config)
+        _record_isoview_runtime(
+            "correct", time.monotonic() - t_start,
+            config.input_dir.parent, logger,
+        )
         monitor.finish("correct_stack pipeline complete.")
         logger.info("correct_stack completed successfully")
     except Exception as e:
@@ -1068,9 +1141,13 @@ def task_isoview_raw_projections(args: dict, logger: logging.Logger) -> None:
         frac = current / total if total else 1.0
         monitor.update(min(0.99, frac), f"projection {current}/{total}: {name}")
 
+    t_start = time.monotonic()
     try:
         result = make_raw_projections(
             raw_dir, overwrite=overwrite, progress_callback=cb,
+        )
+        _record_isoview_runtime(
+            "raw_projections", time.monotonic() - t_start, None, logger,
         )
         monitor.finish(
             f"raw projections: {result['written']} written, "
@@ -1102,6 +1179,7 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
     monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing multi_fuse...")
 
+    t_start = time.monotonic()
     try:
         config = _build_isoview_processing_config(args)
         fused_dir = Path(config.fused_dir)
@@ -1152,6 +1230,10 @@ def task_multi_fuse(args: dict, logger: logging.Logger) -> None:
         # break resume (next run writes to <method>/, completed data sits
         # in <method>_<suffix>/).
 
+        _record_isoview_runtime(
+            "fuse", time.monotonic() - t_start,
+            config.input_dir.parent, logger,
+        )
         monitor.finish("multi_fuse pipeline complete.")
         logger.info("multi_fuse completed successfully")
     except Exception as e:
@@ -1165,8 +1247,8 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
 
     Walks ``config.fused_dir`` for VW00/VW90 pairs and writes one BDV
     SpimData dataset per fusion method under ``config.stitcher_dir``.
-    No resampling — the VW90 pre-rotation is baked into the calibration
-    affine that BigStitcher applies at display time.
+    No resampling and no orientation — VW00/VW90 are written in their
+    native fused frame; orient and register them in BigStitcher.
 
     Reuses the shared isoview ProcessingConfig builder + log bridge so
     the same path resolution and per-run log routing as correct_stack /
@@ -1179,6 +1261,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
     monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
     monitor.update(0.01, "Initializing generate_bigstitcher_xml...")
 
+    t_start = time.monotonic()
     try:
         config = _build_isoview_processing_config(args)
         logger.info(
@@ -1190,167 +1273,19 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
         xml_path = generate_bigstitcher_xml(
             config,
             method=args.get("method"),
-            coarse_align=args.get("coarse_align", False),
             bake_tile_positions=args.get("bake_tile_positions", False),
-            orientation=args.get("orientation"),
         )
         logger.info(f"  wrote: {xml_path}")
+        _record_isoview_runtime(
+            "bigstitcher", time.monotonic() - t_start,
+            config.input_dir.parent, logger,
+        )
         monitor.finish(f"generate_bigstitcher_xml complete: {xml_path}")
         logger.info("generate_bigstitcher_xml completed successfully")
     except Exception as e:
         monitor.fail(str(e), details={"traceback": traceback.format_exc()})
         logger.exception(f"generate_bigstitcher_xml failed: {e}")
         raise
-
-
-def task_bigstitcher_register(args: dict, logger: logging.Logger) -> None:
-    """Run bigstitcher-spark's coarse → fine registration pipeline.
-
-    Mutates ``dataset.xml`` in place. Five spark stages run sequentially:
-
-      1. ``detect-interestpoints`` (DoG)
-      2. ``match-interestpoints`` (descriptor pass, e.g. PRECISE_TRANSLATION)
-      3. ``solver`` (global optimization)
-      4. ``match-interestpoints`` (ICP refinement, when ``do_icp_refine``)
-      5. ``solver`` again
-
-    Required args:
-      - xml_path: path to dataset.xml
-      - spark_root: path to bigstitcher-spark executables dir OR fat JAR
-
-    Optional args: see :func:`isoview.bigstitcher.register`. Both the
-    new keys (``coarse_method``, ``solver_method``, …) and the legacy
-    ``match_algorithm`` alias are accepted.
-    """
-    from isoview import bigstitcher
-
-    monitor = TaskMonitor(args.get("output_dir") or ".", uuid=args.get("_uuid"))
-    monitor.update(0.01, "Initializing bigstitcher-spark...")
-
-    xml_path = Path(args["xml_path"]).resolve()
-    if not xml_path.is_file():
-        raise FileNotFoundError(f"dataset.xml not found: {xml_path}")
-    spark_root = Path(args["spark_root"]).resolve()
-    if not spark_root.exists():
-        raise FileNotFoundError(f"spark_root does not exist: {spark_root}")
-
-    # Legacy alias: GUI used to send `match_algorithm`; rename to the
-    # new `coarse_method` keyword if the caller hasn't already.
-    if "coarse_method" not in args and "match_algorithm" in args:
-        args = dict(args)
-        args["coarse_method"] = args.pop("match_algorithm")
-
-    runtime_keys = ("java_home", "spark_memory_gb", "spark_threads")
-
-    def _pick(keys):
-        return {
-            k: args[k] for k in keys
-            if k in args and args[k] is not None
-        }
-
-    detect_kwargs = _pick((
-        "label", "sigma", "threshold",
-        "downsample_xy", "downsample_z",
-        "min_intensity", "max_intensity",
-        "max_spots", "dog_type", "localization",
-        "overlapping_only_detect",
-        *runtime_keys,
-    ))
-    # bigstitcher.detect_interestpoints expects ``overlapping_only``, not the
-    # prefixed name the register() facade uses.
-    if "overlapping_only_detect" in detect_kwargs:
-        detect_kwargs["overlapping_only"] = detect_kwargs.pop(
-            "overlapping_only_detect"
-        )
-
-    common_match_keys = (
-        "label",
-        "transformation_model", "regularization_model", "lambda_reg",
-        "view_registration_scope", "interestpoints_for_reg",
-        *runtime_keys,
-    )
-    coarse_kwargs = _pick((
-        *common_match_keys,
-        "coarse_method",
-        "num_neighbors", "redundancy", "significance", "search_radius",
-        "coarse_ransac_max_error", "coarse_ransac_min_inliers",
-    ))
-    # rename register()-style names to match_interestpoints()-style.
-    if "coarse_method" in coarse_kwargs:
-        coarse_kwargs["method"] = coarse_kwargs.pop("coarse_method")
-    if "coarse_ransac_max_error" in coarse_kwargs:
-        coarse_kwargs["ransac_max_error"] = coarse_kwargs.pop(
-            "coarse_ransac_max_error"
-        )
-    if "coarse_ransac_min_inliers" in coarse_kwargs:
-        coarse_kwargs["ransac_min_inliers"] = coarse_kwargs.pop(
-            "coarse_ransac_min_inliers"
-        )
-
-    icp_kwargs = _pick((
-        *common_match_keys,
-        "icp_iterations", "icp_max_error", "icp_use_ransac",
-        "icp_ransac_max_error", "icp_ransac_min_inliers",
-        "icp_ransac_iterations",
-    ))
-    icp_kwargs["method"] = "ICP"
-    if "icp_ransac_max_error" in icp_kwargs:
-        icp_kwargs["ransac_max_error"] = icp_kwargs.pop("icp_ransac_max_error")
-    if "icp_ransac_min_inliers" in icp_kwargs:
-        icp_kwargs["ransac_min_inliers"] = icp_kwargs.pop(
-            "icp_ransac_min_inliers"
-        )
-    if "icp_ransac_iterations" in icp_kwargs:
-        icp_kwargs["ransac_iterations"] = icp_kwargs.pop(
-            "icp_ransac_iterations"
-        )
-
-    solver_kwargs = _pick((
-        "label",
-        "transformation_model", "regularization_model", "lambda_reg",
-        "solver_method",
-        "solver_relative_threshold", "solver_absolute_threshold",
-        *runtime_keys,
-    ))
-    if "solver_method" in solver_kwargs:
-        solver_kwargs["method"] = solver_kwargs.pop("solver_method")
-    if "solver_relative_threshold" in solver_kwargs:
-        solver_kwargs["relative_threshold"] = solver_kwargs.pop(
-            "solver_relative_threshold"
-        )
-    if "solver_absolute_threshold" in solver_kwargs:
-        solver_kwargs["absolute_threshold"] = solver_kwargs.pop(
-            "solver_absolute_threshold"
-        )
-
-    do_icp = bool(args.get("do_icp_refine", True))
-
-    monitor.update(0.05, "BigStitcher-Spark: detect-interestpoints")
-    bigstitcher.detect_interestpoints(
-        xml_path, spark_root, log=logger, **detect_kwargs
-    )
-
-    monitor.update(0.30, "BigStitcher-Spark: coarse match (descriptor)")
-    bigstitcher.match_interestpoints(
-        xml_path, spark_root, log=logger,
-        clear_correspondences=True, **coarse_kwargs,
-    )
-
-    monitor.update(0.55, "BigStitcher-Spark: solver (post-coarse)")
-    bigstitcher.solver(xml_path, spark_root, log=logger, **solver_kwargs)
-
-    if do_icp:
-        monitor.update(0.70, "BigStitcher-Spark: fine match (ICP)")
-        bigstitcher.match_interestpoints(
-            xml_path, spark_root, log=logger,
-            clear_correspondences=True, **icp_kwargs,
-        )
-
-        monitor.update(0.90, "BigStitcher-Spark: solver (post-ICP)")
-        bigstitcher.solver(xml_path, spark_root, log=logger, **solver_kwargs)
-
-    monitor.finish(f"BigStitcher registration complete: {xml_path}")
-    logger.info(f"BigStitcher registration completed; XML updated: {xml_path}")
 
 
 # Registry
@@ -1362,5 +1297,4 @@ TASKS = {
     "isoview_raw_projections": task_isoview_raw_projections,
     "isoview_fuse": task_multi_fuse,
     "isoview_bigstitcher": task_generate_bigstitcher,
-    "isoview_bigstitcher_register": task_bigstitcher_register,
 }

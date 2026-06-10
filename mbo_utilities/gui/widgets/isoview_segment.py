@@ -125,15 +125,18 @@ def _build_projection_index(
 
 
 def _common_timepoints(index: dict[int, dict[int, Path]]) -> list[int]:
+    """Every tile/timepoint present in ANY view (union).
+
+    Union, not intersection: a tile acquired on only some cameras (e.g. a
+    dropped CM0/CM1) must still appear so the user can work with the
+    cameras that exist. Panels for views lacking that tile render blank.
+    """
     if not index:
         return []
-    sets = [set(d.keys()) for d in index.values()]
-    if not sets:
-        return []
-    common = sets[0]
-    for s in sets[1:]:
-        common &= s
-    return sorted(common)
+    tps: set[int] = set()
+    for d in index.values():
+        tps |= set(d.keys())
+    return sorted(tps)
 
 
 def _percentile_interp(data: np.ndarray, percentile: float) -> float:

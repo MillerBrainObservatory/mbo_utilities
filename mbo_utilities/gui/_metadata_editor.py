@@ -80,6 +80,25 @@ def _build_suggested_fields(parent: Any) -> list[dict]:
         suggested_fields.append(z_step_field)
         existing_canonicals.add("dz")
 
+    # add frame rate if not already provided (e.g. isoview XML has no fs)
+    fs_canonicals = ("fs", "frame_rate", "framerate")
+    if not any(c in existing_canonicals for c in fs_canonicals):
+        fs_field = {
+            "canonical": "fs",
+            "label": "Frame Rate",
+            "unit": "Hz",
+            "dtype": float,
+            "description": "Volume (or frame) sampling rate in Hz.",
+        }
+        if current_data and hasattr(current_data, "metadata"):
+            meta = current_data.metadata
+            if isinstance(meta, dict):
+                val = meta.get("fs") or meta.get("frame_rate") or meta.get("framerate")
+                if val:
+                    fs_field["value"] = val
+        suggested_fields.append(fs_field)
+        existing_canonicals.add("fs")
+
     # parse filename for auto-detected metadata
     filename_meta = None
     if hasattr(parent, "fpath") and parent.fpath:
