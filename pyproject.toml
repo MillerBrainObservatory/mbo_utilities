@@ -50,7 +50,7 @@ dependencies = [
 	"suite2p>=1.0.0.1",
 	"torch",
 	"lbm_suite2p_python>=3.0.8",
-	"isoview",
+	"isoview>=0.2.0",
 ]
 
 [project.scripts]
