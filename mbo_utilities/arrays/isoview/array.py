@@ -1369,19 +1369,20 @@ def make_raw_projections(
     overwrite: bool = False,
     progress_callback=None,
 ) -> dict:
-    """Write per-camera XY max-projections for a raw isoview acquisition.
+    """Write per-camera XY/XZ/YZ max-projections for a raw isoview acquisition.
 
     For each ``(specimen, timepoint, camera)`` raw ``.stack`` the volume
-    is read and reduced with ``np.max(axis=0)`` (XY MIP), then written as
-    ``SPM##_TM######_CM##.xyProjection.tif`` into the flat sibling
-    ``<raw_dir>.raw.projections/`` directory — the same location and name
-    :func:`_raw_projections` (and the GUI segmentation / dead-pixel
-    previews) read. Existing files are skipped unless ``overwrite``.
+    (Z, Y, X) is read once and reduced over Z/Y/X to XY/XZ/YZ MIPs, written
+    as ``SPM##_TM######_CM##.{xy,xz,yz}Projection.tif`` into the flat sibling
+    ``<raw_dir>.raw.projections/`` directory — the same location and names
+    :func:`_raw_projections` (and the GUI previews) read. Matches MATLAB
+    correctStack.m. Existing files are skipped unless ``overwrite``.
 
     CHN in a raw filename marks the camera's view, not a color channel,
-    so views collapse to one projection per camera (lowest CHN wins).
+    so views collapse to one projection set per camera (lowest CHN wins).
 
-    Returns ``{"dir": Path, "written": int, "skipped": int, "total": int}``.
+    Returns ``{"dir": Path, "written": int, "skipped": int, "total": int}``
+    where ``written``/``skipped`` count cameras (each writes three planes).
     """
     import tifffile
 
@@ -1418,17 +1419,24 @@ def make_raw_projections(
         proj_dir.mkdir(parents=True, exist_ok=True)
 
     for i, ((spc, tm, cam), (_chn, path)) in enumerate(sorted(best.items())):
-        out_name = f"SPM{spc:02d}_TM{tm:06d}_CM{cam:02d}.xyProjection.tif"
-        out_path = proj_dir / out_name
-        if out_path.exists() and not overwrite:
+        base = f"SPM{spc:02d}_TM{tm:06d}_CM{cam:02d}"
+        # stack is (Z, Y, X): axis 0/1/2 -> XY/XZ/YZ (matches correctStack.m)
+        targets = [
+            (0, proj_dir / f"{base}.xyProjection.tif"),
+            (1, proj_dir / f"{base}.xzProjection.tif"),
+            (2, proj_dir / f"{base}.yzProjection.tif"),
+        ]
+        if not overwrite and all(p.exists() for _, p in targets):
             skipped += 1
         else:
-            vol = LazyVolume(path, dimensions=(w, h, 0))
-            mip = np.max(np.asarray(vol[:]), axis=0)
-            tifffile.imwrite(out_path, mip)
+            vol = np.asarray(LazyVolume(path, dimensions=(w, h, 0))[:])
+            for axis, out_path in targets:
+                if out_path.exists() and not overwrite:
+                    continue
+                tifffile.imwrite(out_path, np.max(vol, axis=axis))
             written += 1
         if progress_callback is not None:
-            progress_callback(i + 1, total, out_name)
+            progress_callback(i + 1, total, base)
 
     return {"dir": proj_dir, "written": written, "skipped": skipped, "total": total}
 
