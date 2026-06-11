@@ -1105,7 +1105,7 @@ def task_correct_stack(args: dict, logger: logging.Logger) -> None:
         monitor.update(0.05, "Running correct_stack (see log file for details)...")
         correct_stack(config)
         _record_isoview_runtime(
-            "correct", time.monotonic() - t_start,
+            "correct_stack", time.monotonic() - t_start,
             config.input_dir.parent, logger,
         )
         monitor.finish("correct_stack pipeline complete.")
