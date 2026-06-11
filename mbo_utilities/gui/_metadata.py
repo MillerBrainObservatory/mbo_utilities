@@ -348,6 +348,7 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
 
             is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
             is_isoview = str(metadata.get("stack_type", "")).startswith("isoview")
+            is_tiled = bool(getattr(data_array, "is_tiled", False))
 
             # Imaging section header
             imgui.text_colored(_TREE_NODE_COLOR, "Imaging")
@@ -403,12 +404,12 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                         imgui.text("LBM stacks require user-supplied Z step size.")
                         imgui.text("Set via File > Save As > Metadata section.")
                         imgui.end_tooltip()
-                elif param.canonical == "fs" and is_isoview:
+                elif param.canonical == "fs" and is_isoview and not is_tiled:
                     imgui.same_line(value_col)
                     imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "Required")
                     if imgui.is_item_hovered():
                         imgui.begin_tooltip()
-                        imgui.text("IsoView stacks require a user-supplied frame rate.")
+                        imgui.text("IsoView timelapse stacks require a user-supplied frame rate.")
                         imgui.text("Set via Shift+M (metadata editor).")
                         imgui.end_tooltip()
                 else:

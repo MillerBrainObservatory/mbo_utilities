@@ -1856,20 +1856,21 @@ class IsoviewPipelineWidget(PipelineWidget):
         # reference camera rate ``fps`` as fs). Prefer a user-set value
         # from the metadata editor (Shift+M); when unset, show the row in
         # red with a hint so the missing value is obvious.
-        custom = getattr(self.parent, "_custom_metadata", None) or {}
-        fs_val = custom.get("fs")
-        if fs_val is None:
-            fs_val = md.get("fs")
-        if fs_val is None:
-            rows.append((
-                "Frame rate",
-                "not encoded (Shift+M to set)",
-                "isoview metadata does not currently encode the frame "
-                "rate.\nPress Shift+M to open the metadata editor and set it.",
-                _warn_color,
-            ))
-        else:
-            rows.append(("Frame rate", f"{fs_val} Hz", None, None))
+        if not getattr(arr, "is_tiled", False):
+            custom = getattr(self.parent, "_custom_metadata", None) or {}
+            fs_val = custom.get("fs")
+            if fs_val is None:
+                fs_val = md.get("fs")
+            if fs_val is None:
+                rows.append((
+                    "Frame rate",
+                    "not encoded (Shift+M to set)",
+                    "isoview metadata does not currently encode the frame "
+                    "rate.\nPress Shift+M to open the metadata editor and set it.",
+                    _warn_color,
+                ))
+            else:
+                rows.append(("Frame rate", f"{fs_val} Hz", None, None))
         for label, key, unit in (
             ("dx", "dx", "µm"),
             ("dy", "dy", "µm"),

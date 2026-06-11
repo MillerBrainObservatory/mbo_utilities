@@ -82,7 +82,8 @@ def _build_suggested_fields(parent: Any) -> list[dict]:
 
     # add frame rate if not already provided (e.g. isoview XML has no fs)
     fs_canonicals = ("fs", "frame_rate", "framerate")
-    if not any(c in existing_canonicals for c in fs_canonicals):
+    is_tiled = bool(getattr(current_data, "is_tiled", False))
+    if not is_tiled and not any(c in existing_canonicals for c in fs_canonicals):
         fs_field = {
             "canonical": "fs",
             "label": "Frame Rate",
