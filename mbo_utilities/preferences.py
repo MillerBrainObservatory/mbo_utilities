@@ -430,6 +430,29 @@ def set_debug_logging(enabled: bool) -> None:
     _set_option("debug_logging", bool(enabled))
 
 
+def get_mem_monitor() -> bool:
+    """Return the persisted memory-monitor flag (default False)."""
+    return bool(_get_options().get("mem_monitor", False))
+
+
+def set_mem_monitor(enabled: bool) -> None:
+    """Persist the memory-monitor flag for future launches."""
+    _set_option("mem_monitor", bool(enabled))
+
+
+def get_mem_monitor_interval() -> float:
+    """Return the memory-monitor sample interval in seconds (default 2.0)."""
+    try:
+        return max(0.25, float(_get_options().get("mem_monitor_interval", 2.0)))
+    except (TypeError, ValueError):
+        return 2.0
+
+
+def set_mem_monitor_interval(seconds: float) -> None:
+    """Persist the memory-monitor sample interval in seconds."""
+    _set_option("mem_monitor_interval", max(0.25, float(seconds)))
+
+
 def get_compute_gpu() -> str:
     """Return the persisted compute-GPU policy ('auto', 'cpu', or '0'/'1'…).
 

@@ -192,6 +192,91 @@ def _start_watchdog(uuid: str | None, logger: logging.Logger, log_file: str | No
     t.start()
 
 
+def _resolve_mem_interval() -> float:
+    """Memory-monitor sample interval in seconds, or 0 when off.
+
+    Off by default. The MBO_MEM_LOG_INTERVAL env var overrides when set;
+    otherwise the persisted preference (File -> Options) decides.
+    """
+    raw = os.environ.get("MBO_MEM_LOG_INTERVAL")
+    if raw is not None:
+        try:
+            return float(raw)
+        except ValueError:
+            return 0.0
+    try:
+        from mbo_utilities.preferences import get_mem_monitor, get_mem_monitor_interval
+        if get_mem_monitor():
+            return float(get_mem_monitor_interval())
+    except Exception:
+        pass
+    return 0.0
+
+
+def _start_mem_monitor(uuid: str | None, logger: logging.Logger):
+    """daemon thread that samples system + process-tree memory to a csv.
+
+    Samples every interval seconds into logs/mem_<uuid>.csv, flushing each
+    row so the last sample survives a hard OOM kill. An INFO line goes to
+    the task log on the first sample and on each new pipeline-memory peak;
+    the rest are DEBUG.
+    """
+    interval = _resolve_mem_interval()
+    if interval <= 0:
+        return
+
+    from mbo_utilities._sysmem import mem_snapshot, format_mem_line
+
+    def _monitor():
+        from mbo_utilities.preferences import get_mbo_dirs
+        log_dir = get_mbo_dirs()["logs"]
+        log_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = log_dir / f"mem_{uuid or os.getpid()}.csv"
+        start = time.time()
+        peak = 0.0
+        first = True
+        f = None
+        try:
+            f = open(csv_path, "a", encoding="utf-8")
+            if f.tell() == 0:
+                f.write(
+                    "t_iso,elapsed_s,sys_pct,used_gb,total_gb,"
+                    "proc_gb,nproc,top_pid,top_name,top_gb\n"
+                )
+            while True:
+                time.sleep(interval)
+                try:
+                    s = mem_snapshot()
+                except Exception:
+                    continue
+                top = s.get("top")
+                tp, tn, tgb = (top[0], str(top[1]).replace(",", " "), top[2]) if top else ("", "", 0.0)
+                try:
+                    f.write(
+                        f"{time.strftime('%Y-%m-%dT%H:%M:%S')},{time.time() - start:.1f},"
+                        f"{s['sys_pct']:.1f},{s['used_gb']:.3f},{s['total_gb']:.3f},"
+                        f"{s.get('proc_gb', 0.0):.3f},{s.get('nproc', 0)},{tp},{tn},{tgb:.3f}\n"
+                    )
+                    f.flush()
+                except Exception:
+                    pass
+                pg = s.get("proc_gb", 0.0)
+                if first or pg > peak + 0.1:
+                    peak = max(peak, pg)
+                    first = False
+                    logger.info(format_mem_line(s))
+                else:
+                    logger.debug(format_mem_line(s))
+        finally:
+            if f is not None:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+
+    threading.Thread(target=_monitor, daemon=True).start()
+
+
 def _contain_in_job():
     """Windows: assign this worker to a Job Object that terminates all
     members when the job handle closes.
@@ -341,6 +426,9 @@ def main():
     # watchdog kills this process if it stalls for too long
     _start_watchdog(uuid, logger, log_file)
 
+    # sample system + process-tree memory to a csv sidecar
+    _start_mem_monitor(uuid, logger)
+
     # get task function
     if task_type not in TASKS:
         logger.error(f"Unknown task type: {task_type}")
@@ -357,6 +445,11 @@ def main():
         _update_status(os.getpid(), "completed", uuid=uuid)
         sys.exit(0)
     except Exception as e:
+        try:
+            from mbo_utilities._sysmem import mem_snapshot, format_mem_line
+            logger.error("memory at failure: " + format_mem_line(mem_snapshot()))
+        except Exception:
+            pass
         logger.exception(f"Task failed: {e}")
         _update_status(os.getpid(), "error", message=str(e), details=traceback.format_exc(), uuid=uuid)
         sys.exit(1)

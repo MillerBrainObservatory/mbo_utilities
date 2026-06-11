@@ -20,6 +20,10 @@ from mbo_utilities.preferences import (
     set_gpu_index,
     get_debug_logging,
     set_debug_logging,
+    get_mem_monitor,
+    set_mem_monitor,
+    get_mem_monitor_interval,
+    set_mem_monitor_interval,
 )
 from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 
@@ -113,12 +117,18 @@ def draw_options_popup(parent: Any) -> None:
         parent._options_gpu_idx = get_gpu_index()
     if not hasattr(parent, "_options_debug"):
         parent._options_debug = get_debug_logging()
+    if not hasattr(parent, "_options_mem"):
+        parent._options_mem = get_mem_monitor()
+    if not hasattr(parent, "_options_mem_interval"):
+        parent._options_mem_interval = get_mem_monitor_interval()
 
     if parent._show_options_popup:
         # re-sync from prefs each open so changes from the CLI or another
         # window aren't shadowed by a stale snapshot.
         parent._options_gpu_idx = get_gpu_index()
         parent._options_debug = get_debug_logging()
+        parent._options_mem = get_mem_monitor()
+        parent._options_mem_interval = get_mem_monitor_interval()
         parent._options_sizer.before_open()
         imgui.open_popup("Options##options_popup")
         parent._show_options_popup = False
@@ -180,6 +190,23 @@ def draw_options_popup(parent: Any) -> None:
             _mbo_log.set_global_level(
                 logging.DEBUG if new_debug else logging.INFO
             )
+
+        changed, new_mem = imgui.checkbox("Log memory usage", parent._options_mem)
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Sample RAM use to logs/mem_<id>.csv each tick.")
+        if changed:
+            parent._options_mem = new_mem
+            set_mem_monitor(new_mem)
+        imgui.same_line()
+        imgui.begin_disabled(not parent._options_mem)
+        imgui.set_next_item_width(hello_imgui.em_size(5))
+        changed, new_iv = imgui.input_float(
+            "tick (s)##mem_interval", parent._options_mem_interval, 0.0, 0.0, "%.1f"
+        )
+        imgui.end_disabled()
+        if changed:
+            parent._options_mem_interval = max(0.25, new_iv)
+            set_mem_monitor_interval(parent._options_mem_interval)
 
         imgui.dummy(imgui.ImVec2(0, 8))
         btn_w = hello_imgui.em_size(6)

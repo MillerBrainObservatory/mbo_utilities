@@ -16,6 +16,10 @@ from mbo_utilities.preferences import (
     set_gpu_index,
     get_debug_logging,
     set_debug_logging,
+    get_mem_monitor,
+    set_mem_monitor,
+    get_mem_monitor_interval,
+    set_mem_monitor_interval,
 )
 from mbo_utilities.install import check_installation, cupy_install_hint, Status
 
@@ -211,6 +215,8 @@ class FileDialog:
         # Seed from persisted preferences so re-opens remember the user's choice.
         self.selected_gpu_index: int = get_gpu_index()
         self.debug_logging: bool = get_debug_logging()
+        self.mem_monitor: bool = get_mem_monitor()
+        self.mem_monitor_interval: float = get_mem_monitor_interval()
         self._show_options_popup: bool = False
 
         # start dependency check immediately in background
@@ -296,6 +302,23 @@ class FileDialog:
                     )
                 except Exception:
                     pass
+
+            changed, new_mem = imgui.checkbox("Log memory usage", self.mem_monitor)
+            if imgui.is_item_hovered():
+                wrapped_tooltip("Sample RAM use to logs/mem_<id>.csv each tick.")
+            if changed:
+                self.mem_monitor = new_mem
+                set_mem_monitor(self.mem_monitor)
+            imgui.same_line()
+            imgui.begin_disabled(not self.mem_monitor)
+            imgui.set_next_item_width(hello_imgui.em_size(5))
+            changed, new_iv = imgui.input_float(
+                "tick (s)##mem_interval", self.mem_monitor_interval, 0.0, 0.0, "%.1f"
+            )
+            imgui.end_disabled()
+            if changed:
+                self.mem_monitor_interval = max(0.25, new_iv)
+                set_mem_monitor_interval(self.mem_monitor_interval)
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             if imgui.button("Close", imgui.ImVec2(hello_imgui.em_size(6), 0)):
