@@ -129,6 +129,40 @@ def _parallel_load_status(workers: int, threads_per_worker: int) -> tuple:
     return _LOAD_BAD_COLOR, f"{load} threads > {logical} logical (oversubscribed)"
 
 
+def _parallel_profiles() -> dict[str, tuple[int, int]]:
+    """Profile name -> (workers, threads_per_worker), sized to this host.
+
+    Parallel profiles favor plane parallelism (more workers, one thread
+    each); Sequential runs one plane on every physical core; Max
+    oversubscribes with logical cores. Drives the "Profile" selector,
+    which fills the workers / threads fields in one click.
+    """
+    physical = _detect_physical_cores()
+    logical = os.cpu_count() or physical
+    return {
+        "Sequential": (1, max(1, physical)),
+        "Low": (max(1, physical // 4), 1),
+        "Medium": (max(1, physical // 2), 1),
+        "High": (max(1, physical), 1),
+        "Max": (max(1, logical), 1),
+    }
+
+
+_PROFILE_HELP = (
+    "workers = parallel plane processes\n"
+    "threads/worker = BLAS/OMP threads within one plane\n"
+    "load = workers x threads; green when load <= physical cores\n"
+    "\n"
+    "- Low/Medium/High: cores go to workers, threads=1\n"
+    "  (maximize planes running at once)\n"
+    "- Sequential: 1 worker x all cores (one plane at a time)\n"
+    "- Max: workers = logical cores, so load > physical\n"
+    "\n"
+    "Best when planes >= workers. If planes < workers the extra\n"
+    "workers sit idle - prefer fewer workers, more threads/worker."
+)
+
+
 # "Look at these first" — fields whose label is rendered in a bold font
 # inside a thin rounded box in the pipeline-settings popup, so users know
 # which knobs typically matter most. Add / remove freely; the emphasis is
@@ -2186,6 +2220,36 @@ def _draw_section_suite2p_content(self):
             imgui.text_colored(_load_color, "(?)")
         if imgui.is_item_hovered():
             imgui.set_tooltip(_load_tooltip)
+
+        # Profile presets size workers x threads/worker to this machine in
+        # one click; the active profile is derived from the current values,
+        # so editing either field below flips the selector to Custom.
+        _profiles = _parallel_profiles()
+        _profile_names = list(_profiles) + ["Custom"]
+        _cur_wt = (self.s2p_extras.workers, self.s2p_extras.threads_per_worker)
+        _active = next((n for n, v in _profiles.items() if v == _cur_wt), "Custom")
+        imgui.set_next_item_width(INPUT_WIDTH)
+        _pchanged, _pidx = imgui.combo(
+            "Profile", _profile_names.index(_active), _profile_names
+        )
+        if _pchanged and _profile_names[_pidx] in _profiles:
+            self.s2p_extras.workers, self.s2p_extras.threads_per_worker = (
+                _profiles[_profile_names[_pidx]]
+            )
+        set_tooltip(
+            "Sizes workers x threads/worker to this machine. Sequential = "
+            "one plane on all cores; Low/Medium/High/Max = more parallel "
+            "planes. Custom = manual values below."
+        )
+        # help behind a popup button — keeps the dense text out of the way
+        # but on-screen (imgui clamps popups to the viewport, unlike a tall
+        # tooltip that clips off the popup edge).
+        if imgui.small_button("Profile help##profile_help_btn"):
+            imgui.open_popup("profile_help_popup")
+        if imgui.begin_popup("profile_help_popup"):
+            imgui.text(_PROFILE_HELP)
+            imgui.end_popup()
+
         imgui.set_next_item_width(INPUT_WIDTH)
         with _hi_extras("workers", self.s2p_extras.workers):
             _, self.s2p_extras.workers = imgui.input_int(

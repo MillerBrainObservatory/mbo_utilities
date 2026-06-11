@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.2.0"
+version = "3.2.1"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
-requires-python = ">=3.12.7,<3.14"
+requires-python = ">=3.12.7,<3.15"
 keywords = ["Microscopy", "ScanImage", "multiROI", "Tiff"]
 dependencies = [
 	"setuptools<81",
@@ -35,7 +35,6 @@ dependencies = [
 	"pygfx>=0.15.2",
 	"jupyter_rfb>=0.5.1",
 	"llvmlite>=0.43.0",
-	"mkl_fft>=2.0.0",
 	"mbo-fastplotlib>=0.7.3",
 	"rendercanvas>=2.4.2,<2.5",
 	"imgui-bundle==1.92.5",
@@ -49,7 +48,9 @@ dependencies = [
 	"napari-animation",
 	"numba>=0.60.0",
 	"suite2p>=1.0.0.1",
+	"torch",
 	"lbm_suite2p_python>=3.0.8",
+	"isoview>=0.2.0",
 ]
 
 [project.scripts]
@@ -86,6 +87,11 @@ rastermap = [
 isoview = [
     "isoview",
 ]
+# Faster FFT for axial registration; wheels need glibc>=2.28. Optional:
+# _registration.py falls back to scipy.fft when absent.
+mkl = [
+    "mkl_fft>=2.0.0",
+]
 docs = [
     "sphinx>=6.1.3",
     "docutils>=0.19",
@@ -106,18 +112,24 @@ docs = [
     "myst_nb",
     "pygfx>=0.14.0",
 ]
-all = ["mbo_utilities[rastermap,isoview]"]
+all = ["mbo_utilities[rastermap,isoview,mkl]"]
 
 [tool.uv]
 default-groups = ["dev", "isoview"]
 
-# Local dev: editable sibling checkouts. Honored by uv lock/sync, so CI (no sibling
-# checkouts) must pass --no-sources to resolve isoview / lbm_suite2p_python from PyPI.
-# uv build also strips them (--no-sources) so published wheels resolve from the registry.
-# [tool.uv.sources]
-# isoview = { path = "../isoview", editable = true }
-# lbm_suite2p_python = { path = "../LBM-Suite2p-Python", editable = true }
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
+[tool.uv.sources]
+# isoview = { path = "../isoview", editable = true }
+torch = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
 [tool.ruff]
 line-length = 88

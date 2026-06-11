@@ -123,15 +123,18 @@ def _build_projection_index(
 
 
 def _common_timepoints(index: dict[int, dict[int, Path]]) -> list[int]:
+    """Every tile/timepoint present in ANY camera (union).
+
+    Union, not intersection: a tile acquired on only some cameras (e.g. a
+    dropped CM0/CM1) must still appear so the user can work with the
+    cameras that exist. Panels for cameras lacking that tile render blank.
+    """
     if not index:
         return []
-    sets = [set(d.keys()) for d in index.values()]
-    if not sets:
-        return []
-    common = sets[0]
-    for s in sets[1:]:
-        common &= s
-    return sorted(common)
+    tps: set[int] = set()
+    for d in index.values():
+        tps |= set(d.keys())
+    return sorted(tps)
 
 
 def _percentile_interp(data: np.ndarray, percentile: float) -> float:
@@ -610,11 +613,13 @@ def _draw_display_controls(parent: Any) -> None:
         parent._iso_dp_vmin = lo
         parent._iso_dp_vmax = hi
 
+    tiled = bool(getattr(_get_iso_array(parent), "is_tiled", False))
     tps = parent._iso_dp_timepoints
     if not tps:
+        unit = "per-tile" if tiled else "per-timepoint"
         imgui.text_colored(
             imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
-            "(no per-timepoint projections — slider values still save)",
+            f"(no {unit} projections — slider values still save)",
         )
         return
 
@@ -622,12 +627,17 @@ def _draw_display_controls(parent: Any) -> None:
         cur_idx = tps.index(int(parent._iso_dp_current_tp))
     except ValueError:
         cur_idx = 0
-    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), "Timepoint:")
+    label = "Tile:" if tiled else "Timepoint:"
+    value_fmt = (
+        f"SPM{tps[cur_idx]:02d}  ({cur_idx + 1}/{len(tps)})"
+        if tiled
+        else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
+    )
+    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), label)
     imgui.same_line()
     imgui.set_next_item_width(220)
     changed, new_idx = imgui.slider_int(
-        "##iso_dp_tp", cur_idx, 0, max(0, len(tps) - 1),
-        f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})",
+        "##iso_dp_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
     )
     if changed:
         parent._iso_dp_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
@@ -687,15 +697,26 @@ def _draw_view_previews(parent: Any, iso: Any) -> None:
     if not views:
         return
 
-    avail_x = imgui.get_content_region_avail().x
-    n = len(views)
-    spacing = 12.0
-    cell_w = max(280.0, (avail_x - spacing * (n - 1)) / n)
-
     arr = _get_iso_array(parent)
     raw_mode = arr is not None and _is_raw(arr)
+
+    n = len(views)
+    ncols = 2 if n > 2 else n
+    nrows = (n + ncols - 1) // ncols
+    spacing = 12.0
+
+    avail = imgui.get_content_region_avail()
+    text_h = imgui.get_text_line_height_with_spacing()
+    # per cell: label line above, image box, two info lines below
+    cell_text_h = text_h * 3.5
+    # leave room for the separator + button row drawn after the previews
+    reserve_bottom = imgui.get_frame_height_with_spacing() + text_h
+    cell_w_h = (avail.x - spacing * (ncols - 1)) / ncols
+    cell_w_v = (avail.y - reserve_bottom - spacing * (nrows - 1)) / nrows - cell_text_h
+    cell_w = max(160.0, min(cell_w_h, cell_w_v))
+
     for i, view in enumerate(views):
-        if i > 0:
+        if i % ncols != 0:
             imgui.same_line(0.0, spacing)
         imgui.begin_group()
         try:

@@ -142,10 +142,44 @@ class ProcessInfo:
             return False
 
     def kill(self) -> bool:
-        """Attempt to kill the process."""
+        """Kill the process and its descendants (task-spawned pool / plane
+        workers, multiprocessing Manager).
+
+        Terminate gracefully first, then force-kill survivors. Children are
+        signalled before the parent so they are not reparented mid-kill.
+        Falls back to taskkill /T / SIGKILL if psutil is unavailable.
+        """
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
+
+        if psutil is not None:
+            try:
+                parent = psutil.Process(self.pid)
+            except psutil.NoSuchProcess:
+                return True  # already gone
+            try:
+                procs = parent.children(recursive=True)
+            except psutil.NoSuchProcess:
+                procs = []
+            procs.append(parent)
+            for p in procs:
+                try:
+                    p.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            _, alive = psutil.wait_procs(procs, timeout=5)
+            for p in alive:
+                try:
+                    p.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            return True
+
         try:
             if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/PID", str(self.pid)], check=True, capture_output=True)
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.pid)], check=True, capture_output=True)
             else:
                 os.kill(self.pid, 9)  # SIGKILL
             return True
@@ -339,11 +373,22 @@ class ProcessManager:
             child_env.setdefault("PYTHONUTF8", "1")
 
             if sys.platform == "win32":
-                # DETACHED_PROCESS (0x00000008) | CREATE_NEW_PROCESS_GROUP (0x00000200) | CREATE_NO_WINDOW (0x08000000)
-                creationflags = 0x00000008 | 0x00000200 | 0x08000000
+                # CREATE_NO_WINDOW hides the console; CREATE_NEW_PROCESS_GROUP
+                # detaches it from the GUI's Ctrl-C group so it outlives the
+                # GUI. DETACHED_PROCESS is deliberately NOT combined with
+                # CREATE_NO_WINDOW — they are conflicting console-disposition
+                # flags and together Windows pops a blank console window.
+                creationflags = (
+                    subprocess.CREATE_NO_WINDOW
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
                 proc = subprocess.Popen(
                     cmd,
                     creationflags=creationflags,
+                    startupinfo=startupinfo,
                     stdin=subprocess.DEVNULL,
                     stdout=f_out,
                     stderr=f_out,

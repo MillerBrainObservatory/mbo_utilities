@@ -109,7 +109,8 @@ def _build_projection_index(
 
     Keyed by the camera (CM##) directly — no view collapsing — so each
     of the cameras gets its own preview. The timepoint slider walks the
-    intersection of the per-camera timepoint sets.
+    union of the per-camera timepoint sets, so a tile present on only some
+    cameras still appears.
     """
     if not projections:
         return {}
@@ -135,16 +136,18 @@ def _build_projection_index(
 
 
 def _common_timepoints(index: dict[int, dict[int, Path]]) -> list[int]:
-    """Sorted list of timepoints present for every view."""
+    """Every tile/timepoint present in ANY camera (union).
+
+    Union, not intersection: a tile acquired on only some cameras (e.g. a
+    dropped CM0/CM1) must still appear so the user can crop the cameras
+    that exist. Panels for cameras lacking that tile render blank.
+    """
     if not index:
         return []
-    sets = [set(d.keys()) for d in index.values()]
-    if not sets:
-        return []
-    common = sets[0]
-    for s in sets[1:]:
-        common &= s
-    return sorted(common)
+    tps: set[int] = set()
+    for d in index.values():
+        tps |= set(d.keys())
+    return sorted(tps)
 
 
 def _ensure_window_state(parent: Any) -> None:
@@ -157,9 +160,10 @@ def _ensure_window_state(parent: Any) -> None:
     if not hasattr(parent, "_iso_crop_shapes"):
         parent._iso_crop_shapes: dict[int, tuple[int, int, int]] = {}
     # Widget-local edits — only committed to crop_state on Apply.
-    # Keyed by view int; values are dicts with z/y/x tuples.
+    # Keyed by (tile, camera); tile is None when non-tiled, else the SPM int.
+    # Values are dicts with z/y/x tuples.
     if not hasattr(parent, "_iso_crop_pending"):
-        parent._iso_crop_pending: dict[int, dict[str, tuple[int, int]]] = {}
+        parent._iso_crop_pending: dict[tuple, dict[str, tuple[int, int]]] = {}
     if not hasattr(parent, "_iso_crop_proj_index"):
         parent._iso_crop_proj_index: dict[int, dict[int, Path]] = {}
     if not hasattr(parent, "_iso_crop_timepoints"):
@@ -291,6 +295,25 @@ def _initial_display_range(parent: Any, arr: Any) -> tuple[float, float]:
     return 0.0, 1000.0
 
 
+def _seed_bounds(existing: dict | None, shp: tuple[int, int, int]) -> dict:
+    """Bounds dict seeded from a stored crop, else full extent."""
+    nz, ny, nx = shp
+    if existing is not None and tuple(existing.get("shape", ())) == tuple(shp):
+        return {
+            "z": tuple(existing["z"]),
+            "y": tuple(existing["y"]),
+            "x": tuple(existing["x"]),
+        }
+    return {"z": (0, nz), "y": (0, ny), "x": (0, nx)}
+
+
+def _pending_tile(parent: Any, arr: Any) -> int | None:
+    """Active tile key for pending crops: current SPM when tiled, else None."""
+    if bool(getattr(arr, "is_tiled", False)):
+        return int(parent._iso_crop_current_tp)
+    return None
+
+
 def _ensure_loaded_for(parent: Any, arr: Any) -> None:
     """(Re)resolve per-view extents + projection index when the dataset
     changes. Seeds full-extent crops, picks a sensible initial display
@@ -311,21 +334,8 @@ def _ensure_loaded_for(parent: Any, arr: Any) -> None:
     if shp is None:
         return
     cameras = cameras_for_crop(arr)
-    parent._iso_crop_pending = {}
-    nz, ny, nx = shp
     for cam in cameras:
         parent._iso_crop_shapes[cam] = shp
-        existing = crop_state.get_crops(arr).get(cam)
-        if existing is not None and existing.get("shape") == shp:
-            parent._iso_crop_pending[cam] = {
-                "z": tuple(existing["z"]),
-                "y": tuple(existing["y"]),
-                "x": tuple(existing["x"]),
-            }
-        else:
-            parent._iso_crop_pending[cam] = {
-                "z": (0, nz), "y": (0, ny), "x": (0, nx),
-            }
 
     try:
         projections = arr.projections() if hasattr(arr, "projections") else None
@@ -335,6 +345,26 @@ def _ensure_loaded_for(parent: Any, arr: Any) -> None:
     parent._iso_crop_timepoints = _common_timepoints(parent._iso_crop_proj_index)
     if parent._iso_crop_timepoints:
         parent._iso_crop_current_tp = parent._iso_crop_timepoints[0]
+
+    # Seed pending bounds, keyed by (tile, camera). tile is None for non-tiled
+    # datasets; for tiled it is each SPM that has a projection, so every tile
+    # carries its own per-camera crop.
+    parent._iso_crop_pending = {}
+    if bool(getattr(arr, "is_tiled", False)):
+        tile_crops = crop_state.get_tile_crops(arr)
+        tiles = parent._iso_crop_timepoints or [int(parent._iso_crop_current_tp)]
+        for tile in tiles:
+            existing_cams = tile_crops.get(int(tile), {})
+            for cam in cameras:
+                parent._iso_crop_pending[(int(tile), cam)] = _seed_bounds(
+                    existing_cams.get(cam), shp,
+                )
+    else:
+        existing = crop_state.get_crops(arr)
+        for cam in cameras:
+            parent._iso_crop_pending[(None, cam)] = _seed_bounds(
+                existing.get(cam), shp,
+            )
 
     vmin, vmax = _initial_display_range(parent, arr)
     parent._iso_crop_vmin = vmin
@@ -429,15 +459,41 @@ def draw_window(parent: Any) -> None:
         imgui.separator()
 
         sorted_cams = sorted(parent._iso_crop_shapes)
-        for i, cam in enumerate(sorted_cams):
-            _draw_camera_section(parent, arr, cam, is_first=(i == 0))
-            imgui.spacing()
+        # Scroll region for the camera sections so they never spill past the
+        # window; size it to leave room for the bottom button row, and cap
+        # each preview's height so all cameras fit without scrolling.
+        reserve_bottom = (
+            imgui.get_frame_height_with_spacing()
+            + imgui.get_text_line_height_with_spacing()
+        )
+        region_h = max(140.0, imgui.get_content_region_avail().y - reserve_bottom)
+        per_cam_h = region_h / max(1, len(sorted_cams))
+        if imgui.begin_child(
+            "##iso_crop_sections", imgui.ImVec2(0, region_h),
+        ):
+            for i, cam in enumerate(sorted_cams):
+                _draw_camera_section(
+                    parent, arr, cam, is_first=(i == 0), max_h=per_cam_h,
+                )
+                imgui.spacing()
+        imgui.end_child()
 
         imgui.separator()
+        tiled = bool(getattr(arr, "is_tiled", False))
+        if tiled and len(parent._iso_crop_timepoints) > 1:
+            cur = int(parent._iso_crop_current_tp)
+            if imgui.button(f"Copy SPM{cur:02d} crop to all tiles", imgui.ImVec2(0, 0)):
+                for cam in parent._iso_crop_shapes:
+                    src = parent._iso_crop_pending.get((cur, cam))
+                    if src is None:
+                        continue
+                    for tile in parent._iso_crop_timepoints:
+                        parent._iso_crop_pending[(int(tile), cam)] = dict(src)
+
         if imgui.button("Reset all", imgui.ImVec2(120, 0)):
-            for cam, shp in parent._iso_crop_shapes.items():
-                nz, ny, nx = shp
-                parent._iso_crop_pending[cam] = {
+            for (tile, cam), _ in list(parent._iso_crop_pending.items()):
+                nz, ny, nx = parent._iso_crop_shapes.get(cam, (0, 0, 0))
+                parent._iso_crop_pending[(tile, cam)] = {
                     "z": (0, nz), "y": (0, ny), "x": (0, nx),
                 }
         imgui.same_line()
@@ -446,21 +502,28 @@ def draw_window(parent: Any) -> None:
             # open seeds from crop_state again.
             parent._iso_crop_window_open = False
         imgui.same_line()
-        # Apply: commit every pending camera bound to the store + close.
-        # The Run-tab submits read from crop_state, so this is the
-        # explicit "make this run's crop" gesture.
+        # Apply: commit every pending bound to the store + close. The Run-tab
+        # submits read from crop_state, so this is the explicit "make this
+        # run's crop" gesture. Tiled datasets commit per (tile, camera).
         with _apply_button_style():
             if imgui.button("Apply", imgui.ImVec2(160, 0)):
-                for cam, shp in parent._iso_crop_shapes.items():
-                    pending = parent._iso_crop_pending.get(cam)
-                    if pending is None:
+                for (tile, cam), pending in parent._iso_crop_pending.items():
+                    shp = parent._iso_crop_shapes.get(cam)
+                    if shp is None:
                         continue
                     nz, ny, nx = shp
-                    crop_state.set_camera_bounds(
-                        arr, cam,
-                        z=pending["z"], y=pending["y"], x=pending["x"],
-                        shape=(nz, ny, nx),
-                    )
+                    if tile is None:
+                        crop_state.set_camera_bounds(
+                            arr, cam,
+                            z=pending["z"], y=pending["y"], x=pending["x"],
+                            shape=(nz, ny, nx),
+                        )
+                    else:
+                        crop_state.set_tile_camera_bounds(
+                            arr, tile, cam,
+                            z=pending["z"], y=pending["y"], x=pending["x"],
+                            shape=(nz, ny, nx),
+                        )
                 parent._iso_crop_window_open = False
     finally:
         imgui.end()
@@ -495,39 +558,48 @@ def _draw_display_controls(parent: Any, arr: Any) -> None:
         parent._iso_crop_vmin = lo
         parent._iso_crop_vmax = hi
 
+    tiled = bool(getattr(arr, "is_tiled", False))
     tps = parent._iso_crop_timepoints
     if not tps:
+        unit = "per-tile" if tiled else "per-timepoint"
         imgui.text_colored(
             imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
-            "(no per-timepoint projections — preview will not animate)",
+            f"(no {unit} projections — preview will not animate)",
         )
         return
 
-    # Timepoint scrubber — use the index into the common-timepoint list
-    # so it's always 0..N-1 regardless of TM numbering gaps.
+    # Scrubber — use the index into the common-tile/timepoint list so it's
+    # always 0..N-1 regardless of SPM/TM numbering gaps.
     try:
         cur_idx = tps.index(int(parent._iso_crop_current_tp))
     except ValueError:
         cur_idx = 0
-    imgui.text_colored(
-        imgui.ImVec4(0.85, 0.85, 0.85, 1.0),
-        "Timepoint:",
+    label = "Tile:" if tiled else "Timepoint:"
+    value_fmt = (
+        f"SPM{tps[cur_idx]:02d}  ({cur_idx + 1}/{len(tps)})"
+        if tiled
+        else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
     )
+    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), label)
     imgui.same_line()
     imgui.set_next_item_width(220)
     changed, new_idx = imgui.slider_int(
-        f"##iso_crop_tp", cur_idx, 0, max(0, len(tps) - 1),
-        f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})",
+        "##iso_crop_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
     )
     if changed:
         parent._iso_crop_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
-def _draw_camera_section(parent: Any, arr: Any, camera: int, *, is_first: bool = False) -> None:
+def _draw_camera_section(
+    parent: Any, arr: Any, camera: int, *,
+    is_first: bool = False, max_h: float | None = None,
+) -> None:
     nz, ny, nx = parent._iso_crop_shapes[camera]
+    tile = _pending_tile(parent, arr)
+    key = (tile, camera)
 
     # All edits go through pending state so the user can Cancel cleanly.
-    pending = parent._iso_crop_pending.setdefault(camera, {
+    pending = parent._iso_crop_pending.setdefault(key, {
         "z": (0, nz), "y": (0, ny), "x": (0, nx),
     })
     z0, z1 = pending["z"]
@@ -535,7 +607,11 @@ def _draw_camera_section(parent: Any, arr: Any, camera: int, *, is_first: bool =
     x0, x1 = pending["x"]
 
     color = _CAMERA_COLORS.get(camera, (0.6, 0.8, 1.0, 1.0))
-    imgui.text_colored(imgui.ImVec4(*color), f"CM{camera:02d}   shape=(Z={nz}, Y={ny}, X={nx})")
+    spm = f"SPM{tile:02d}  " if tile is not None else ""
+    imgui.text_colored(
+        imgui.ImVec4(*color),
+        f"{spm}CM{camera:02d}   shape=(Z={nz}, Y={ny}, X={nx})",
+    )
 
     imgui.push_id(f"iso_crop_cm_{camera}")
     try:
@@ -543,6 +619,14 @@ def _draw_camera_section(parent: Any, arr: Any, camera: int, *, is_first: bool =
         # Compact drag column on the left; preview eats whatever's left.
         controls_w = 2 * _DRAG_W + 56  # 2 drags + label + spacing per row
         preview_w = max(220.0, avail_x - controls_w - 16.0)
+        # Cap preview height so every camera section fits the scroll region;
+        # without this the preview scales to its full width and one camera
+        # can be ~600px tall, pushing the rest off-window.
+        header_h = imgui.get_text_line_height_with_spacing()
+        preview_h = (
+            preview_w if max_h is None
+            else max(96.0, max_h - header_h - imgui.get_style().item_spacing.y)
+        )
 
         imgui.begin_group()
         try:
@@ -560,12 +644,12 @@ def _draw_camera_section(parent: Any, arr: Any, camera: int, *, is_first: bool =
                 f"kept ({z1 - z0}, {y1 - y0}, {x1 - x0})",
             )
             if is_first and len(parent._iso_crop_shapes) > 1:
-                if imgui.button("Apply to all", imgui.ImVec2(120, 0)):
+                if imgui.button("Apply to all cameras", imgui.ImVec2(0, 0)):
                     for other_cam, shp in parent._iso_crop_shapes.items():
                         if other_cam == camera:
                             continue
                         o_nz, o_ny, o_nx = shp
-                        parent._iso_crop_pending[other_cam] = {
+                        parent._iso_crop_pending[(tile, other_cam)] = {
                             "z": (min(z0, o_nz - 1), min(z1, o_nz)),
                             "y": (min(y0, o_ny - 1), min(y1, o_ny)),
                             "x": (min(x0, o_nx - 1), min(x1, o_nx)),
@@ -580,12 +664,12 @@ def _draw_camera_section(parent: Any, arr: Any, camera: int, *, is_first: bool =
                 parent, camera, preview_w,
                 ny=ny, nx=nx,
                 y0=y0, y1=y1, x0=x0, x1=x1,
-                color=color,
+                color=color, preview_h=preview_h,
             )
         finally:
             imgui.end_group()
 
-        parent._iso_crop_pending[camera] = {
+        parent._iso_crop_pending[key] = {
             "z": (z0, z1), "y": (y0, y1), "x": (x0, x1),
         }
     finally:
@@ -632,10 +716,13 @@ def _draw_view_preview(
     ny: int, nx: int,
     y0: int, y1: int, x0: int, x1: int,
     color: tuple[float, float, float, float],
+    preview_h: float | None = None,
 ) -> None:
     """Draw the XY-projection texture for ``view`` at the current
-    timepoint, with the crop-box overlaid.
+    timepoint, with the crop-box overlaid. ``preview_h`` caps the
+    rendered height; when ``None`` it falls back to ``preview_w``.
     """
+    box_h = preview_w if preview_h is None else preview_h
     timepoint = int(parent._iso_crop_current_tp)
     gpu = _get_or_upload(parent, view, timepoint)
     if gpu is None:
@@ -643,15 +730,15 @@ def _draw_view_preview(
             imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
             "(no XY projection at this timepoint)",
         )
-        imgui.dummy(imgui.ImVec2(preview_w, preview_w * 0.6))
+        imgui.dummy(imgui.ImVec2(preview_w, min(preview_w * 0.6, box_h)))
         return
 
     src_h, src_w = gpu.h, gpu.w
     if src_h <= 0 or src_w <= 0:
         return
-    scale = min(preview_w / src_w, preview_w / src_h)
-    disp_w = max(96.0, src_w * scale)
-    disp_h = max(96.0, src_h * scale)
+    scale = min(preview_w / src_w, box_h / src_h)
+    disp_w = max(64.0, src_w * scale)
+    disp_h = max(64.0, src_h * scale)
 
     p0 = imgui.get_cursor_screen_pos()
     p1 = imgui.ImVec2(p0.x + disp_w, p0.y + disp_h)

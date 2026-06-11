@@ -347,6 +347,8 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                     imgui.spacing()
 
             is_lbm = metadata.get("lbm_stack", False) or metadata.get("stack_type") == "lbm"
+            is_isoview = str(metadata.get("stack_type", "")).startswith("isoview")
+            is_tiled = bool(getattr(data_array, "is_tiled", False))
 
             # Imaging section header
             imgui.text_colored(_TREE_NODE_COLOR, "Imaging")
@@ -358,7 +360,11 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                     continue
 
                 value = metadata.get(param.canonical)
-                if value is None:
+                # isoview has no real fs; its fps/vps reference rates are
+                # fs aliases, so skip alias resolution and treat fs as a
+                # user-supplied field (like LBM's dz).
+                skip_alias = is_isoview and param.canonical == "fs"
+                if value is None and not skip_alias:
                     for alias in param.aliases:
                         if alias in metadata:
                             value = metadata[alias]
@@ -397,6 +403,14 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                         imgui.begin_tooltip()
                         imgui.text("LBM stacks require user-supplied Z step size.")
                         imgui.text("Set via File > Save As > Metadata section.")
+                        imgui.end_tooltip()
+                elif param.canonical == "fs" and is_isoview and not is_tiled:
+                    imgui.same_line(value_col)
+                    imgui.text_colored(imgui.ImVec4(1.0, 0.3, 0.3, 1.0), "Required")
+                    if imgui.is_item_hovered():
+                        imgui.begin_tooltip()
+                        imgui.text("IsoView timelapse stacks require a user-supplied frame rate.")
+                        imgui.text("Set via Shift+M (metadata editor).")
                         imgui.end_tooltip()
                 else:
                     imgui.same_line(value_col)

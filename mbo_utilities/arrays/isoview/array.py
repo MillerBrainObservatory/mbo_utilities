@@ -850,7 +850,8 @@ _CORRECTED_RE = re.compile(
     r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _FUSED_RE = re.compile(
-    r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
+    # CM##_CM## is a fused camera pair; a lone CM## is a single-camera view.
+    r"SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_CM(\d+))?_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
     r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
 _RAW_STACK_RE = re.compile(
@@ -859,11 +860,11 @@ _RAW_STACK_RE = re.compile(
 _KLB_TM_RE = re.compile(r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)\.klb$")
 
 _PROJ_FLAT_RE = re.compile(
-    r"^SPM(\d+)_TM(\d+)_CM(\d+)(?:_CHN\d+)?\.(xy|xz|yz)Projection\.tif$",
+    r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_CHN\d+)?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_FUSED_RE = re.compile(
-    r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)_CM(\d+)_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
+    r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_CM(\d+))?_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_VW_ONLY_RE = re.compile(
@@ -889,26 +890,39 @@ def _scan_flat_projections(proj_dir: Path) -> dict | None:
     """Scan a flat ``*.{raw,corrected}.projections/`` directory.
 
     Files look like ``SPM##_TM##_CM##.{xy,xz,yz}Projection.tif`` with no
-    nested TM folders. Returns the standard
-    ``{"axes", "views", "files"}`` dict or ``None`` when empty.
+    nested TM folders. Tiled acquisitions (single TM, multiple SPM) key
+    each slot by its SPM so every spatial tile gets its own slot,
+    mirroring :func:`_scan_raw`; timelapse keys by TM. Returns the
+    standard ``{"axes", "views", "files"}`` dict or ``None`` when empty.
     """
-    axes: set[str] = set()
-    views: set[str] = set()
-    files: dict[tuple[str, str, int], Path] = {}
     if not proj_dir.is_dir():
         return None
+    parsed: list[tuple[int, int, int, str, Path]] = []
+    spm_set: set[int] = set()
+    tm_set: set[int] = set()
     for f in proj_dir.iterdir():
         if not f.is_file():
             continue
         m = _PROJ_FLAT_RE.match(f.name)
         if not m:
             continue
-        _, tm, cm, axis = m.groups()
-        axis = axis.lower()
-        view = f"CM{int(cm):02d}"
+        spm, tm, cm, axis = m.groups()
+        spm, cm = int(spm), int(cm)
+        tm = int(tm) if tm is not None else 0
+        spm_set.add(spm)
+        tm_set.add(tm)
+        parsed.append((spm, tm, cm, axis.lower(), f))
+    if not parsed:
+        return None
+    use_spm = len(tm_set) == 1 and len(spm_set) > 1
+    axes: set[str] = set()
+    views: set[str] = set()
+    files: dict[tuple[str, str, int], Path] = {}
+    for spm, tm, cm, axis, f in parsed:
+        view = f"CM{cm:02d}"
         axes.add(axis)
         views.add(view)
-        files[(axis, view, int(tm))] = f
+        files[(axis, view, spm if use_spm else tm)] = f
     return _finalize_projections(axes, views, files)
 
 
@@ -1112,7 +1126,8 @@ def _scan_fused(method_dir: Path):
             # tile gets its own timepoint; timelapse keys by the TM dir.
             slot = tm_from_dir if tm_from_dir is not None else int(m.group(1))
             chn = int(m.group(6)) if m.group(6) is not None else -1
-            key = (int(m.group(3)), int(m.group(4)), int(m.group(5)), chn)
+            cam1 = int(m.group(4)) if m.group(4) is not None else -1
+            key = (int(m.group(3)), cam1, int(m.group(5)), chn)
             by_tm.setdefault(slot, {})[key] = f
             views.add(key)
 
@@ -1354,19 +1369,20 @@ def make_raw_projections(
     overwrite: bool = False,
     progress_callback=None,
 ) -> dict:
-    """Write per-camera XY max-projections for a raw isoview acquisition.
+    """Write per-camera XY/XZ/YZ max-projections for a raw isoview acquisition.
 
     For each ``(specimen, timepoint, camera)`` raw ``.stack`` the volume
-    is read and reduced with ``np.max(axis=0)`` (XY MIP), then written as
-    ``SPM##_TM######_CM##.xyProjection.tif`` into the flat sibling
-    ``<raw_dir>.raw.projections/`` directory — the same location and name
-    :func:`_raw_projections` (and the GUI segmentation / dead-pixel
-    previews) read. Existing files are skipped unless ``overwrite``.
+    (Z, Y, X) is read once and reduced over Z/Y/X to XY/XZ/YZ MIPs, written
+    as ``SPM##_TM######_CM##.{xy,xz,yz}Projection.tif`` into the flat sibling
+    ``<raw_dir>.raw.projections/`` directory — the same location and names
+    :func:`_raw_projections` (and the GUI previews) read. Matches MATLAB
+    correctStack.m. Existing files are skipped unless ``overwrite``.
 
     CHN in a raw filename marks the camera's view, not a color channel,
-    so views collapse to one projection per camera (lowest CHN wins).
+    so views collapse to one projection set per camera (lowest CHN wins).
 
-    Returns ``{"dir": Path, "written": int, "skipped": int, "total": int}``.
+    Returns ``{"dir": Path, "written": int, "skipped": int, "total": int}``
+    where ``written``/``skipped`` count cameras (each writes three planes).
     """
     import tifffile
 
@@ -1403,17 +1419,24 @@ def make_raw_projections(
         proj_dir.mkdir(parents=True, exist_ok=True)
 
     for i, ((spc, tm, cam), (_chn, path)) in enumerate(sorted(best.items())):
-        out_name = f"SPM{spc:02d}_TM{tm:06d}_CM{cam:02d}.xyProjection.tif"
-        out_path = proj_dir / out_name
-        if out_path.exists() and not overwrite:
+        base = f"SPM{spc:02d}_TM{tm:06d}_CM{cam:02d}"
+        # stack is (Z, Y, X): axis 0/1/2 -> XY/XZ/YZ (matches correctStack.m)
+        targets = [
+            (0, proj_dir / f"{base}.xyProjection.tif"),
+            (1, proj_dir / f"{base}.xzProjection.tif"),
+            (2, proj_dir / f"{base}.yzProjection.tif"),
+        ]
+        if not overwrite and all(p.exists() for _, p in targets):
             skipped += 1
         else:
-            vol = LazyVolume(path, dimensions=(w, h, 0))
-            mip = np.max(np.asarray(vol[:]), axis=0)
-            tifffile.imwrite(out_path, mip)
+            vol = np.asarray(LazyVolume(path, dimensions=(w, h, 0))[:])
+            for axis, out_path in targets:
+                if out_path.exists() and not overwrite:
+                    continue
+                tifffile.imwrite(out_path, np.max(vol, axis=axis))
             written += 1
         if progress_callback is not None:
-            progress_callback(i + 1, total, out_name)
+            progress_callback(i + 1, total, base)
 
     return {"dir": proj_dir, "written": written, "skipped": skipped, "total": total}
 
@@ -1806,14 +1829,10 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             meta.setdefault("dz", float(meta["axial_step"]))
         elif "y_step" in meta:
             meta.setdefault("dz", float(meta["y_step"]))
-        # fs is the T-axis rate. For volumetric lightsheet, that's the
-        # volume rate (vps = fps / zplanes), not the per-plane camera
-        # rate (fps = 1000/exposure_time_ms). Fall back to fps only when
-        # zplanes is unknown / vps wasn't derived.
-        if "vps" in meta:
-            meta.setdefault("fs", float(meta["vps"]))
-        elif "fps" in meta:
-            meta.setdefault("fs", float(meta["fps"]))
+        # fs (the T-axis rate) is not reliably encoded in the acquisition
+        # XML, so it is left unset for the user to enter via the metadata
+        # editor. vps/fps stay available for reference but no longer seed
+        # fs automatically.
         if self._camera_metadata:
             # The GUI metadata viewer renders a dedicated "Cameras" panel
             # from metadata["cameras"]. Surface per-camera fields there;
@@ -1849,10 +1868,16 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         out_shape = (len(t_indices), len(c_indices), z_size, y_size, x_size)
         result = np.empty(out_shape, dtype=self._dtype)
 
-        # narrow zarr reads only pay off when one (t, view) is hit per call;
-        # bulk reads (zstats striding T at fixed Z) benefit from the cached
-        # full volume so the same (t, view) isn't re-decompressed at every Z.
+        # _read_slab reads only the requested slab and never fills the
+        # whole-volume cache. route single (t, view) reads through it, and
+        # any single-plane read (z is an int) regardless of how many
+        # timepoints are asked for. zstats strides T at a fixed Z; without
+        # the single-plane carve-out each sampled timepoint would cache a
+        # full Z*Y*X volume that is never released. genuine multi-plane
+        # bulk reads still cache the full volume so the same (t, view) is
+        # not re-decompressed at every Z.
         single_tv = len(t_indices) == 1 and len(c_indices) == 1
+        single_plane = isinstance(z_key, (int, np.integer))
 
         for ti, t_idx in enumerate(t_indices):
             for ci, c_idx in enumerate(c_indices):
@@ -1862,7 +1887,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
                     result[ti, ci] = 0
                     continue
 
-                if single_tv:
+                if single_tv or single_plane:
                     slab = self._read_slab(path, t_idx, c_idx, z_key, y_key, x_key)
                 else:
                     vol = self._read_volume(path, t_idx, c_idx)

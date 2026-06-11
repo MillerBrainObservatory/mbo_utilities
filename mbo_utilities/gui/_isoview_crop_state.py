@@ -24,6 +24,11 @@ from typing import Any
 #                                      "shape": (nz, ny, nx)}
 _STORE: dict[str, dict[int, dict[str, tuple]]] = {}
 
+# Per-tile crops (tiled acquisitions only). One entry per spatial tile (SPM),
+# each holding its own per-camera bounds. Emitted as isoview ``tile_crops``.
+# tiled[<raw_root_str>][tile_int][camera_int] = {"z":..., "y":..., "x":..., "shape":...}
+_TILE_STORE: dict[str, dict[int, dict[int, dict[str, tuple]]]] = {}
+
 
 def _raw_root_for(arr: Any) -> Path | None:
     """Resolve a stable per-acquisition key for ``arr``'s crops.
@@ -106,10 +111,44 @@ def set_camera_bounds(
     }
 
 
+def get_tile_crops(arr: Any) -> dict[int, dict[int, dict[str, tuple]]]:
+    """Return per-tile crops for ``arr``'s raw root, or ``{}``.
+
+    ``{tile_int: {camera_int: bounds}}`` (tiled acquisitions only).
+    """
+    k = _key(arr)
+    if k is None:
+        return {}
+    return {t: dict(cams) for t, cams in _TILE_STORE.get(k, {}).items()}
+
+
+def set_tile_camera_bounds(
+    arr: Any,
+    tile: int,
+    camera: int,
+    *,
+    z: tuple[int, int],
+    y: tuple[int, int],
+    x: tuple[int, int],
+    shape: tuple[int, int, int],
+) -> None:
+    """Record ``camera``'s crop within spatial tile ``tile`` (SPM index)."""
+    k = _key(arr)
+    if k is None:
+        return
+    _TILE_STORE.setdefault(k, {}).setdefault(int(tile), {})[int(camera)] = {
+        "z": (int(z[0]), int(z[1])),
+        "y": (int(y[0]), int(y[1])),
+        "x": (int(x[0]), int(x[1])),
+        "shape": tuple(int(d) for d in shape),
+    }
+
+
 def clear(arr: Any) -> None:
     k = _key(arr)
     if k is not None:
         _STORE.pop(k, None)
+        _TILE_STORE.pop(k, None)
 
 
 def _is_full_extent(bounds: dict[str, tuple]) -> bool:
@@ -133,7 +172,14 @@ def to_config_args(arr: Any) -> dict[str, dict[int, int]]:
 
     Returns ``{}`` when no crops are set (so callers can safely
     ``args.update(to_config_args(arr))``).
+
+    For tiled acquisitions, returns ``{"tile_crops": {...}}`` instead —
+    one per-camera override block per spatial tile (SPM) — which isoview
+    applies per active specimen at fuse time.
     """
+    if bool(getattr(arr, "is_tiled", False)):
+        return _tile_config_args(arr)
+
     crops = get_crops(arr)
     if not crops:
         return {}
@@ -174,8 +220,50 @@ def to_config_args(arr: Any) -> dict[str, dict[int, int]]:
     return out
 
 
+def _tile_config_args(arr: Any) -> dict[str, dict]:
+    """Build isoview ``tile_crops`` from the per-tile store.
+
+    ``{"tile_crops": {"SPM##": {crop_param: {camera: value}}}}``. Tiles
+    (and cameras) whose bounds span the full source shape are omitted, so
+    untouched tiles stay uncropped.
+    """
+    tile_crops = get_tile_crops(arr)
+    if not tile_crops:
+        return {}
+
+    out: dict[str, dict[str, dict[int, int]]] = {}
+    for tile in sorted(tile_crops):
+        params: dict[str, dict[int, int]] = {}
+        for camera, b in tile_crops[tile].items():
+            if _is_full_extent(b):
+                continue
+            z0, z1 = b["z"]
+            y0, y1 = b["y"]
+            x0, x1 = b["x"]
+            params.setdefault("crop_left", {})[camera] = x0
+            params.setdefault("crop_top", {})[camera] = y0
+            params.setdefault("crop_front", {})[camera] = z0
+            params.setdefault("crop_width", {})[camera] = x1 - x0
+            params.setdefault("crop_height", {})[camera] = y1 - y0
+            params.setdefault("crop_depth", {})[camera] = z1 - z0
+        if params:
+            out[f"SPM{int(tile):02d}"] = params
+
+    return {"tile_crops": out} if out else {}
+
+
 def summary(arr: Any) -> str:
     """Compact single-line summary for the Run-tab readout."""
+    if bool(getattr(arr, "is_tiled", False)):
+        tile_crops = get_tile_crops(arr)
+        cropped = [
+            t for t, cams in tile_crops.items()
+            if any(not _is_full_extent(b) for b in cams.values())
+        ]
+        if not cropped:
+            return "(none)"
+        return "per-tile: " + ", ".join(f"SPM{int(t):02d}" for t in sorted(cropped))
+
     crops = get_crops(arr)
     if not crops:
         return "(none)"

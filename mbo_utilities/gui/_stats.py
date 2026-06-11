@@ -162,6 +162,32 @@ def _selected_channel(parent: Any) -> int:
     return _current_channel(parent) % nc
 
 
+# zstats z-plane budget. deeper than this and we sample an evenly-spaced
+# subset instead of every plane, so a tens-to-thousands-deep stack doesn't
+# read and plot one point per plane. a constant stride keeps the samples on
+# even intervals (truthful and easy to label) and the count stays near the
+# budget so the table and plot don't overflow.
+_ZSTATS_MAX_PLANES = 40
+
+
+def _z_plane_indices(nz: int) -> list[int]:
+    """Evenly-spaced z-plane indices to compute stats over.
+
+    Returns every plane when ``nz <= _ZSTATS_MAX_PLANES``. Above that, uses
+    a constant stride of ``ceil(nz / _ZSTATS_MAX_PLANES)`` so the stride
+    grows with depth — a 1000-plane stack is sampled more sparsely (stride
+    25) than a 400-plane one (stride 10) — while the sample count stays at
+    or under the budget.
+    """
+    nz = int(nz)
+    if nz <= 1:
+        return [0]
+    if nz <= _ZSTATS_MAX_PLANES:
+        return list(range(nz))
+    stride = -(-nz // _ZSTATS_MAX_PLANES)  # ceil division
+    return list(range(0, nz, stride))
+
+
 def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
     """Determine the range of slices to compute stats over.
 
@@ -180,7 +206,7 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
         if not arr.average_frames and arr.can_average:
             arr.average_frames = True
         if nz is not None:
-            return list(range(nz)), "z"
+            return _z_plane_indices(nz), "z"
 
     # fallback: detect from arr.nz if available, else from parent
     if nz is None:
@@ -189,7 +215,7 @@ def _get_slice_range(parent: Any, arr: Any) -> tuple[list[int], str]:
         nc = arr.nc if hasattr(arr, "nc") else 1
 
     if nz > 1:
-        return list(range(nz)), "z"
+        return _z_plane_indices(nz), "z"
     elif nc > 1:
         return list(range(nc)), "c"
 
@@ -320,6 +346,17 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
     slice_range, slice_label = _get_slice_range(parent, arr)
     n_slices = len(slice_range)
 
+    # record the 1-based plane numbers actually sampled so the table/plot
+    # axes stay truthful when z is subsampled (deep stacks sample a strided
+    # subset rather than every plane). channel-stats mode has no z axis.
+    if not hasattr(parent, "_zstats_z_indices"):
+        parent._zstats_z_indices = [None] * max(
+            idx, int(getattr(parent, "num_graphics", idx))
+        )
+    parent._zstats_z_indices[idx - 1] = (
+        [int(s) + 1 for s in slice_range] if slice_label == "z" else None
+    )
+
     # Pre-cached stats on disk are single-channel only. Use them solely
     # when the array is single-channel; multi-channel data always
     # recomputes (the legacy cache schema has no channel slot).
@@ -335,6 +372,13 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         # the mean-images cache used by the visualization layer.
         stats = dict(pre_stats)
         stats.setdefault("slice_label", slice_label)
+        # disk-cached stats are full-resolution; subsample them to the same
+        # planes as slice_range so values match the (possibly subsampled)
+        # z axis the table/plot will label.
+        for _k in ("mean", "std", "snr", "min", "max"):
+            seq = stats.get(_k)
+            if isinstance(seq, (list, tuple)) and len(seq) > n_slices:
+                stats[_k] = [seq[s] for s in slice_range if s < len(seq)]
         parent._zstats[idx - 1][0] = stats
         means: list[np.ndarray] = []
         parent._zstats_progress[idx - 1] = 0.01
@@ -487,6 +531,7 @@ def refresh_zstats(parent: Any):
     parent._zstats_running = [False] * n
     parent._zstats_progress = [0.0] * n
     parent._zstats_current_z = [0] * n
+    parent._zstats_z_indices = [None] * n
 
     # Reset progress state for each graphic to allow new progress display
     for i in range(n):
@@ -594,6 +639,26 @@ def draw_stats_section(parent: Any):
     )
 
 
+def _z_axis_values(parent: Any, array_idx: int | None, n: int) -> np.ndarray:
+    """1-based plane numbers for the n stats points, honoring z-subsampling.
+
+    Uses the sampled plane numbers recorded by ``compute_zstats_single_array``
+    so a subsampled z axis shows the real (evenly-strided) plane numbers.
+    Falls back to a contiguous 1..n when no record matches (channel-stats
+    mode, or a length mismatch).
+    """
+    idxs = getattr(parent, "_zstats_z_indices", None)
+    picked = None
+    if idxs:
+        if array_idx is not None and 0 <= array_idx < len(idxs) and idxs[array_idx]:
+            picked = idxs[array_idx]
+        else:
+            picked = next((v for v in idxs if v), None)
+    if picked is not None and len(picked) >= n:
+        return np.ascontiguousarray(np.asarray(picked[:n], dtype=np.float64))
+    return np.ascontiguousarray(np.arange(1, n + 1, dtype=np.float64))
+
+
 def _draw_array_stats(
     parent, stats_list, channel, is_single_zplane, is_dual_zplane, is_combined
 ):
@@ -633,8 +698,9 @@ def _draw_array_stats(
         n = min(len(mean_vals), len(std_vals), len(snr_vals))
         mean_vals, std_vals, snr_vals = mean_vals[:n], std_vals[:n], snr_vals[:n]
 
-    # Convert to contiguous arrays for ImPlot
-    z_vals = np.ascontiguousarray(np.arange(1, len(mean_vals) + 1, dtype=np.float64))
+    # Convert to contiguous arrays for ImPlot. z_vals carries the real
+    # (possibly subsampled) 1-based plane numbers so axes are truthful.
+    z_vals = _z_axis_values(parent, array_idx, len(mean_vals))
     mean_vals = np.ascontiguousarray(mean_vals, dtype=np.float64)
     std_vals = np.ascontiguousarray(std_vals, dtype=np.float64)
 

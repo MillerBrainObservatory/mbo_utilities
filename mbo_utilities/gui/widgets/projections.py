@@ -55,6 +55,16 @@ def _timepoints_for(group: dict, axis: str, view: str) -> list[int]:
     )
 
 
+def _timepoints_for_axis(group: dict, axis: str) -> list[int]:
+    """Union of tiles/timepoints across all views for ``axis``.
+
+    Used for the slider so a tile acquired on only some cameras (e.g. a
+    dropped CM0/CM1) still appears; the image area shows "no projection
+    for current selection" when the active view lacks that tile.
+    """
+    return sorted({t for (a, v, t) in group["files"] if a == axis})
+
+
 class ProjectionsViewer(Widget):
     """Browse XY/XZ/YZ projections produced for the loaded isoview stack."""
 
@@ -82,6 +92,7 @@ class ProjectionsViewer(Widget):
         # discovery cache (lazy, sourced from arr.projections())
         self._projections: dict | None = None
         self._stack_type: str | None = None
+        self._is_tiled: bool = False
 
         # per-image state
         self._array_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
@@ -140,13 +151,14 @@ class ProjectionsViewer(Widget):
             return False
         self._projections = result
         self._stack_type = str((arr.metadata or {}).get("stack_type", ""))
+        self._is_tiled = bool(getattr(arr, "is_tiled", False))
         # initialize selection to the first plausible entry
         axes = result.get("axes") or []
         views = result.get("views") or []
         self._axis = axes[0] if axes else None
         self._view = views[0] if views else None
-        if self._axis and self._view:
-            tps = _timepoints_for(result, self._axis, self._view)
+        if self._axis:
+            tps = _timepoints_for_axis(result, self._axis)
             self._timepoint = tps[0] if tps else None
         return True
 
@@ -280,10 +292,11 @@ class ProjectionsViewer(Widget):
         max_t = max(tps_per_view.values()) if tps_per_view else 0
         axes_str = ", ".join(a.upper() for a in axes)
 
+        unit = "tiles" if self._is_tiled else "timepoints"
         imgui.text_colored(_WHITE, f"{len(files)} files")
         imgui.text_colored(_WHITE, f"axes: {axes_str}")
         imgui.text_colored(_WHITE, f"views: {', '.join(views)}")
-        imgui.text_colored(_WHITE, f"timepoints: {max_t}")
+        imgui.text_colored(_WHITE, f"{unit}: {max_t}")
 
     def _draw_popup_selectors(self) -> None:
         """Axis / View / Timepoint selectors inside the popup viewer."""
@@ -315,11 +328,14 @@ class ProjectionsViewer(Widget):
             self._view = views[new_idx]
             self._on_selection_changed()
 
-        tps = _timepoints_for(g, self._axis, self._view)
+        # Union across views so a tile present on only some cameras is
+        # still reachable; the image area reports when the active view
+        # lacks the selected tile.
+        tps = _timepoints_for_axis(g, self._axis)
         if not tps:
             imgui.text_colored(
                 STATUS_ERROR_COLOR,
-                f"no {self._axis} for {self._view}",
+                f"no {self._axis} projections",
             )
             return
         if self._timepoint not in tps:
@@ -328,12 +344,14 @@ class ProjectionsViewer(Widget):
 
         imgui.set_next_item_width(220)
         cur_pos = tps.index(self._timepoint)
+        if self._is_tiled:
+            slider_label = "Tile##projections"
+            value_fmt = f"%d / {len(tps) - 1}  (SPM{tps[0]:02d}-{tps[-1]:02d})"
+        else:
+            slider_label = "T##projections"
+            value_fmt = f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})"
         changed, new_pos = imgui.slider_int(
-            "T##projections",
-            cur_pos,
-            0,
-            len(tps) - 1,
-            f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})",
+            slider_label, cur_pos, 0, len(tps) - 1, value_fmt,
         )
         if changed:
             self._timepoint = tps[int(new_pos)]

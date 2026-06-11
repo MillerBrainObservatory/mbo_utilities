@@ -495,6 +495,7 @@ class PreviewDataWidget(EdgeWindow):
         self._zstats_running = [False] * self.num_graphics
         self._zstats_progress = [0.0] * self.num_graphics
         self._zstats_current_z = [0] * self.num_graphics
+        self._zstats_z_indices = [None] * self.num_graphics
 
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
@@ -999,11 +1000,30 @@ class PreviewDataWidget(EdgeWindow):
             if self._mean_subtraction and self._zstats_done[i]:
                 means_arr = _means_for(i)
                 if means_arr is not None:
-                    mean_img = means_arr[z_idx].astype(np.float32)
+                    # means_arr rows follow the sampled planes, which may be
+                    # a strided subset for deep stacks. map the displayed
+                    # plane to its nearest sampled row instead of indexing by
+                    # the absolute plane (which would be out of range).
+                    pos = self._sampled_mean_pos(i, z_idx, means_arr.shape[0])
+                    mean_img = means_arr[pos].astype(np.float32)
 
             spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
 
         self._set_processor_attr("spatial_func", spatial_funcs)
+
+    def _sampled_mean_pos(self, i: int, z_idx: int, n_rows: int) -> int:
+        """Row in graphic ``i``'s mean-images stack for displayed plane z_idx.
+
+        When z is subsampled the stack has fewer rows than the volume has
+        planes; map the absolute plane to the nearest sampled plane. Falls
+        back to a clamped index when no sampling record is available.
+        """
+        idxs = getattr(self, "_zstats_z_indices", None)
+        if idxs and i < len(idxs) and idxs[i] and len(idxs[i]) == n_rows:
+            target = int(z_idx) + 1  # records are 1-based plane numbers
+            planes = idxs[i]
+            return min(range(n_rows), key=lambda k: abs(planes[k] - target))
+        return max(0, min(int(z_idx), n_rows - 1))
 
     def _make_spatial_func(self, mean_img: np.ndarray | None, sigma: float | None):
         """Create a spatial function that applies mean subtraction and/or gaussian blur."""
@@ -1142,6 +1162,17 @@ class PreviewDataWidget(EdgeWindow):
         prev = getattr(self, "_last_frame_t", None)
         gap_ms = (t0 - prev) * 1000.0 if prev is not None else 0.0
         self._last_frame_t = t0
+
+        # Surface the Projections widget once the background raw-projection
+        # worker has written its output (widget list is otherwise only built
+        # on load). Cheap: gated to one refresh per raw dir.
+        try:
+            from mbo_utilities.gui.widgets.pipelines.isoview import (
+                maybe_refresh_raw_projections,
+            )
+            maybe_refresh_raw_projections(self)
+        except Exception:
+            self.logger.debug("raw projection refresh skipped", exc_info=True)
 
         draw_menu_bar(self)
         t1 = time.perf_counter()
