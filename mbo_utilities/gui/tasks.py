@@ -863,6 +863,7 @@ def _build_isoview_processing_config(args: dict):
         "pyramid_max_layers",
         "timepoints",
         "specimens",
+        "cameras",
         "segment_mode",
         "gauss_kernel",
         "gauss_sigma",
@@ -1247,8 +1248,9 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
 
     Walks ``config.fused_dir`` for VW00/VW90 pairs and writes one BDV
     SpimData dataset per fusion method under ``config.stitcher_dir``.
-    No resampling and no orientation — VW00/VW90 are written in their
-    native fused frame; orient and register them in BigStitcher.
+    No resampling. ``orientation`` (default none) bakes an optional
+    rotation/flip seed onto VW00 only; otherwise VW00/VW90 are written in
+    their native fused frame. Orient and register them in BigStitcher.
 
     Reuses the shared isoview ProcessingConfig builder + log bridge so
     the same path resolution and per-run log routing as correct_stack /
@@ -1274,6 +1276,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
             config,
             method=args.get("method"),
             bake_tile_positions=args.get("bake_tile_positions", False),
+            orientation=args.get("orientation"),
         )
         logger.info(f"  wrote: {xml_path}")
         _record_isoview_runtime(

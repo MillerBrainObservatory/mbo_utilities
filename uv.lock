@@ -2396,7 +2396,6 @@ dependencies = [
     { name = "llvmlite" },
     { name = "matplotlib" },
     { name = "mbo-fastplotlib" },
-    { name = "mkl-fft" },
     { name = "napari" },
     { name = "napari-animation" },
     { name = "napari-ome-zarr" },
@@ -2426,6 +2425,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "isoview" },
+    { name = "mkl-fft" },
     { name = "rastermap" },
 ]
 docs = [
@@ -2450,6 +2450,9 @@ docs = [
 ]
 isoview = [
     { name = "isoview" },
+]
+mkl = [
+    { name = "mkl-fft" },
 ]
 rastermap = [
     { name = "rastermap" },
@@ -2489,8 +2492,8 @@ requires-dist = [
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
-    { name = "mbo-utilities", extras = ["rastermap", "isoview"], marker = "extra == 'all'" },
-    { name = "mkl-fft", specifier = ">=2.0.0" },
+    { name = "mbo-utilities", extras = ["rastermap", "isoview", "mkl"], marker = "extra == 'all'" },
+    { name = "mkl-fft", marker = "extra == 'mkl'", specifier = ">=2.0.0" },
     { name = "myst-nb", marker = "extra == 'docs'" },
     { name = "napari" },
     { name = "napari-animation" },
@@ -2532,7 +2535,7 @@ requires-dist = [
     { name = "wgpu", specifier = ">=0.28.1,<0.29" },
     { name = "zarr", specifier = ">=3.1.3" },
 ]
-provides-extras = ["rastermap", "isoview", "docs", "all"]
+provides-extras = ["rastermap", "isoview", "mkl", "docs", "all"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -60,6 +60,25 @@ _BTN_W = 90
 # logical-CPU count so a fat-finger 32 can't slip in.
 _MAX_WORKERS = 16
 
+# Rough per-worker RAM as a multiple of one raw camera volume. Correction holds
+# the stack + a corrected copy + segmentation buffers (~3x); fusion holds two
+# camera volumes + two masks + the fused output (~6x, also used by the fuse
+# worker-count RAM cap below).
+_CORRECT_RAM_PER_WORKER_X = 3.0
+_FUSE_RAM_PER_WORKER_X = 6.0
+
+
+def _iso_volume_gb(arr: Any) -> float:
+    """One camera-volume size in GiB from an input array's last 3 dims (Z,Y,X)."""
+    try:
+        shp = tuple(int(s) for s in arr.shape)
+        if len(shp) < 3:
+            return 0.0
+        itemsize = int(getattr(arr.dtype, "itemsize", 2))
+        return (shp[-3] * shp[-2] * shp[-1] * itemsize) / (1024 ** 3)
+    except Exception:
+        return 0.0
+
 
 def _default_workers() -> int:
     """Conservative default: half the logical CPUs, capped at 4."""
@@ -139,6 +158,18 @@ _MODE_PREFIX = {
     _MODE_CORRECT: ".corrected",
     _MODE_FUSE: ".fused",
     _MODE_STITCHER: ".stitcher",
+}
+
+# VW00 orientation profiles for the BigStitcher export. A profile seeds the
+# editable rotations + flips in the Orientation box; the resulting ops are
+# forwarded to generate_bigstitcher_xml(orientation=...) and baked onto the
+# VW00 (angle-0) view only. "None" = no transform (default). Normal/Rotated
+# are starting seeds you refine in BigStitcher. Rotations are
+# (sign, axis, magnitude-degrees); flips are axes.
+_STITCHER_ORIENT_PROFILES: dict[str, dict] = {
+    "none": {"rotations": [], "flips": []},
+    "default": {"rotations": [("-", "X", 90), ("-", "Z", 90)], "flips": []},
+    "rotated": {"rotations": [("-", "X", 90)], "flips": []},
 }
 
 
@@ -352,6 +383,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         # To Regular Grid" / registration instead.
         self._stitcher_bake_tile_positions: bool = False
 
+        # VW00 reorientation seed for the BigStitcher export (applied to
+        # VW00 only). Empty = no transform; seeded from a profile or edited
+        # by hand. Forwarded to generate_bigstitcher_xml(orientation=...).
+        self._stitcher_rotations: list[dict] = []
+        self._stitcher_flips: list[str] = []
+
         # Per-step output suffix shared by correct/fuse/stitcher dirs.
         # Empty string yields the canonical names (.corrected, .fused,
         # .stitcher); a non-empty value is appended as `_<suffix>`.
@@ -409,6 +446,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._iso_slicing_open: bool = False
         self._iso_last_max_tp: int = 0
         self._iso_last_fpath: str = ""
+
+        # camera (C-axis) subset for correction. None = all cameras.
+        self._iso_selected_cameras: set[int] | None = None
 
         # Files popup lazy state
         self._iso_files_sizer: PopupAutoSize | None = None
@@ -641,6 +681,10 @@ class IsoviewPipelineWidget(PipelineWidget):
         if not self._show_settings_popup:
             return
 
+        # cache one camera-volume size for the worker RAM-estimate lines (the
+        # IO boxes drawn below don't receive ``arr``).
+        self._iso_vol_gb = _iso_volume_gb(arr)
+
         popup_title = "Isoview Pipeline Settings##isoview_pipeline_settings_popup"
         viewport = imgui.get_main_viewport()
         _vp_size = viewport.size
@@ -867,10 +911,155 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_stitcher_popup_rows(self) -> None:
         """BigStitcher Parameters popup, laid out in Suite2p-style boxes."""
         self._draw_popup_columns([
+            ("Orientation", self._draw_stitcher_orientation_box),
             ("View transforms", self._draw_stitcher_transforms_box),
             ("Acquisition (override XML)",
              self._draw_microscope_overrides_box, True),
         ])
+
+    def _orient_toggle(self, label: str, active: bool, width: float = 0.0) -> bool:
+        """Highlighted selection button; returns True when clicked."""
+        if active:
+            imgui.push_style_color(
+                imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
+            imgui.push_style_color(
+                imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
+            imgui.push_style_color(
+                imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
+        clicked = imgui.button(label, imgui.ImVec2(width, 0))
+        if active:
+            imgui.pop_style_color(3)
+        return clicked
+
+    def _load_orient_profile(self, name: str) -> None:
+        """Seed the editable rotations + flips from a profile."""
+        prof = _STITCHER_ORIENT_PROFILES.get(name, {"rotations": [], "flips": []})
+        self._stitcher_rotations = [
+            {"sign": s, "axis": a, "deg": int(d)} for (s, a, d) in prof["rotations"]
+        ]
+        self._stitcher_flips = list(prof["flips"])
+
+    def _orient_profile_match(self) -> "str | None":
+        """Name of the profile matching the current edits, or None."""
+        cur_rot = [
+            (r["sign"], r["axis"], int(r["deg"])) for r in self._stitcher_rotations
+        ]
+        cur_flip = list(self._stitcher_flips)
+        for name, prof in _STITCHER_ORIENT_PROFILES.items():
+            if cur_rot == [tuple(x) for x in prof["rotations"]] and (
+                cur_flip == list(prof["flips"])
+            ):
+                return name
+        return None
+
+    def _compose_orientation_ops(self) -> list:
+        """VW00 orientation op list for generate_bigstitcher_xml.
+
+        Rotations (row order, innermost first) then flips. Rotation ->
+        ["rot", axis, signed degrees]; flip -> ["flip", axis].
+        """
+        ops: list = []
+        for rot in self._stitcher_rotations:
+            deg = int(rot["deg"])
+            if rot["sign"] == "-":
+                deg = -deg
+            ops.append(["rot", rot["axis"], deg])
+        for axis in self._stitcher_flips:
+            ops.append(["flip", axis])
+        return ops
+
+    def _draw_stitcher_orientation_box(self) -> None:
+        """VW00 reorientation for the export (applied to VW00 only).
+
+        A profile seeds the editable rotations + flips below; tweak them
+        for one-offs. None = no transform (default).
+        """
+        _hint("Applied to VW00")
+        imgui.spacing()
+
+        # Profile: load a preset into the editable controls below.
+        match = self._orient_profile_match()
+        imgui.align_text_to_frame_padding()
+        imgui.text("Profile")
+        imgui.same_line(hello_imgui.em_size(7))
+        for k, (name, label) in enumerate(
+            (("none", "None"), ("default", "Normal"), ("rotated", "Rotated"))
+        ):
+            if k > 0:
+                imgui.same_line()
+            if self._orient_toggle(f"{label}##orient_profile_{name}", match == name):
+                self._load_orient_profile(name)
+        imgui.spacing()
+
+        # Rotations — editable list seeded by the profile.
+        imgui.text("Rotations")
+        axes = ["X", "Y", "Z"]
+        degs = ["90", "180", "270"]
+        remove_idx = -1
+        for i, rot in enumerate(self._stitcher_rotations):
+            imgui.push_id(i)
+            if imgui.button(
+                f"{rot['sign']}##sign", imgui.ImVec2(hello_imgui.em_size(2.2), 0)
+            ):
+                rot["sign"] = "-" if rot["sign"] == "+" else "+"
+            imgui.same_line()
+            imgui.set_next_item_width(hello_imgui.em_size(3.6))
+            ai = axes.index(rot["axis"]) if rot["axis"] in axes else 0
+            changed, ai = imgui.combo("##axis", ai, axes)
+            if changed:
+                rot["axis"] = axes[ai]
+            imgui.same_line()
+            imgui.set_next_item_width(hello_imgui.em_size(5.0))
+            cur_deg = str(int(rot["deg"]))
+            di = degs.index(cur_deg) if cur_deg in degs else 0
+            changed, di = imgui.combo("##deg", di, degs)
+            if changed:
+                rot["deg"] = int(degs[di])
+            imgui.same_line()
+            imgui.text("deg")
+            imgui.same_line()
+            if imgui.small_button("x##rm"):
+                remove_idx = i
+            imgui.pop_id()
+        if remove_idx >= 0:
+            del self._stitcher_rotations[remove_idx]
+        if imgui.small_button("+ add##orient_add_rot"):
+            self._stitcher_rotations.append({"sign": "-", "axis": "X", "deg": 90})
+        imgui.same_line()
+        if imgui.small_button("clear##orient_clear_rot"):
+            self._stitcher_rotations = []
+        imgui.spacing()
+
+        # Flip — Horizontal/Vertical/Depth toggle = flip X/Y/Z.
+        imgui.align_text_to_frame_padding()
+        imgui.text("Flip")
+        imgui.same_line(hello_imgui.em_size(7))
+        for k, (label, axis) in enumerate(
+            (("Horizontal (X)", "X"), ("Vertical (Y)", "Y"), ("Depth (Z)", "Z"))
+        ):
+            if k > 0:
+                imgui.same_line()
+            if self._orient_toggle(
+                f"{label}##orient_flip_{axis}", axis in self._stitcher_flips
+            ):
+                if axis in self._stitcher_flips:
+                    self._stitcher_flips.remove(axis)
+                else:
+                    self._stitcher_flips.append(axis)
+        imgui.spacing()
+
+        # Live summary of the composed VW00 transform.
+        ops = self._compose_orientation_ops()
+        if ops:
+            parts = []
+            for op in ops:
+                if op[0] == "rot":
+                    parts.append(f"{op[2]:+d} {op[1]}")
+                else:
+                    parts.append(f"flip {op[1]}")
+            imgui.text_disabled("VW00: " + ", ".join(parts))
+        else:
+            imgui.text_disabled("VW00: no transform")
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
@@ -987,6 +1176,7 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "CPU-bound: each holds a full 3D volume.\n"
                 f"Start 2–4 and watch RAM (soft cap {_MAX_WORKERS})."
             )
+            self._draw_worker_ram_estimate(_CORRECT_RAM_PER_WORKER_X)
 
             _, self._pyramid = imgui.checkbox("Pyramid", self._pyramid)
             set_tooltip(
@@ -1183,6 +1373,7 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "volumes + the output; adaptive blending uses more.\n"
                 f"Start 2–4 (soft cap {_MAX_WORKERS})."
             )
+            self._draw_worker_ram_estimate(_FUSE_RAM_PER_WORKER_X)
 
             _, self._pyramid = imgui.checkbox("Pyramid", self._pyramid)
             set_tooltip(
@@ -1484,6 +1675,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             "output_suffix": self._iso_tree_suffix(input_dir),
             "stitcher_suffix": self._stitcher_suffix,
             "bake_tile_positions": self._stitcher_bake_tile_positions,
+            "orientation": self._compose_orientation_ops(),
             "overwrite": self._overwrite,
             "specimens": [int(specimen)],
             "timepoints": list(getattr(arr, "_timepoints", []) or []),
@@ -1526,9 +1718,19 @@ class IsoviewPipelineWidget(PipelineWidget):
             "segment_threshold": self._correct_segment_threshold,
             "splitting": self._correct_splitting,
         }
-        tps = self._selected_timepoints()
-        if tps is not None:
-            args["timepoints"] = tps
+        sel = self._selected_timepoints()
+        if sel is not None:
+            if bool(getattr(arr, "is_tiled", False)):
+                # tiled: the slicing timeline IS the spatial-tile (SPM) axis, and
+                # isoview slices tiled data by `specimens`, not `timepoints`. map
+                # the selected positions to SPM indices so "process 1 tile" works.
+                tiles = list(getattr(arr, "_timepoints", []) or [])
+                args["specimens"] = [tiles[i] for i in sel if 0 <= i < len(tiles)] or sel
+            else:
+                args["timepoints"] = sel
+        cams = self._selected_cameras(arr)
+        if cams is not None:
+            args["cameras"] = cams
         args.update(self._microscope_kwargs())
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         args.update(crop_state.to_config_args(arr))
@@ -1536,6 +1738,33 @@ class IsoviewPipelineWidget(PipelineWidget):
             "isoview_correct", args,
             description=f"correct_stack: {Path(arr.scan_root).name}",
             output_path=resolved_out or str(arr.scan_root),
+        )
+
+    def _draw_worker_ram_estimate(self, per_worker_x: float) -> None:
+        """Estimated-RAM line under the Workers control. Per-worker footprint is
+        ~``per_worker_x`` x one raw camera volume; total = that x worker count.
+        Colored amber when it nears, red when it exceeds, machine RAM."""
+        vol_gb = getattr(self, "_iso_vol_gb", 0.0)
+        if vol_gb <= 0:
+            return
+        per_worker = vol_gb * per_worker_x
+        total = per_worker * max(1, self._workers)
+        try:
+            import psutil
+            total_ram = psutil.virtual_memory().total / (1024 ** 3)
+        except Exception:
+            total_ram = None
+        label = f"~{total:.0f} GB RAM  ({per_worker:.1f} GB/worker x {self._workers})"
+        if total_ram is not None and total > total_ram:
+            imgui.text_colored(imgui.ImVec4(0.92, 0.32, 0.32, 1.0), label)
+        elif total_ram is not None and total > 0.8 * total_ram:
+            imgui.text_colored(imgui.ImVec4(0.95, 0.75, 0.32, 1.0), label)
+        else:
+            imgui.text_disabled(label)
+        set_tooltip(
+            f"Rough estimate: each worker holds ~{per_worker_x:.0f}x one raw "
+            f"camera volume ({vol_gb:.1f} GB)."
+            + (f" Machine RAM: {total_ram:.0f} GB." if total_ram is not None else "")
         )
 
     def _ram_capped_fuse_workers(self, arr: Any, requested: int) -> int:
@@ -1549,10 +1778,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         requested = max(1, int(requested))
         try:
             import psutil
-            shp = tuple(int(s) for s in arr.shape)
-            itemsize = int(getattr(arr.dtype, "itemsize", 2))
-            vol_gb = (shp[-3] * shp[-2] * shp[-1] * itemsize) / (1024 ** 3)
-            per_worker_gb = max(1.0, vol_gb * 6.0)
+            vol_gb = _iso_volume_gb(arr)
+            per_worker_gb = max(1.0, vol_gb * _FUSE_RAM_PER_WORKER_X)
             avail_gb = psutil.virtual_memory().available / (1024 ** 3)
             ram_cap = max(1, int((avail_gb * 0.8) // per_worker_gb))
         except Exception:
@@ -2208,6 +2435,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         )
         imgui.text(f"{tp_label}: {n_tp}/{max_frames}")
 
+        if self._selected_mode == _MODE_CORRECT:
+            self._draw_iso_camera_subset()
+
         self._draw_iso_slicing_popup(max_frames, tp_label)
         imgui.spacing()
         imgui.spacing()
@@ -2257,6 +2487,62 @@ class IsoviewPipelineWidget(PipelineWidget):
             if imgui.button("Close##iso_slice_close", imgui.ImVec2(80, 0)):
                 imgui.close_current_popup()
             imgui.end_popup()
+
+    def _available_cameras(self, arr: Any) -> list[int]:
+        """Camera indices present in the loaded array. raw/corrected view_keys
+        are plain camera ints; fused view_keys are tuples (take the first)."""
+        vk = getattr(arr, "_view_keys", None)
+        if vk is None:
+            vk = getattr(arr, "view_keys", None) or []
+        out: list[int] = []
+        for v in vk:
+            if isinstance(v, (tuple, list)) and v:
+                out.append(int(v[0]))
+            else:
+                try:
+                    out.append(int(v))
+                except (TypeError, ValueError):
+                    continue
+        return sorted(set(out))
+
+    def _selected_cameras(self, arr: Any) -> list[int] | None:
+        """Selected camera indices, or None when the full set is selected (in
+        which case the pipeline auto-detects every camera)."""
+        avail = self._available_cameras(arr)
+        if len(avail) <= 1:
+            return None
+        sel = self._iso_selected_cameras
+        if sel is None:
+            return None
+        chosen = [c for c in avail if c in sel]
+        if not chosen or len(chosen) == len(avail):
+            return None
+        return chosen
+
+    def _draw_iso_camera_subset(self) -> None:
+        """Camera checkboxes — process only the checked cameras (correct mode)."""
+        arr = self._get_array()
+        cams = self._available_cameras(arr) if arr is not None else []
+        if len(cams) <= 1:
+            return
+        # (re)seed on first draw or when the dataset's cameras changed.
+        if self._iso_selected_cameras is None or not (self._iso_selected_cameras <= set(cams)):
+            self._iso_selected_cameras = set(cams)
+        imgui.spacing()
+        imgui.text_colored(_SUBSECTION_COLOR, "Cameras")
+        set_tooltip("Process only the checked cameras.", align="right")
+        for i, c in enumerate(cams):
+            checked = c in self._iso_selected_cameras
+            changed, new = imgui.checkbox(f"CM{c:02d}##iso_cam_{c}", checked)
+            if changed:
+                if new:
+                    self._iso_selected_cameras.add(c)
+                else:
+                    self._iso_selected_cameras.discard(c)
+            if i < len(cams) - 1:
+                imgui.same_line()
+        n_sel = len([c for c in cams if c in self._iso_selected_cameras])
+        imgui.text_disabled(f"{n_sel}/{len(cams)} cameras")
 
     def _selected_timepoints(self) -> list[int] | None:
         """Return a 0-based list of selected timepoint indices, or None
