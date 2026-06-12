@@ -32,8 +32,10 @@ export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 _done=0
 finish() {
   [ "$_done" = 1 ] && return; _done=1
+  local t0=$SECONDS
   cp -a "$WORK"/. "$MBO_DEST_DIR"/ 2>/dev/null || true
   rm -rf "$WORK"
+  echo "timing: transfer=$((SECONDS - t0))s total_wall=${SECONDS}s"
 }
 trap finish EXIT TERM
 

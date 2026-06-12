@@ -20,7 +20,11 @@ import math
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+# suite2p records these per-plane stage times in ops.npy['timing'] (seconds).
+_STAGES = ["registration", "detection", "extraction", "classification", "deconvolution"]
 
 DEFAULT_INPUT = "/lustre/fs8/mbo/scratch/mbo_data/lbm/2025-07-27_mk355/raw"
 DEFAULT_OUTPUT = "/lustre/fs8/mbo/scratch/mbo_data/lbm/2025-07-27_mk355/results"
@@ -80,6 +84,7 @@ def _num_planes(arr) -> int:
 def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force):
     from lbm_suite2p_python import pipeline
 
+    t0 = time.perf_counter()
     pipeline(
         arr,
         save_path=str(output_dir),
@@ -94,6 +99,72 @@ def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force)
         threads_per_worker=threads,
         writer_kwargs={"fix_phase": True, "use_fft": True},
     )
+    return time.perf_counter() - t0
+
+
+def _read_plane_timings(output_dir):
+    """Per-plane suite2p stage times (s) from each ops.npy['timing']."""
+    try:
+        import numpy as np
+    except Exception:
+        return []
+    rows = []
+    for p in sorted(Path(output_dir).glob("**/ops.npy")):
+        try:
+            ops = np.load(p, allow_pickle=True).item()
+        except Exception:
+            continue
+        t = ops.get("timing") if isinstance(ops, dict) else None
+        if not t:
+            continue
+        row = {"plane": p.parent.name}
+        row.update({s: float(t.get(s, 0) or 0) for s in _STAGES})
+        row["total_plane"] = float(t.get("total_plane_runtime", 0) or 0)
+        rows.append(row)
+    return rows
+
+
+def _write_timing_report(output_dir, wall=None, n_workers=None):
+    """Write timings.json into output_dir and print a per-plane breakdown.
+
+    Per-plane stage times come from ops.npy (suite2p); wall holds runner-level
+    seconds (imread, pipeline). Per plane == per worker (one plane per worker).
+    """
+    rows = _read_plane_timings(output_dir)
+    report = {"wall": wall or {}, "n_workers": n_workers, "planes": rows}
+    cols = _STAGES + ["total_plane"]
+    if rows:
+        report["totals"] = {
+            c: {"sum": sum(r[c] for r in rows),
+                "mean": sum(r[c] for r in rows) / len(rows),
+                "max": max(r[c] for r in rows)}
+            for c in cols
+        }
+    try:
+        (Path(output_dir) / "timings.json").write_text(json.dumps(report, indent=2))
+    except Exception:
+        pass
+
+    if not rows:
+        print("timing: no suite2p ops.npy['timing'] found under "
+              f"{output_dir}", flush=True)
+    else:
+        print("\n--- per-plane timing (s) ---", flush=True)
+        print(f"{'plane':<26}" + "".join(f"{s[:5]:>9}" for s in _STAGES)
+              + f"{'total':>9}", flush=True)
+        for r in rows:
+            print(f"{r['plane'][:26]:<26}"
+                  + "".join(f"{r[s]:>9.1f}" for s in _STAGES)
+                  + f"{r['total_plane']:>9.1f}", flush=True)
+        tot = report["totals"]
+        print(f"{'sum':<26}" + "".join(f"{tot[s]['sum']:>9.1f}" for s in _STAGES)
+              + f"{tot['total_plane']['sum']:>9.1f}", flush=True)
+        print(f"{'max (slowest plane)':<26}"
+              + "".join(f"{tot[s]['max']:>9.1f}" for s in _STAGES)
+              + f"{tot['total_plane']['max']:>9.1f}", flush=True)
+    for k, v in (wall or {}).items():
+        print(f"wall.{k}: {v:.1f}s", flush=True)
+    return report
 
 
 def _resolve_workers(n_shard: int, pack: int) -> tuple[int, int]:
@@ -150,6 +221,12 @@ def main(argv=None):
         print(math.ceil(p / pack))
         return
 
+    if "--report-timings" in argv:
+        i = argv.index("--report-timings")
+        d = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else str(output_dir)
+        _write_timing_report(d)
+        return
+
     gpus = None
     pos = []
     i = 0
@@ -182,7 +259,9 @@ def main(argv=None):
         _aggregate(input_dir, output_dir)
         return
 
+    t0 = time.perf_counter()
     arr = imread(input_dir)
+    t_imread = time.perf_counter() - t0
     print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
     plane_indices = list(range(_num_planes(arr)))
 
@@ -196,6 +275,7 @@ def main(argv=None):
 
     if gpus:
         _local_multi_gpu(gpus, plane_indices, input_dir, output_dir)
+        _write_timing_report(output_dir, {"imread": t_imread})
         return
 
     if array_id is not None:
@@ -210,7 +290,8 @@ def main(argv=None):
 
     workers, threads = _resolve_workers(len(plane_indices), pack)
     print(f"single job: {len(plane_indices)} planes workers={workers} threads={threads}", flush=True)
-    _run(arr, output_dir, ops, plane_indices, workers, threads, skip_volumetric=False, force=False)
+    wall = _run(arr, output_dir, ops, plane_indices, workers, threads, skip_volumetric=False, force=False)
+    _write_timing_report(output_dir, {"imread": t_imread, "pipeline": wall}, n_workers=workers)
 
 
 if __name__ == "__main__":

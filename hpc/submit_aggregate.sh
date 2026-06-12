@@ -21,4 +21,9 @@ export MBO_INPUT="${MBO_INPUT:-$MBO_LBM/2025-07-27_mk355/raw}"
 export MBO_OUTPUT="$MBO_DEST_DIR"
 export MBO_HPC_MODE=aggregate
 
+t0=$SECONDS
 srun python "$PROJECT/hpc/run_pipeline.py"
+echo "timing: aggregate=$((SECONDS - t0))s"
+
+# timing report over the full run (per-plane stages + writes timings.json)
+python "$PROJECT/hpc/run_pipeline.py" --report-timings "$MBO_OUTPUT" || true
