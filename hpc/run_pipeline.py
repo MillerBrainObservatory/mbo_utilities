@@ -56,6 +56,9 @@ def _config():
     ops_json = os.environ.get("MBO_OPS_JSON")
     if ops_json:
         ops.update(json.loads(Path(ops_json).read_text()))
+    ops_inline = os.environ.get("MBO_OPS")  # inline JSON, overrides MBO_OPS_JSON
+    if ops_inline:
+        ops.update(json.loads(ops_inline))
     return input_dir, output_dir, pack, ops
 
 
