@@ -20,7 +20,13 @@ import math
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+# Per-plane timing lives in two places inside ops.npy:
+#   ops['processing_history'] - lbm step durations (binary_write=IO, plots=figures)
+#   ops['plane_times']        - suite2p stage split (registration/detection/...)
+_COLS = ["io", "reg", "regmetrics", "detect", "extract", "plots", "total"]
 
 DEFAULT_INPUT = "/lustre/fs8/mbo/scratch/mbo_data/lbm/2025-07-27_mk355/raw"
 DEFAULT_OUTPUT = "/lustre/fs8/mbo/scratch/mbo_data/lbm/2025-07-27_mk355/results"
@@ -29,11 +35,13 @@ DEFAULT_PLANES_PER_GPU = 4
 DEFAULT_OPS = {
     "anatomical_only": 4,
     "diameter": 2,
-    "cellprob_threshold": -6,
+    "cellprob_threshold": -4,
+    "flow_threshold": 0,
     "spatial_hp_cp": 3,
     "niter": 200,
     "do_registration": 1,
     "two_step_registration": 1,
+    "do_regmetrics": False,  # PC reg-quality metrics cost ~40s/plane (>=1500 frames); off for speed
     "lam_percentile": 0,
     "min_neuropil_pixels": 0,
     "max_overlap": 0.99,
@@ -56,6 +64,9 @@ def _config():
     ops_json = os.environ.get("MBO_OPS_JSON")
     if ops_json:
         ops.update(json.loads(Path(ops_json).read_text()))
+    ops_inline = os.environ.get("MBO_OPS")  # inline JSON, overrides MBO_OPS_JSON
+    if ops_inline:
+        ops.update(json.loads(ops_inline))
     return input_dir, output_dir, pack, ops
 
 
@@ -74,9 +85,11 @@ def _num_planes(arr) -> int:
     return 1
 
 
-def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force):
+def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
+         replot=True):
     from lbm_suite2p_python import pipeline
 
+    t0 = time.perf_counter()
     pipeline(
         arr,
         save_path=str(output_dir),
@@ -86,11 +99,101 @@ def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force)
         keep_raw=False,
         force_reg=force,
         force_detect=force,
+        replot=replot,
         skip_volumetric=skip_volumetric,
         workers=workers,
         threads_per_worker=threads,
         writer_kwargs={"fix_phase": True, "use_fft": True},
     )
+    return time.perf_counter() - t0
+
+
+def _read_plane_timings(output_dir):
+    """Per-plane timing (s): IO + suite2p stage split + plotting.
+
+    io/plots come from ops['processing_history'] (first occurrence, so a
+    re-run's redundant re-plot doesn't inflate the original cost); the
+    registration/detection split comes from suite2p's ops['plane_times'].
+    """
+    try:
+        import numpy as np
+    except Exception:
+        return []
+
+    def _g(d, k):
+        return float(d.get(k, 0) or 0)
+
+    rows = []
+    for p in sorted(Path(output_dir).glob("**/ops.npy")):
+        try:
+            ops = np.load(p, allow_pickle=True).item()
+        except Exception:
+            continue
+        if not isinstance(ops, dict):
+            continue
+        pt = ops.get("plane_times") or {}
+        io = plots = 0.0
+        seen = set()
+        for step in (ops.get("processing_history") or []):
+            name, dur = step.get("step"), step.get("duration_seconds")
+            if dur is None:
+                continue
+            if name == "binary_write" and "io" not in seen:
+                io = float(dur); seen.add("io")
+            elif name == "plots" and "plots" not in seen:
+                plots = float(dur); seen.add("plots")
+        if not pt and not seen:
+            continue
+        row = {
+            "plane": p.parent.name,
+            "io": io,
+            "reg": _g(pt, "registration"),
+            "regmetrics": _g(pt, "registration_metrics"),
+            "detect": _g(pt, "detection"),
+            "extract": _g(pt, "extraction") + _g(pt, "classification") + _g(pt, "deconvolution"),
+            "plots": plots,
+        }
+        row["total"] = (row["io"] + row["reg"] + row["regmetrics"]
+                        + row["detect"] + row["extract"] + row["plots"])
+        rows.append(row)
+    return rows
+
+
+def _write_timing_report(output_dir, wall=None, n_workers=None):
+    """Write timings.json into output_dir and print a per-plane breakdown.
+
+    Columns: io=tiff->bin, reg=motion correction, regmetrics=reg quality PCs,
+    detect=cellpose, extract=+classify+deconv, plots=figures. wall holds
+    runner-level seconds (imread, pipeline). Per plane == per worker.
+    """
+    rows = _read_plane_timings(output_dir)
+    report = {"wall": wall or {}, "n_workers": n_workers, "planes": rows}
+    if rows:
+        report["totals"] = {
+            c: {"sum": sum(r[c] for r in rows),
+                "mean": sum(r[c] for r in rows) / len(rows),
+                "max": max(r[c] for r in rows)}
+            for c in _COLS
+        }
+    try:
+        (Path(output_dir) / "timings.json").write_text(json.dumps(report, indent=2))
+    except Exception:
+        pass
+
+    if not rows:
+        print(f"timing: no ops.npy timing (plane_times / processing_history) under {output_dir}", flush=True)
+    else:
+        print("\n--- per-plane timing (s): io=tiff->bin  reg=motion  regmetrics=reg-quality  "
+              "detect=cellpose  extract=+class+decon  plots=figures ---", flush=True)
+        print(f"{'plane':<24}" + "".join(f"{c:>11}" for c in _COLS), flush=True)
+        for r in rows:
+            print(f"{r['plane'][:24]:<24}" + "".join(f"{r[c]:>11.1f}" for c in _COLS), flush=True)
+        tot = report["totals"]
+        print(f"{'sum':<24}" + "".join(f"{tot[c]['sum']:>11.1f}" for c in _COLS), flush=True)
+        print(f"{'mean':<24}" + "".join(f"{tot[c]['mean']:>11.1f}" for c in _COLS), flush=True)
+    for k, v in (wall or {}).items():
+        print(f"wall.{k}: {v:.1f}s", flush=True)
+    return report
 
 
 def _resolve_workers(n_shard: int, pack: int) -> tuple[int, int]:
@@ -133,8 +236,11 @@ def _aggregate(input_dir, output_dir):
 
     _, _, _, ops = _config()
     arr = imread(input_dir)
+    # replot=False: per-plane figures already exist from the shard runs; the
+    # aggregate only needs the volumetric merge + volume plots, not a redundant
+    # per-plane re-plot (the dominant cost of the aggregate).
     _run(arr, output_dir, ops, planes=None, workers=1, threads=_cpu_quota(),
-         skip_volumetric=False, force=False)
+         skip_volumetric=False, force=False, replot=False)
 
 
 def main(argv=None):
@@ -145,6 +251,12 @@ def main(argv=None):
         from mbo_utilities import imread
         p = _num_planes(imread(input_dir))
         print(math.ceil(p / pack))
+        return
+
+    if "--report-timings" in argv:
+        i = argv.index("--report-timings")
+        d = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else str(output_dir)
+        _write_timing_report(d)
         return
 
     gpus = None
@@ -179,7 +291,9 @@ def main(argv=None):
         _aggregate(input_dir, output_dir)
         return
 
+    t0 = time.perf_counter()
     arr = imread(input_dir)
+    t_imread = time.perf_counter() - t0
     print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
     plane_indices = list(range(_num_planes(arr)))
 
@@ -193,6 +307,7 @@ def main(argv=None):
 
     if gpus:
         _local_multi_gpu(gpus, plane_indices, input_dir, output_dir)
+        _write_timing_report(output_dir, {"imread": t_imread})
         return
 
     if array_id is not None:
@@ -207,7 +322,8 @@ def main(argv=None):
 
     workers, threads = _resolve_workers(len(plane_indices), pack)
     print(f"single job: {len(plane_indices)} planes workers={workers} threads={threads}", flush=True)
-    _run(arr, output_dir, ops, plane_indices, workers, threads, skip_volumetric=False, force=False)
+    wall = _run(arr, output_dir, ops, plane_indices, workers, threads, skip_volumetric=False, force=False)
+    _write_timing_report(output_dir, {"imread": t_imread, "pipeline": wall}, n_workers=workers)
 
 
 if __name__ == "__main__":

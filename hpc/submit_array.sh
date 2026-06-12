@@ -1,26 +1,43 @@
 #!/bin/bash
-# Array body: each task processes one plane shard (F planes) on its own GPU.
-# --gres=gpu:1 per task makes CUDA renumber the visible GPU to 0, so no manual
-# pinning is needed. The --array range is set by submit_all.sh from the plane
-# count and MBO_PLANES_PER_GPU. skip_volumetric is implied by SLURM_ARRAY_TASK_ID;
-# the volumetric merge runs once in submit_aggregate.sh after all tasks succeed.
+# Array body: one plane shard per task on its own GPU, computed on node-local NVMe
+# and transferred into the shared folder submit_all.sh set (MBO_DEST_DIR). SLURM
+# writes this task's log straight into that folder. Run only via submit_all.sh.
 #SBATCH --job-name=s2p-arr
-#SBATCH --partition=gpu          # confirm: sinfo -s
-#SBATCH --gres=gpu:1             # confirm gres name: sinfo -o "%P %G"
+#SBATCH --partition=hpc_a100_a
+#SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
-#SBATCH --output=logs/%x_%A_%a.out
-#SBATCH --error=logs/%x_%A_%a.err
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
+#SBATCH --signal=B:TERM@120
 
 set -euo pipefail
-cd "$SLURM_SUBMIT_DIR"
-mkdir -p logs
+: "${MBO_REPOS:?source your mbo env file first (defines MBO_REPOS/MBO_LBM)}"
+: "${MBO_DEST_DIR:?run via submit_all.sh (it sets the shared output folder)}"
+PROJECT="${MBO_PROJECT:-$MBO_REPOS/mbo_utilities}"
+# Python env to activate; override with MBO_ENV (default: the shared mbo env).
+source "${MBO_ENV:-/lustre/fs8/mbo/scratch/mbo_soft/envs/mbo}/bin/activate"
 
-PROJECT="${MBO_PROJECT:-/lustre/fs8/mbo/scratch/mbo_soft/repos/mbo_distributed}"
-source "$PROJECT/.venv/bin/activate"
+JOB="${SLURM_JOB_NAME:-s2p-arr}"
+JID="${SLURM_ARRAY_JOB_ID:-0}_${SLURM_ARRAY_TASK_ID:-0}"
 
+WORK="${TMPDIR:-/tmp}/${JOB}_${JID}"
+mkdir -p "$WORK"
+export MBO_INPUT="${MBO_INPUT:-$MBO_LBM/2025-07-27_mk355/raw}"
+export MBO_OUTPUT="$WORK"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
-srun python run_pipeline.py
+# Transfer this shard into the shared folder, then wipe node-local /tmp.
+_done=0
+finish() {
+  [ "$_done" = 1 ] && return; _done=1
+  local t0=$SECONDS
+  cp -a "$WORK"/. "$MBO_DEST_DIR"/ 2>/dev/null || true
+  rm -rf "$WORK"
+  echo "timing: transfer=$((SECONDS - t0))s total_wall=${SECONDS}s"
+}
+trap finish EXIT TERM
+
+srun python "$PROJECT/hpc/run_pipeline.py"
