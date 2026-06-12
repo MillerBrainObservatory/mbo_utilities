@@ -1,17 +1,12 @@
 #!/bin/bash
 # Chain: array over plane shards, then one dependent aggregate. Both target ONE
-# shared dated folder on scratch (decided here once) so the cross-node merge can
-# see every shard. Each array task still computes on node-local NVMe and transfers
-# its shard into that folder; the aggregate reads it directly.
-#
-# Run from a writable dir with a logs/ subdir (e.g. $MBO_USER), env file sourced:
+# dated folder on scratch (decided here once); SLURM writes every task log into it
+# and the shards transfer their results into it, so one scp gets logs + results.
+# Nothing is written to the CWD or repo.
 #   MBO_NAME=mk355 ./submit_all.sh
-#   MBO_NAME=mk355 MBO_PLANES_PER_GPU=2 MBO_INPUT=/path/raw ./submit_all.sh
-# Result lands in  <MBO_DEST>/YYYY_MM_DD_<MBO_NAME>  (a _2, _3 ... suffix if it exists).
+#   MBO_NAME=mk355 MBO_PARTITION=hpc_l40s MBO_GRES=gpu:l40s:1 MBO_OPS='{"diameter":3}' ./submit_all.sh
 set -euo pipefail
 : "${MBO_REPOS:?source your mbo env file first (defines MBO_REPOS/MBO_LBM/MBO_USER)}"
-mkdir -p logs 2>/dev/null || true
-
 PROJECT="${MBO_PROJECT:-$MBO_REPOS/mbo_utilities}"
 source "$PROJECT/.venv/bin/activate"
 
@@ -34,9 +29,11 @@ SB=()
 [ -n "${MBO_GRES:-}" ] && SB+=(--gres="$MBO_GRES")
 
 ARRAY_JID=$(sbatch --parsable --job-name="${NAME}-arr" --array=0-$((NTASKS - 1)) \
+  --output="$FINAL/%x_%A_%a.out" --error="$FINAL/%x_%A_%a.err" \
   ${SB[@]+"${SB[@]}"} --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_array.sh")
 echo "submitted array job $ARRAY_JID"
 
 AGG_JID=$(sbatch --parsable --job-name="${NAME}-agg" --dependency=afterok:"$ARRAY_JID" \
+  --output="$FINAL/%x_%j.out" --error="$FINAL/%x_%j.err" \
   ${SB[@]+"${SB[@]}"} --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_aggregate.sh")
 echo "submitted aggregate job $AGG_JID (runs after $ARRAY_JID succeeds)"

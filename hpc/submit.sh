@@ -1,21 +1,18 @@
 #!/bin/bash
-# Single job: all planes on one GPU, F workers time-sharing it. Computes on
-# node-local NVMe, then moves results + this job's logs to shared scratch and
-# wipes the node-local copy. For 4 GPUs on one node use submit_node.sh; for
-# multi-node scaling use submit_all.sh.
+# Single job: all planes on one GPU. Computes on node-local NVMe, writes its log
+# AND results into one dated folder on shared scratch, wipes the node-local copy.
+# One scp of that folder gets everything. Nothing is written to the CWD or repo.
 #
-# Override from the command line (no edits):
-#   sbatch --job-name=mk355 --export=ALL,MBO_DEST=$MBO_USER/results submit.sh
+#   sbatch --job-name=mk355 --export=ALL,MBO_DEST=$MBO_USER/results,MBO_OPS='{"diameter":3}' submit.sh
 # Result lands in  <MBO_DEST>/YYYY_MM_DD_<job-name>  (a _2, _3 ... suffix if it exists).
-# Source your mbo env file first and submit from a dir with a logs/ subdir.
 #SBATCH --job-name=s2p
 #SBATCH --partition=hpc_a100_a
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 #SBATCH --signal=B:TERM@120
 
 set -euo pipefail
@@ -25,30 +22,28 @@ source "$PROJECT/.venv/bin/activate"
 
 JOB="${SLURM_JOB_NAME:-s2p}"
 JID="${SLURM_JOB_ID:-local}"
-SUBMIT="${SLURM_SUBMIT_DIR:-$PWD}"
 
-WORK="${TMPDIR:-/tmp}/${JOB}_${JID}"
+# One dated output folder on shared scratch; the log lives inside it.
 DEST_ROOT="${MBO_DEST:-${MBO_USER:?set MBO_DEST or source env (MBO_USER)}/results}"
-mkdir -p "$WORK"
+base="$DEST_ROOT/$(date +%Y_%m_%d)_${JOB}"; FINAL="$base"; n=2
+while [ -e "$FINAL" ]; do FINAL="${base}_${n}"; n=$((n + 1)); done
+mkdir -p "$FINAL"
+exec > "$FINAL/${JOB}_${JID}.log" 2>&1
 
+# Compute on node-local NVMe, copy results into the folder, wipe /tmp.
+WORK="${TMPDIR:-/tmp}/${JOB}_${JID}"
+mkdir -p "$WORK"
 export MBO_INPUT="${MBO_INPUT:-$MBO_LBM/2025-07-27_mk355/raw}"
 export MBO_OUTPUT="$WORK"
-
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
-# Move results + logs to a dated, non-colliding folder, then wipe node-local /tmp.
-_moved=0
+_done=0
 finish() {
-  [ "$_moved" = 1 ] && return; _moved=1
-  local base="$DEST_ROOT/$(date +%Y_%m_%d)_${JOB}" final n=2
-  final="$base"
-  while [ -e "$final" ]; do final="${base}_${n}"; n=$((n + 1)); done
-  mkdir -p "$final"
-  cp -a "$WORK"/. "$final"/ 2>/dev/null || true
-  cp -a "$SUBMIT/logs/${JOB}_${JID}".{out,err} "$final"/ 2>/dev/null || true
+  [ "$_done" = 1 ] && return; _done=1
+  cp -a "$WORK"/. "$FINAL"/ 2>/dev/null || true
   rm -rf "$WORK"
-  echo "moved results + logs to $final"
+  echo "results + log in $FINAL"
 }
 trap finish EXIT TERM
 
