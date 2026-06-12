@@ -22,7 +22,7 @@ PROJECT="${MBO_PROJECT:-$MBO_REPOS/mbo_utilities}"
 # Python env to activate; override with MBO_ENV (default: the shared mbo env).
 source "${MBO_ENV:-/lustre/fs8/mbo/scratch/mbo_soft/envs/mbo}/bin/activate"
 
-JOB="${SLURM_JOB_NAME:-s2p-node}"
+JOB="${MBO_NAME:-${SLURM_JOB_NAME:-s2p-node}}"
 JID="${SLURM_JOB_ID:-local}"
 
 # One dated output folder on shared scratch; the log lives inside it.
