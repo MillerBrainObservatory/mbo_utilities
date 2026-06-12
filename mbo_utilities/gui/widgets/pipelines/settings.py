@@ -722,7 +722,7 @@ class Suite2pSettings:
 
     # run section
     do_registration: int = 1  # 0=skip, 1=run, 2=force
-    do_regmetrics: bool = True
+    do_regmetrics: bool = False  # PC reg-quality metrics: ~40s/plane on >=1500 frames
     do_detection: int = 1  # 0=skip, 1=run, 2=force (was fork's "roidetect")
     do_deconvolution: bool = True  # was fork's "spikedetect"
     multiplane_parallel: bool = False
@@ -797,8 +797,8 @@ class Suite2pSettings:
     # "max_proj / meanImg" | "meanImg" | "max_proj"
     cellpose_img: str = "max_proj / meanImg"
     highpass_spatial: float = 0.0  # upstream default
-    flow_threshold: float = 0.4  # upstream default; was 0.0 (LBM tuning, flow-check disabled)
-    cellprob_threshold: float = 0.0  # upstream default; was -6.0 (LBM permissive tuning)
+    flow_threshold: float = 0.0  # LBM default: flow check disabled (suite2p ships 0.4)
+    cellprob_threshold: float = -4.0  # LBM default: more permissive than suite2p's 0.0
     # cellpose iterations (upstream forwards via `params` dict → model.eval(niter=...))
     # 0 = let cellpose pick based on diameter (default). Bump for dense / small cells.
     cellpose_niter: int = 0
@@ -3139,10 +3139,9 @@ def _draw_section_suite2p_content(self):
                 "flow_threshold", self.s2p.flow_threshold, "Flow threshold"
             )
             set_tooltip(
-                "Max allowed flow error per mask. Default 0.4.\n"
-                "INCREASE (or 0.0 = off) if missing masks.\n"
-                "DECREASE if cellpose returns ill-shaped masks.\n"
-                "LBM default: 0 (flow checking disabled)."
+                "Max allowed flow error per mask. LBM default: 0 (flow checking disabled).\n"
+                "INCREASE (suite2p default 0.4) if missing masks.\n"
+                "DECREASE if cellpose returns ill-shaped masks."
             )
             imgui.set_next_item_width(INPUT_WIDTH)
             with _hi("cellprob_threshold", self.s2p.cellprob_threshold):
@@ -3156,10 +3155,9 @@ def _draw_section_suite2p_content(self):
                 "Cellprob threshold",
             )
             set_tooltip(
-                "Cell probability threshold for Cellpose. Default: 0.0\n\n"
+                "Cell probability threshold for Cellpose. LBM default: -4.\n\n"
                 "DECREASE if cellpose is missing masks (or masks too small).\n"
-                "INCREASE if cellpose returns too many masks / false positives.\n\n"
-                "LBM default: -6 (very permissive)."
+                "INCREASE (suite2p default 0.0) if too many masks / false positives."
             )
             imgui.set_next_item_width(INPUT_WIDTH)
             with _mbo():
