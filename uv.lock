@@ -2139,16 +2139,16 @@ wheels = [
 
 [[package]]
 name = "lbm-suite2p-python"
-version = "3.1.0"
+version = "3.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mbo-utilities" },
     { name = "setuptools" },
     { name = "suite2p" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c0/32/2a3dcf004c498e562c3939109e146a5195b20c114fc2f82c91e578a765f8/lbm_suite2p_python-3.1.0.tar.gz", hash = "sha256:1714f5c641de9fff1885ad3a39260e9f386244d67e3d48acbdcf4e56561dcd6a", size = 175940, upload-time = "2026-06-08T17:47:40.277Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/39/6fb37d79391cd3ce083534b4c65d686d99e7db188e1ce18a1c0f620a9e1b/lbm_suite2p_python-3.1.1.tar.gz", hash = "sha256:b03c5ead6fb055684f76e1d2c49bb18fd67bf3a224ef06f22039568b15944fbb", size = 175837, upload-time = "2026-06-11T22:42:31.896Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/6f/04303a95870d6c6aac2092def1736ffc7cf21d8fbf4a5ee1a725fbdf1395/lbm_suite2p_python-3.1.0-py3-none-any.whl", hash = "sha256:cb19828ac1f05b985cddd12e7c10574cb7d6cce0420a651d209e8184ccdc8579", size = 170578, upload-time = "2026-06-08T17:47:39.094Z" },
+    { url = "https://files.pythonhosted.org/packages/91/57/656f20151befede4c323f9b1547633185d11a099109747cd767cd3e866e0/lbm_suite2p_python-3.1.1-py3-none-any.whl", hash = "sha256:2cad8dfaba24ecfd346141efb3cf6f0a18dbde2293daadbdeb9037069278b1ce", size = 170355, upload-time = "2026-06-11T22:42:30.879Z" },
 ]
 
 [[package]]
@@ -2378,7 +2378,7 @@ notebook = [
 
 [[package]]
 name = "mbo-utilities"
-version = "3.2.1"
+version = "3.2.2"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
@@ -2489,7 +2489,7 @@ requires-dist = [
     { name = "jupyter-rfb", specifier = ">=0.5.1" },
     { name = "jupyterlab", specifier = ">=4.2.6" },
     { name = "jupytext", marker = "extra == 'docs'" },
-    { name = "lbm-suite2p-python", specifier = ">=3.0.8" },
+    { name = "lbm-suite2p-python", specifier = ">=3.1.1" },
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
