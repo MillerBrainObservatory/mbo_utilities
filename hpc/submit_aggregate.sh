@@ -15,7 +15,8 @@ set -euo pipefail
 : "${MBO_REPOS:?source your mbo env file first (defines MBO_REPOS/MBO_LBM)}"
 : "${MBO_DEST_DIR:?run via submit_all.sh (it sets the shared output folder)}"
 PROJECT="${MBO_PROJECT:-$MBO_REPOS/mbo_utilities}"
-source "$PROJECT/.venv/bin/activate"
+# Python env to activate; override with MBO_ENV (default: the shared mbo env).
+source "${MBO_ENV:-/lustre/fs8/mbo/scratch/mbo_soft/envs/mbo}/bin/activate"
 
 export MBO_INPUT="${MBO_INPUT:-$MBO_LBM/2025-07-27_mk355/raw}"
 export MBO_OUTPUT="$MBO_DEST_DIR"

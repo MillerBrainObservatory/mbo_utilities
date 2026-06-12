@@ -19,7 +19,8 @@
 set -euo pipefail
 : "${MBO_REPOS:?source your mbo env file first (defines MBO_REPOS/MBO_LBM/MBO_USER)}"
 PROJECT="${MBO_PROJECT:-$MBO_REPOS/mbo_utilities}"
-source "$PROJECT/.venv/bin/activate"
+# Python env to activate; override with MBO_ENV (default: the shared mbo env).
+source "${MBO_ENV:-/lustre/fs8/mbo/scratch/mbo_soft/envs/mbo}/bin/activate"
 
 JOB="${SLURM_JOB_NAME:-s2p-node}"
 JID="${SLURM_JOB_ID:-local}"
