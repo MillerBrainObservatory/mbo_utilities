@@ -1,22 +1,37 @@
 #!/bin/bash
-# Chain: array over plane shards, then one dependent aggregate job.
-# Computes the array size from the plane count and MBO_PLANES_PER_GPU.
+# Chain: array over plane shards, then one dependent aggregate. Both target ONE
+# shared dated folder on scratch (decided here once) so the cross-node merge can
+# see every shard. Each array task still computes on node-local NVMe and transfers
+# its shard into that folder; the aggregate reads it directly.
 #
-#   ./submit_all.sh
-#   MBO_PLANES_PER_GPU=2 MBO_INPUT=/path/raw MBO_OUTPUT=/path/results ./submit_all.sh
-
+# Run from a writable dir with a logs/ subdir (e.g. $MBO_USER), env file sourced:
+#   MBO_NAME=mk355 ./submit_all.sh
+#   MBO_NAME=mk355 MBO_PLANES_PER_GPU=2 MBO_INPUT=/path/raw ./submit_all.sh
+# Result lands in  <MBO_DEST>/YYYY_MM_DD_<MBO_NAME>  (a _2, _3 ... suffix if it exists).
 set -euo pipefail
-cd "$(dirname "$0")"
+: "${MBO_REPOS:?source your mbo env file first (defines MBO_REPOS/MBO_LBM/MBO_USER)}"
 mkdir -p logs
 
-PROJECT="${MBO_PROJECT:-/lustre/fs8/mbo/scratch/mbo_soft/repos/mbo_distributed}"
+PROJECT="${MBO_PROJECT:-$MBO_REPOS/mbo_utilities}"
 source "$PROJECT/.venv/bin/activate"
 
-NTASKS=$(python run_pipeline.py --print-num-tasks)
+export MBO_INPUT="${MBO_INPUT:-$MBO_LBM/2025-07-27_mk355/raw}"
+
+NAME="${MBO_NAME:-s2p}"
+DEST_ROOT="${MBO_DEST:-${MBO_USER:?set MBO_DEST or source env (MBO_USER)}/results}"
+base="$DEST_ROOT/$(date +%Y_%m_%d)_${NAME}"
+FINAL="$base"; n=2
+while [ -e "$FINAL" ]; do FINAL="${base}_${n}"; n=$((n + 1)); done
+mkdir -p "$FINAL"
+echo "output folder: $FINAL"
+
+NTASKS=$(python "$PROJECT/hpc/run_pipeline.py" --print-num-tasks)
 echo "array size: $NTASKS task(s) (planes / MBO_PLANES_PER_GPU)"
 
-ARRAY_JID=$(sbatch --parsable --array=0-$((NTASKS - 1)) submit_array.sh)
+ARRAY_JID=$(sbatch --parsable --job-name="${NAME}-arr" --array=0-$((NTASKS - 1)) \
+  --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_array.sh")
 echo "submitted array job $ARRAY_JID"
 
-AGG_JID=$(sbatch --parsable --dependency=afterok:"$ARRAY_JID" submit_aggregate.sh)
+AGG_JID=$(sbatch --parsable --job-name="${NAME}-agg" --dependency=afterok:"$ARRAY_JID" \
+  --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_aggregate.sh")
 echo "submitted aggregate job $AGG_JID (runs after $ARRAY_JID succeeds)"
