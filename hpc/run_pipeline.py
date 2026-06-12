@@ -35,7 +35,8 @@ DEFAULT_PLANES_PER_GPU = 4
 DEFAULT_OPS = {
     "anatomical_only": 4,
     "diameter": 2,
-    "cellprob_threshold": -6,
+    "cellprob_threshold": -4,
+    "flow_threshold": 0,
     "spatial_hp_cp": 3,
     "niter": 200,
     "do_registration": 1,
