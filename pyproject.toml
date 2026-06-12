@@ -49,6 +49,7 @@ dependencies = [
 	"numba>=0.60.0",
 	"suite2p>=1.0.0.1",
 	"torch",
+	"torchvision",
 	"lbm_suite2p_python>=3.1.1",
 	"isoview>=0.2.0",
 ]
