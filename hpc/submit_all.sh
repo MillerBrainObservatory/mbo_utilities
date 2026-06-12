@@ -28,10 +28,15 @@ echo "output folder: $FINAL"
 NTASKS=$(python "$PROJECT/hpc/run_pipeline.py" --print-num-tasks)
 echo "array size: $NTASKS task(s) (planes / MBO_PLANES_PER_GPU)"
 
+# Optional partition/gres override (e.g. MBO_PARTITION=hpc_l40s MBO_GRES=gpu:l40s:1).
+SB=()
+[ -n "${MBO_PARTITION:-}" ] && SB+=(--partition="$MBO_PARTITION")
+[ -n "${MBO_GRES:-}" ] && SB+=(--gres="$MBO_GRES")
+
 ARRAY_JID=$(sbatch --parsable --job-name="${NAME}-arr" --array=0-$((NTASKS - 1)) \
-  --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_array.sh")
+  ${SB[@]+"${SB[@]}"} --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_array.sh")
 echo "submitted array job $ARRAY_JID"
 
 AGG_JID=$(sbatch --parsable --job-name="${NAME}-agg" --dependency=afterok:"$ARRAY_JID" \
-  --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_aggregate.sh")
+  ${SB[@]+"${SB[@]}"} --export=ALL,MBO_DEST_DIR="$FINAL" "$PROJECT/hpc/submit_aggregate.sh")
 echo "submitted aggregate job $AGG_JID (runs after $ARRAY_JID succeeds)"
