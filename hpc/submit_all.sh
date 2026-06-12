@@ -10,7 +10,7 @@
 # Result lands in  <MBO_DEST>/YYYY_MM_DD_<MBO_NAME>  (a _2, _3 ... suffix if it exists).
 set -euo pipefail
 : "${MBO_REPOS:?source your mbo env file first (defines MBO_REPOS/MBO_LBM/MBO_USER)}"
-mkdir -p logs
+mkdir -p logs 2>/dev/null || true
 
 PROJECT="${MBO_PROJECT:-$MBO_REPOS/mbo_utilities}"
 source "$PROJECT/.venv/bin/activate"
