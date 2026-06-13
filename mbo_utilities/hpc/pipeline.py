@@ -1,0 +1,249 @@
+"""Scheduler-agnostic compute core for the HPC Suite2p runner.
+
+These functions run the same whether invoked locally, in a single SLURM job, or
+in one array task; the submitit layer in ``submit.py`` only decides which role
+each process plays. ``run_job`` is the module-level entry point submitit pickles
+and executes on the compute node.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import shutil
+import tempfile
+import time
+from pathlib import Path
+
+from .config import HpcConfig
+
+# Per-plane timing columns (see _read_plane_timings).
+_COLS = ["io", "reg", "regmetrics", "detect", "extract", "plots", "total"]
+
+
+def cpu_quota() -> int:
+    """CPUs this process may use — respects SLURM cgroup, unlike os.cpu_count()."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 1
+
+
+def num_planes(arr) -> int:
+    try:
+        from lbm_suite2p_python.utils import _get_num_planes
+        return int(_get_num_planes(arr))
+    except Exception:
+        pass
+    n = getattr(arr, "nz", None)
+    if n:
+        return int(n)
+    shp = getattr(arr, "shape", None)
+    if shp is not None and len(shp) >= 3:
+        return int(shp[-3])
+    return 1
+
+
+def resolve_workers(n_shard: int, pack: int, threads_override: int = 0) -> tuple[int, int]:
+    workers = max(1, min(n_shard, pack, cpu_quota()))
+    threads = threads_override if threads_override else max(1, cpu_quota() // workers)
+    return workers, threads
+
+
+def shard_for_task(plane_indices, pack, task_id):
+    start = task_id * pack
+    return plane_indices[start:start + pack]
+
+
+def num_tasks(n_planes: int, pack: int) -> int:
+    return math.ceil(n_planes / pack)
+
+
+def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
+         replot=True):
+    from lbm_suite2p_python import pipeline
+
+    t0 = time.perf_counter()
+    pipeline(
+        arr,
+        save_path=str(output_dir),
+        ops=ops,
+        planes=planes,
+        keep_reg=True,
+        keep_raw=False,
+        force_reg=force,
+        force_detect=force,
+        replot=replot,
+        skip_volumetric=skip_volumetric,
+        workers=workers,
+        threads_per_worker=threads,
+        writer_kwargs={"fix_phase": True, "use_fft": True},
+    )
+    return time.perf_counter() - t0
+
+
+def _aggregate(input_dir, output_dir, ops):
+    from mbo_utilities import imread
+
+    arr = imread(input_dir)
+    # replot=False: per-plane figures already exist from the shard runs; the
+    # aggregate only needs the volumetric merge + volume plots.
+    _run(arr, output_dir, ops, planes=None, workers=1, threads=cpu_quota(),
+         skip_volumetric=False, force=False, replot=False)
+
+
+def _read_plane_timings(output_dir):
+    """Per-plane timing (s): IO + suite2p stage split + plotting."""
+    try:
+        import numpy as np
+    except Exception:
+        return []
+
+    def _g(d, k):
+        return float(d.get(k, 0) or 0)
+
+    rows = []
+    for p in sorted(Path(output_dir).glob("**/ops.npy")):
+        try:
+            ops = np.load(p, allow_pickle=True).item()
+        except Exception:
+            continue
+        if not isinstance(ops, dict):
+            continue
+        pt = ops.get("plane_times") or {}
+        io = plots = 0.0
+        seen = set()
+        for step in (ops.get("processing_history") or []):
+            name, dur = step.get("step"), step.get("duration_seconds")
+            if dur is None:
+                continue
+            if name == "binary_write" and "io" not in seen:
+                io = float(dur); seen.add("io")
+            elif name == "plots" and "plots" not in seen:
+                plots = float(dur); seen.add("plots")
+        if not pt and not seen:
+            continue
+        row = {
+            "plane": p.parent.name,
+            "io": io,
+            "reg": _g(pt, "registration"),
+            "regmetrics": _g(pt, "registration_metrics"),
+            "detect": _g(pt, "detection"),
+            "extract": _g(pt, "extraction") + _g(pt, "classification") + _g(pt, "deconvolution"),
+            "plots": plots,
+        }
+        row["total"] = (row["io"] + row["reg"] + row["regmetrics"]
+                        + row["detect"] + row["extract"] + row["plots"])
+        rows.append(row)
+    return rows
+
+
+def write_timing_report(output_dir, wall=None, n_workers=None):
+    """Write timings.json into output_dir and print a per-plane breakdown."""
+    rows = _read_plane_timings(output_dir)
+    report = {"wall": wall or {}, "n_workers": n_workers, "planes": rows}
+    if rows:
+        report["totals"] = {
+            c: {"sum": sum(r[c] for r in rows),
+                "mean": sum(r[c] for r in rows) / len(rows),
+                "max": max(r[c] for r in rows)}
+            for c in _COLS
+        }
+    try:
+        (Path(output_dir) / "timings.json").write_text(json.dumps(report, indent=2))
+    except Exception:
+        pass
+
+    if not rows:
+        print(f"timing: no ops.npy timing under {output_dir}", flush=True)
+    else:
+        print("\n--- per-plane timing (s): io=tiff->bin  reg=motion  regmetrics=reg-quality  "
+              "detect=cellpose  extract=+class+decon  plots=figures ---", flush=True)
+        print(f"{'plane':<24}" + "".join(f"{c:>11}" for c in _COLS), flush=True)
+        for r in rows:
+            print(f"{r['plane'][:24]:<24}" + "".join(f"{r[c]:>11.1f}" for c in _COLS), flush=True)
+        tot = report["totals"]
+        print(f"{'sum':<24}" + "".join(f"{tot[c]['sum']:>11.1f}" for c in _COLS), flush=True)
+        print(f"{'mean':<24}" + "".join(f"{tot[c]['mean']:>11.1f}" for c in _COLS), flush=True)
+    for k, v in (wall or {}).items():
+        print(f"wall.{k}: {v:.1f}s", flush=True)
+    return report
+
+
+def _apply_thread_env(threads: int) -> None:
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ.setdefault(var, str(threads))
+
+
+def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
+            task_id: int | None = None, shard=None):
+    """Entry point executed on the compute node (submitit pickles this).
+
+    role:
+      single    - all planes on one GPU, volumetric merge, timing report.
+      array     - this task's plane shard (skip_volumetric); merged later.
+      aggregate - volumetric merge over already-processed planes (no node-local).
+    """
+    if isinstance(cfg, dict):
+        cfg = HpcConfig.from_dict(cfg)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ops = cfg.ops
+
+    if role == "aggregate":
+        t0 = time.perf_counter()
+        _aggregate(cfg.io.input, output_dir, ops)
+        write_timing_report(output_dir, {"aggregate": time.perf_counter() - t0})
+        return str(output_dir)
+
+    from mbo_utilities import imread
+
+    # Node-local NVMe staging is a cluster optimization; off-cluster it would only
+    # copy results through /tmp, so it applies only when running under SLURM.
+    jid = os.environ.get("SLURM_JOB_ID")
+    node_local = cfg.pipeline.node_local and bool(jid)
+    work_dir = output_dir
+    if node_local:
+        base = os.environ.get("TMPDIR") or tempfile.gettempdir()
+        work_dir = Path(base) / f"{cfg.io.name}_{jid}_{task_id if task_id is not None else 0}"
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        t0 = time.perf_counter()
+        arr = imread(cfg.io.input)
+        t_imread = time.perf_counter() - t0
+        print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
+        plane_indices = list(range(1, num_planes(arr) + 1))  # lbm planes are 1-based
+        pack = cfg.pipeline.planes_per_gpu
+        thr = cfg.pipeline.threads_per_worker
+
+        if role == "array":
+            this_shard = shard if shard is not None else shard_for_task(
+                plane_indices, pack, int(task_id or 0))
+            if not this_shard:
+                print(f"array task {task_id}: no planes, exiting", flush=True)
+                return str(output_dir)
+            workers, threads = resolve_workers(len(this_shard), pack, thr)
+            _apply_thread_env(threads)
+            print(f"array task {task_id}: planes {this_shard} "
+                  f"workers={workers} threads={threads}", flush=True)
+            _run(arr, work_dir, ops, this_shard, workers, threads,
+                 skip_volumetric=True, force=False)
+        else:  # single
+            workers, threads = resolve_workers(len(plane_indices), pack, thr)
+            _apply_thread_env(threads)
+            print(f"single job: {len(plane_indices)} planes "
+                  f"workers={workers} threads={threads}", flush=True)
+            wall = _run(arr, work_dir, ops, plane_indices, workers, threads,
+                        skip_volumetric=False, force=False)
+            write_timing_report(work_dir, {"imread": t_imread, "pipeline": wall},
+                                n_workers=workers)
+    finally:
+        if node_local and Path(work_dir) != output_dir:
+            t0 = time.perf_counter()
+            shutil.copytree(work_dir, output_dir, dirs_exist_ok=True)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            print(f"timing: transfer={time.perf_counter() - t0:.1f}s -> {output_dir}",
+                  flush=True)
+    return str(output_dir)
