@@ -295,7 +295,7 @@ def main(argv=None):
     arr = imread(input_dir)
     t_imread = time.perf_counter() - t0
     print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
-    plane_indices = list(range(_num_planes(arr)))
+    plane_indices = list(range(1, _num_planes(arr) + 1))  # lbm planes are 1-based
 
     if explicit is not None:
         shard = [int(p) for p in explicit.split(",") if p != ""]
