@@ -104,9 +104,14 @@ def _print_plan(cfg: HpcConfig, mode: str, output_dir: Path) -> None:
             print(f"planes:  unreadable here ({type(e).__name__}: {e})")
 
 
+def _next_steps(job_id) -> None:
+    print(f"follow: mbo hpc watch {job_id}")
+    print(f"status: mbo hpc status {job_id}")
+
+
 def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
     """Submit (or simulate) the run. Returns a dict describing what was launched."""
-    output_dir = resolve_output_dir(cfg)
+    output_dir = resolve_output_dir(cfg).resolve()  # absolute so logs/paths print fully
 
     if dry_run:
         _print_plan(cfg, mode, output_dir)
@@ -127,6 +132,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         job = ex.submit(_pipe.run_job, cfg_dict, str(output_dir), "single")
         print(f"submitted single job {job.job_id} -> {output_dir}")
         print(f"logs:   {log_folder}")
+        _next_steps(job.job_id)
         return {"mode": "single", "job_id": job.job_id, "output_dir": str(output_dir)}
 
     if mode == "array":
@@ -151,6 +157,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         agg_job = agg_ex.submit(_pipe.run_job, cfg_dict, str(output_dir), "aggregate")
         print(f"submitted aggregate job {agg_job.job_id} (after {array_id} succeeds)")
         print(f"logs:   {log_folder}")
+        _next_steps(array_id)
         return {
             "mode": "array",
             "array_id": array_id,

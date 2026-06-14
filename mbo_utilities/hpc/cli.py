@@ -36,7 +36,7 @@ def hpc():
               help="Results root (default: <data_path>/../results).")
 @click.option("--overwrite/--no-overwrite", default=False)
 def hpc_init(data_path, config_path, output_root, overwrite):
-    r"""
+    """
     Write a commented TOML config next to your data.
 
     \b
@@ -89,7 +89,7 @@ def hpc_init(data_path, config_path, output_root, overwrite):
 @click.option("--planes-per-gpu", type=int, default=None, help="Override pack factor F.")
 def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
             partition, gres, time_, planes_per_gpu):
-    r"""
+    """
     Submit the pipeline described by CONFIG_PATH.
 
     \b
@@ -133,13 +133,14 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
 
 
 @hpc.command("status")
-@click.argument("target", required=False, type=click.Path())
+@click.argument("target", required=False)
 def hpc_status(target):
-    r"""
-    Show timings for an output folder, or your SLURM queue.
+    """
+    Show a job's state, an output folder's timings, or your SLURM queue.
 
     \b
     Examples:
+      mbo hpc status 5162141                          # job state + exit + diagnosis
       mbo hpc status /data/results/2025_07_27_mk355   # timings.json summary
       mbo hpc status                                  # squeue -u $USER
     """
@@ -147,17 +148,28 @@ def hpc_status(target):
     import os
     import subprocess
 
+    from mbo_utilities.hpc import slurm
+
+    if target and slurm.is_job_id(target):
+        click.echo(slurm.job_report(target))
+        return
+
     if target:
+        logs = Path(target) / "logs"
+        failures = sorted(logs.glob("FAILURE_*.log")) if logs.is_dir() else []
         timings = Path(target) / "timings.json"
         if not timings.exists():
             click.secho(f"No timings.json under {target} (run not finished?)", fg="yellow")
-            logs = Path(target) / "logs"
             errs = sorted(logs.glob("*.err")) if logs.is_dir() else []
             if errs:
                 click.echo(f"\nLogs in {logs}:")
                 for f in errs:
                     click.echo(f"  {f.name}  ({f.stat().st_size} bytes)")
                 click.echo(f"\nRead the newest error log:\n  tail -n 80 {errs[-1]}")
+            if failures:
+                click.secho(f"\nFAILURE report(s) in {logs}:", fg="red")
+                for f in failures:
+                    click.echo(f"  {f}")
             return
         report = json.loads(timings.read_text())
         totals = report.get("totals", {})
@@ -183,17 +195,20 @@ def hpc_status(target):
 @click.option("--no-follow", is_flag=True, help="Print the tail once and exit.")
 @click.option("-n", "--lines", default=40, show_default=True, help="Initial tail lines.")
 def hpc_watch(target, stream_out, no_follow, lines):
-    r"""
-    Follow a run's .err/.out logs, reconstructed from a config or output dir.
+    """
+    Follow a run's .err/.out logs, from a job id, a config, or an output dir.
 
     \b
     Examples:
+      mbo hpc watch 5162141               # by SLURM job id (prints state first)
       mbo hpc watch                       # newest run from hpc.toml, follow .err
       mbo hpc watch hpc.toml -o           # follow .out instead
       mbo hpc watch /data/results/2025_07_27_mk355
       mbo hpc watch --no-follow           # tail once, don't stream
 
-    While following (in a terminal): o/e switch out/err, n/p switch task logs, q quit.
+    A job id resolves exact log paths via scontrol and shows job state before any
+    logs exist. While following (terminal): o/e switch out/err, n/p switch task
+    logs, q quit.
     """
     from mbo_utilities.hpc.logs import watch
 
@@ -209,7 +224,7 @@ def hpc_watch(target, stream_out, no_follow, lines):
 @hpc.command("info")
 @click.argument("pattern", required=False, default="hpc")
 def hpc_info(pattern):
-    r"""
+    """
     Show cluster partitions (nodes, CPUs, GPUs, memory) matching PATTERN.
 
     PATTERN is a regex on the partition name (default 'hpc'), so it isn't tied
@@ -239,7 +254,7 @@ def hpc_info(pattern):
 @click.option("--mode", type=click.Choice(["single", "array", "local"]), default="single",
               help="Mode to check the request against (CPU packing depends on it).")
 def hpc_check(config_path, mode):
-    r"""
+    """
     Check a config's requested resources against the data and the partition.
 
     Reads the input to size per-plane memory, queries sinfo for the partition,

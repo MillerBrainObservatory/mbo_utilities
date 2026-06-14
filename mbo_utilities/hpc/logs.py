@@ -79,6 +79,8 @@ def resolve_logs_dir(target) -> tuple[Path | None, Path | None]:
 
 def list_logs(logs_dir: Path, stream: str) -> list[Path]:
     """Sorted (oldest->newest) .out or .err files in ``logs_dir``."""
+    if logs_dir is None or not logs_dir.is_dir():
+        return []
     ext = "out" if stream == "out" else "err"
     files = [f for f in logs_dir.glob(f"*.{ext}") if f.is_file()]
     files.sort(key=lambda f: f.stat().st_mtime)
@@ -154,17 +156,54 @@ def _header(path: Path, stream: str, interactive: bool, n_files: int) -> str:
     return bar + " ---"
 
 
+def _resolve_target(target):
+    """(logs_dir, output_dir, job_id). Accepts a SLURM job id, a config file,
+    or a directory. job_id is set only when the target is a numeric id."""
+    from . import slurm
+
+    if slurm.is_job_id(target):
+        job_id = str(target).strip()
+        out_p, err_p = slurm.job_log_paths(job_id)
+        ref = err_p or out_p
+        if ref is not None:
+            return ref.parent, ref.parent.parent, job_id
+        return None, None, job_id
+    logs_dir, output_dir = resolve_logs_dir(target)
+    return logs_dir, output_dir, None
+
+
 def watch(target="hpc.toml", stream="err", follow=True, lines=40) -> None:
     """Tail (and optionally follow) a run's .err/.out logs.
 
-    Raises FileNotFoundError if no run/logs can be located.
+    ``target`` may be a SLURM job id, an hpc.toml, or an output/logs dir.
+    Raises FileNotFoundError only when nothing about the run can be located.
     """
-    logs_dir, output_dir = resolve_logs_dir(target)
-    if logs_dir is None or not logs_dir.is_dir():
-        raise FileNotFoundError(
-            f"no logs for {target}. Run may not have started; "
-            f"check `mbo hpc status`."
-        )
+    from . import slurm
+
+    logs_dir, output_dir, job_id = _resolve_target(target)
+
+    if job_id is not None:
+        print(slurm.state_line(job_id))
+
+    have_logs = logs_dir is not None and bool(list_logs(logs_dir, "err")
+                                              or list_logs(logs_dir, "out"))
+    if not have_logs:
+        # Job may be PENDING or just started — describe what we know and, when
+        # following, wait for the first log line instead of erroring out.
+        if logs_dir is not None:
+            print(f"no logs yet in {logs_dir}")
+        elif job_id is None:
+            raise FileNotFoundError(
+                f"no run found for {target}. Pass a job id, hpc.toml, or output "
+                f"dir; or check `mbo hpc status`."
+            )
+        if not follow:
+            return
+        if logs_dir is None:  # job id with no resolvable path yet (still PENDING)
+            raise FileNotFoundError(
+                f"job {job_id} has no log path yet (still pending?); "
+                f"retry once it is RUNNING."
+            )
 
     n_out = len(list_logs(logs_dir, "out"))
     n_err = len(list_logs(logs_dir, "err"))
