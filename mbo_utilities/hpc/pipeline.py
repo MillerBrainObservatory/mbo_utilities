@@ -12,6 +12,7 @@ import json
 import math
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -176,6 +177,98 @@ def _apply_thread_env(threads: int) -> None:
         os.environ.setdefault(var, str(threads))
 
 
+def disk_free_gb(path) -> float:
+    """Free space (GB) on the filesystem holding `path`'s nearest existing parent."""
+    p = Path(path)
+    while not p.exists() and p.parent != p:
+        p = p.parent
+    try:
+        return shutil.disk_usage(p).free / 1e9
+    except OSError:
+        return -1.0
+
+
+def probe_writable(path) -> tuple[bool, str]:
+    """Write+delete a probe file under `path`'s nearest existing dir.
+
+    A real write catches read-only mounts and permission denials that
+    os.access misses. The reported free space is filesystem-level and does
+    NOT reflect a per-user quota — a quota only surfaces on the real write.
+    """
+    p = Path(path)
+    while not p.exists() and p.parent != p:
+        p = p.parent
+    free = disk_free_gb(p)
+    try:
+        probe = p / f".mbo_write_test_{os.getpid()}"
+        probe.write_bytes(b"mbo")
+        probe.unlink()
+    except OSError as e:
+        return False, f"{p}: {e} (free {free:.1f} GB)"
+    return True, f"writable, {free:.1f} GB free"
+
+
+def assert_output_writable(path) -> None:
+    """Raise with actionable text if `path` can't be written to."""
+    ok, detail = probe_writable(path)
+    if not ok:
+        raise RuntimeError(
+            f"output not writable ({detail}). Point [io] output at a writable "
+            f"location with room (home dirs often have small quotas; prefer scratch)."
+        )
+
+
+def _log_output_estimate(arr, n_planes: int, output_dir) -> None:
+    """Print the expected registered-binary footprint vs. free space."""
+    try:
+        nt, ly, lx = int(arr.shape[0]), int(arr.shape[-2]), int(arr.shape[-1])
+    except Exception:
+        return
+    est_gb = nt * ly * lx * 2 * n_planes / 1e9  # int16 data.bin per plane
+    free_gb = disk_free_gb(output_dir)
+    print(f"output estimate: ~{est_gb:.0f} GB for {n_planes} plane(s); "
+          f"{free_gb:.0f} GB free on output FS (quota not included)", flush=True)
+    if 0 <= free_gb < est_gb:
+        print("WARNING: estimated output exceeds free space — likely to fail at "
+              "write/copy. Use scratch, or disable keep_reg.", flush=True)
+
+
+def write_failure_report(output_dir, role, task_id, exc) -> str | None:
+    """Write a failure report to the first writable of: <output>/logs,
+    ~/.mbo/hpc_logs, the temp dir. Returns the path written, or None.
+
+    Guarantees a debug breadcrumb survives even when the output dir is the
+    thing that failed (e.g. a full quota that broke the result copy).
+    """
+    import traceback
+
+    lines = [
+        "mbo hpc job failure",
+        f"time={time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"role={role} task_id={task_id} pid={os.getpid()}",
+        f"node={os.environ.get('SLURMD_NODENAME', '?')} "
+        f"job={os.environ.get('SLURM_JOB_ID', '?')}",
+        f"output={output_dir} (free {disk_free_gb(output_dir):.1f} GB)",
+        f"tmp={os.environ.get('TMPDIR') or tempfile.gettempdir()} "
+        f"(free {disk_free_gb(os.environ.get('TMPDIR') or tempfile.gettempdir()):.1f} GB)",
+        "",
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+    ]
+    text = "\n".join(lines)
+    name = f"FAILURE_{role}_{task_id}_{os.getpid()}.log"
+    for base in (Path(output_dir) / "logs",
+                 Path.home() / ".mbo" / "hpc_logs",
+                 Path(tempfile.gettempdir())):
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            dest = base / name
+            dest.write_text(text, encoding="utf-8")
+            return str(dest)
+        except OSError:
+            continue
+    return None
+
+
 def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
             task_id: int | None = None, shard=None):
     """Entry point executed on the compute node (submitit pickles this).
@@ -191,59 +284,85 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
     output_dir.mkdir(parents=True, exist_ok=True)
     ops = cfg.ops
 
-    if role == "aggregate":
-        t0 = time.perf_counter()
-        _aggregate(cfg.io.input, output_dir, ops)
-        write_timing_report(output_dir, {"aggregate": time.perf_counter() - t0})
-        return str(output_dir)
-
-    from mbo_utilities import imread
-
-    # Node-local NVMe staging is a cluster optimization; off-cluster it would only
-    # copy results through /tmp, so it applies only when running under SLURM.
-    jid = os.environ.get("SLURM_JOB_ID")
-    node_local = cfg.pipeline.node_local and bool(jid)
-    work_dir = output_dir
-    if node_local:
-        base = os.environ.get("TMPDIR") or tempfile.gettempdir()
-        work_dir = Path(base) / f"{cfg.io.name}_{jid}_{task_id if task_id is not None else 0}"
-        work_dir.mkdir(parents=True, exist_ok=True)
-
     try:
-        t0 = time.perf_counter()
-        arr = imread(cfg.io.input)
-        t_imread = time.perf_counter() - t0
-        print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
-        plane_indices = list(range(1, num_planes(arr) + 1))  # lbm planes are 1-based
-        pack = cfg.pipeline.planes_per_gpu
-        thr = cfg.pipeline.threads_per_worker
+        # Fail fast: confirm the destination is writable before the long
+        # compute, so a bad output costs seconds instead of hours.
+        assert_output_writable(output_dir)
 
-        if role == "array":
-            this_shard = shard if shard is not None else shard_for_task(
-                plane_indices, pack, int(task_id or 0))
-            if not this_shard:
-                print(f"array task {task_id}: no planes, exiting", flush=True)
-                return str(output_dir)
-            workers, threads = resolve_workers(len(this_shard), pack, thr)
-            _apply_thread_env(threads)
-            print(f"array task {task_id}: planes {this_shard} "
-                  f"workers={workers} threads={threads}", flush=True)
-            _run(arr, work_dir, ops, this_shard, workers, threads,
-                 skip_volumetric=True, force=False)
-        else:  # single
-            workers, threads = resolve_workers(len(plane_indices), pack, thr)
-            _apply_thread_env(threads)
-            print(f"single job: {len(plane_indices)} planes "
-                  f"workers={workers} threads={threads}", flush=True)
-            wall = _run(arr, work_dir, ops, plane_indices, workers, threads,
-                        skip_volumetric=False, force=False)
-            write_timing_report(work_dir, {"imread": t_imread, "pipeline": wall},
-                                n_workers=workers)
-    finally:
-        if node_local and Path(work_dir) != output_dir:
+        if role == "aggregate":
             t0 = time.perf_counter()
-            shutil.copytree(work_dir, output_dir, dirs_exist_ok=True)
-            shutil.rmtree(work_dir, ignore_errors=True)
-            print(f"timing: transfer={time.perf_counter() - t0:.1f}s -> {output_dir}",
-                  flush=True)
-    return str(output_dir)
+            _aggregate(cfg.io.input, output_dir, ops)
+            write_timing_report(output_dir, {"aggregate": time.perf_counter() - t0})
+            return str(output_dir)
+
+        from mbo_utilities import imread
+
+        # Node-local NVMe staging is a cluster optimization; off-cluster it would
+        # only copy results through /tmp, so it applies only when running under SLURM.
+        jid = os.environ.get("SLURM_JOB_ID")
+        node_local = cfg.pipeline.node_local and bool(jid)
+        work_dir = output_dir
+        if node_local:
+            base = os.environ.get("TMPDIR") or tempfile.gettempdir()
+            work_dir = Path(base) / f"{cfg.io.name}_{jid}_{task_id if task_id is not None else 0}"
+            work_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            t0 = time.perf_counter()
+            arr = imread(cfg.io.input)
+            t_imread = time.perf_counter() - t0
+            print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
+            plane_indices = list(range(1, num_planes(arr) + 1))  # lbm planes are 1-based
+            pack = cfg.pipeline.planes_per_gpu
+            thr = cfg.pipeline.threads_per_worker
+
+            if role == "array":
+                this_shard = shard if shard is not None else shard_for_task(
+                    plane_indices, pack, int(task_id or 0))
+                if not this_shard:
+                    print(f"array task {task_id}: no planes, exiting", flush=True)
+                    return str(output_dir)
+                workers, threads = resolve_workers(len(this_shard), pack, thr)
+                _apply_thread_env(threads)
+                _log_output_estimate(arr, len(this_shard), output_dir)
+                print(f"array task {task_id}: planes {this_shard} "
+                      f"workers={workers} threads={threads}", flush=True)
+                _run(arr, work_dir, ops, this_shard, workers, threads,
+                     skip_volumetric=True, force=False)
+            else:  # single
+                workers, threads = resolve_workers(len(plane_indices), pack, thr)
+                _apply_thread_env(threads)
+                _log_output_estimate(arr, len(plane_indices), output_dir)
+                print(f"single job: {len(plane_indices)} planes "
+                      f"workers={workers} threads={threads}", flush=True)
+                wall = _run(arr, work_dir, ops, plane_indices, workers, threads,
+                            skip_volumetric=False, force=False)
+                write_timing_report(work_dir, {"imread": t_imread, "pipeline": wall},
+                                    n_workers=workers)
+        finally:
+            if node_local and Path(work_dir) != output_dir:
+                pending = sys.exc_info()[1]  # compute error already unwinding, if any
+                try:
+                    t0 = time.perf_counter()
+                    shutil.copytree(work_dir, output_dir, dirs_exist_ok=True)
+                    shutil.rmtree(work_dir, ignore_errors=True)
+                    print(f"timing: transfer={time.perf_counter() - t0:.1f}s -> {output_dir}",
+                          flush=True)
+                except Exception as copy_err:
+                    detail = copy_err
+                    if isinstance(copy_err, shutil.Error) and copy_err.args:
+                        detail = "; ".join(str(x) for x in copy_err.args[0][:15])
+                    msg = (f"copy-back failed: node-local results in {work_dir} were not "
+                           f"copied to {output_dir} (check destination disk quota / free "
+                           f"space): {detail}")
+                    # Never let a copy-back failure mask the real compute error.
+                    if pending is not None:
+                        print(f"WARNING: {msg}", flush=True)
+                    else:
+                        raise RuntimeError(msg) from copy_err
+        return str(output_dir)
+    except BaseException as e:
+        report = write_failure_report(output_dir, role, task_id, e)
+        if report:
+            print(f"failure report written: {report}", flush=True)
+        raise

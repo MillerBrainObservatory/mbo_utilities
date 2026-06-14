@@ -83,6 +83,10 @@ def _print_plan(cfg: HpcConfig, mode: str, output_dir: Path) -> None:
     print(f"mode:    {mode}")
     print(f"input:   {cfg.io.input}")
     print(f"output:  {output_dir}")
+    ok, detail = _pipe.probe_writable(output_dir)
+    print(f"writable: {detail}" if ok else
+          f"WARNING: output not writable ({detail}); set [io] output to a writable "
+          f"location with room (prefer scratch)")
     print("slurm parameters:")
     for k, v in _executor_params(cfg, array=(mode == "array")).items():
         print(f"  {k} = {v}")
@@ -106,6 +110,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         return {"mode": mode, "output_dir": str(output_dir), "dry_run": True}
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    _pipe.assert_output_writable(output_dir)
     cfg_dict = cfg.to_dict()
 
     if mode == "local":
@@ -118,6 +123,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         ex = _make_executor(log_folder, _executor_params(cfg))
         job = ex.submit(_pipe.run_job, cfg_dict, str(output_dir), "single")
         print(f"submitted single job {job.job_id} -> {output_dir}")
+        print(f"logs:   {log_folder}")
         return {"mode": "single", "job_id": job.job_id, "output_dir": str(output_dir)}
 
     if mode == "array":
@@ -137,6 +143,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         agg_ex = _make_executor(log_folder, agg_params)
         agg_job = agg_ex.submit(_pipe.run_job, cfg_dict, str(output_dir), "aggregate")
         print(f"submitted aggregate job {agg_job.job_id} (after {array_id} succeeds)")
+        print(f"logs:   {log_folder}")
         return {
             "mode": "array",
             "array_id": array_id,

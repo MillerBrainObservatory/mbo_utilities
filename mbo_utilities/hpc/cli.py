@@ -38,20 +38,30 @@ def hpc_init(data_path, config_path, output_root, overwrite):
     """
     from mbo_utilities.hpc.config import render_template
 
-    cfg_file = Path(config_path)
+    cfg_file = Path(config_path).expanduser()
     if cfg_file.exists() and not overwrite:
         click.secho(f"Exists: {cfg_file}  (--overwrite to replace)", fg="yellow")
         return
 
-    out = output_root
-    if out is None and data_path:
-        out = str(Path(data_path).expanduser().resolve().parent / "results")
+    # Absolute paths so the config works from any directory. Results default next
+    # to the config (writable by construction), never the data tree — acquisition
+    # directories are commonly read-only to the submitting user.
+    inp = str(Path(data_path).expanduser().resolve()) if data_path else ""
+    out = output_root or str(cfg_file.resolve().parent / "results")
 
-    cfg_file.write_text(
-        render_template(input_path=data_path or "", output_path=out or ""),
-        encoding="utf-8",
-    )
-    click.secho(f"Created: {cfg_file}", fg="green")
+    try:
+        cfg_file.parent.mkdir(parents=True, exist_ok=True)
+        cfg_file.write_text(
+            render_template(input_path=inp, output_path=out),
+            encoding="utf-8",
+        )
+    except OSError as e:
+        raise click.ClickException(
+            f"cannot write {cfg_file}: {e}\n"
+            "The current directory may be read-only (data directories often are). "
+            "Re-run from a writable directory, or pass -o <writable-dir>/hpc.toml."
+        )
+    click.secho(f"Created: {cfg_file.resolve()}", fg="green")
     click.echo(f"Edit it, then: mbo hpc run {cfg_file}")
 
 
@@ -107,7 +117,10 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
     if force_local:
         mode = "local"
 
-    submit(cfg, mode=mode, dry_run=dry_run)
+    try:
+        submit(cfg, mode=mode, dry_run=dry_run)
+    except (ValueError, OSError, ImportError, RuntimeError) as e:
+        raise click.ClickException(str(e))
 
 
 @hpc.command("status")
@@ -128,7 +141,14 @@ def hpc_status(target):
     if target:
         timings = Path(target) / "timings.json"
         if not timings.exists():
-            click.secho(f"No timings.json under {target}", fg="yellow")
+            click.secho(f"No timings.json under {target} (run not finished?)", fg="yellow")
+            logs = Path(target) / "logs"
+            errs = sorted(logs.glob("*.err")) if logs.is_dir() else []
+            if errs:
+                click.echo(f"\nLogs in {logs}:")
+                for f in errs:
+                    click.echo(f"  {f.name}  ({f.stat().st_size} bytes)")
+                click.echo(f"\nRead the newest error log:\n  tail -n 80 {errs[-1]}")
             return
         report = json.loads(timings.read_text())
         totals = report.get("totals", {})

@@ -66,7 +66,7 @@ class PipelineConfig:
 HELP: dict = {
     "io": {
         "input": "directory of ScanImage TIFFs",
-        "output": "results root; final folder is <output>/<date>_<name>",
+        "output": "WRITABLE results root; final folder is <output>/<date>_<name>",
         "name": "label for the dated output subfolder",
         "dated_subfolder": "false to write straight into <output>",
     },
