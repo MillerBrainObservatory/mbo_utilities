@@ -2051,7 +2051,7 @@ wheels = [
 
 [[package]]
 name = "mbo-utilities"
-version = "3.2.3"
+version = "3.2.4"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
@@ -2102,6 +2102,7 @@ dependencies = [
 all = [
     { name = "isoview" },
     { name = "rastermap" },
+    { name = "submitit" },
 ]
 docs = [
     { name = "docutils" },
@@ -2166,7 +2167,7 @@ requires-dist = [
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
-    { name = "mbo-utilities", extras = ["rastermap", "isoview"], marker = "extra == 'all'" },
+    { name = "mbo-utilities", extras = ["rastermap", "isoview", "hpc"], marker = "extra == 'all'" },
     { name = "mkl-fft", specifier = ">=2.0.0" },
     { name = "myst-nb", marker = "extra == 'docs'" },
     { name = "napari" },
