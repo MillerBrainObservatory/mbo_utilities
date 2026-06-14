@@ -27,14 +27,26 @@ __all__ = [
 ]
 
 
+# attribute -> submodule it lives in. `submit` the function collides with
+# submit.py the module, so resolve via importlib.import_module (which imports the
+# submodule without probing this package's __getattr__) and cache the function in
+# globals so it shadows the submodule attribute the import sets.
+_SOURCE = {
+    "DEFAULT_OPS": ".config",
+    "HpcConfig": ".config",
+    "render_template": ".config",
+    "run_job": ".pipeline",
+    "plan": ".submit",
+    "resolve_output_dir": ".submit",
+    "submit": ".submit",
+}
+
+
 def __getattr__(name):
-    if name in ("DEFAULT_OPS", "HpcConfig", "render_template"):
-        from . import config
-        return getattr(config, name)
-    if name == "run_job":
-        from .pipeline import run_job
-        return run_job
-    if name in ("plan", "resolve_output_dir", "submit"):
-        from . import submit as _submit
-        return getattr(_submit, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if name not in _SOURCE:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    val = getattr(importlib.import_module(_SOURCE[name], __name__), name)
+    globals()[name] = val
+    return val

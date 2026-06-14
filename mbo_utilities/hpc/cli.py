@@ -13,9 +13,18 @@ def hpc():
 
     \b
     Typical flow:
-      mbo hpc init /data/raw      write hpc.toml (edit input/output/params)
-      mbo hpc run hpc.toml --dry-run   preview the jobs
+      mbo hpc info                     show partitions: nodes/CPUs/GPUs/free mem
+      mbo hpc init /data/raw           write hpc.toml (edit input/output/params)
+      mbo hpc check hpc.toml           does the request fit the data + partition?
       mbo hpc run hpc.toml --mode array   submit array + dependent aggregate
+
+    \b
+    Resources (size from `mbo hpc info`, verify with `mbo hpc check`):
+      One job = one GPU (gres). planes_per_gpu (F) planes share it, each holding a
+      movie in RAM, so peak RAM ~= F x per-plane size; set mem_gb to the node's
+      capacity, not a small default (too low OOMs at the cgroup cap).
+      --mode array only helps across MULTIPLE nodes. On a single-node partition all
+      tasks pile onto one node, and cpus_per_task x tasks must fit the node's CPUs.
     """
 
 
@@ -195,3 +204,61 @@ def hpc_watch(target, stream_out, no_follow, lines):
         raise click.ClickException(str(e))
     except KeyboardInterrupt:
         pass
+
+
+@hpc.command("info")
+@click.argument("pattern", required=False, default="hpc")
+def hpc_info(pattern):
+    r"""
+    Show cluster partitions (nodes, CPUs, GPUs, memory) matching PATTERN.
+
+    PATTERN is a regex on the partition name (default 'hpc'), so it isn't tied
+    to one cluster. Use it to size a job: NODES tells you whether --mode array
+    can spread; FREE / GPUS tell you what to request.
+
+    \b
+    Examples:
+      mbo hpc info               # partitions matching 'hpc'
+      mbo hpc info a100          # only a100 partitions
+      mbo hpc info '.'           # everything
+    """
+    from mbo_utilities.hpc import cluster
+
+    if not cluster.sinfo_available():
+        click.secho("sinfo not found (not on a SLURM login node?)", fg="yellow")
+        return
+    parts = cluster.query_partitions(pattern)
+    if not parts:
+        click.secho(f"no partitions match /{pattern}/", fg="yellow")
+        return
+    click.echo(cluster.format_partitions(parts))
+
+
+@hpc.command("check")
+@click.argument("config_path", type=click.Path(exists=True), default="hpc.toml")
+@click.option("--mode", type=click.Choice(["single", "array", "local"]), default="single",
+              help="Mode to check the request against (CPU packing depends on it).")
+def hpc_check(config_path, mode):
+    r"""
+    Check a config's requested resources against the data and the partition.
+
+    Reads the input to size per-plane memory, queries sinfo for the partition,
+    and reports the memory math plus suggested fixes for structural problems
+    (array on a single node, cpus_per_task x tasks > node CPUs, gres > node GPUs).
+
+    \b
+    Examples:
+      mbo hpc check hpc.toml
+      mbo hpc check hpc.toml --mode array
+    """
+    from mbo_utilities.hpc.config import HpcConfig
+    from mbo_utilities.hpc.check import run_check
+
+    try:
+        cfg = HpcConfig.from_toml(config_path)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    try:
+        run_check(cfg, mode=mode)
+    except (ValueError, OSError, RuntimeError) as e:
+        raise click.ClickException(str(e))
