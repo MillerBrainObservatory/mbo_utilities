@@ -110,7 +110,7 @@ docs = [
     "myst_nb",
     "pygfx>=0.14.0",
 ]
-all = ["mbo_utilities[rastermap,isoview]"]
+all = ["mbo_utilities[rastermap,isoview,hpc]"]
 
 [tool.uv]
 default-groups = ["dev", "isoview"]
