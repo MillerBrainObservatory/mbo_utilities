@@ -8,11 +8,13 @@ Python API:
 CLI:
     mbo hpc init /data/raw
     mbo hpc run hpc.toml --mode array
+
+Imports are lazy (PEP 562): pulling in the `hpc` package to register the CLI
+group must not drag in config/pipeline/submit (and their deps), so a bare
+`mbo hpc ... --help` stays fast on slow network filesystems.
 """
 
-from .config import DEFAULT_OPS, HpcConfig, render_template
-from .pipeline import run_job
-from .submit import plan, resolve_output_dir, submit
+from __future__ import annotations
 
 __all__ = [
     "DEFAULT_OPS",
@@ -23,3 +25,16 @@ __all__ = [
     "resolve_output_dir",
     "submit",
 ]
+
+
+def __getattr__(name):
+    if name in ("DEFAULT_OPS", "HpcConfig", "render_template"):
+        from . import config
+        return getattr(config, name)
+    if name == "run_job":
+        from .pipeline import run_job
+        return run_job
+    if name in ("plan", "resolve_output_dir", "submit"):
+        from . import submit as _submit
+        return getattr(_submit, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

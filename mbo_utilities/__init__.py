@@ -8,17 +8,10 @@ For fastest CLI startup, avoid importing from this module directly -
 use `from mbo_utilities.gui.run_gui import _cli_entry`.
 """
 
-from importlib.metadata import version, PackageNotFoundError
 import warnings
 
 # Suppress annoying CuPy warning about CUDA path (usually harmless if CUDA works)
 warnings.filterwarnings("ignore", category=UserWarning, message="CUDA path could not be detected")
-
-try:
-    __version__ = version("mbo_utilities")
-except PackageNotFoundError:
-    # fallback for editable installs
-    __version__ = "0.0.0"
 
 
 # Define what's available for lazy loading
@@ -70,6 +63,14 @@ __all__ = [
 
 def __getattr__(name):
     """Lazy import attributes to avoid loading heavy dependencies at startup."""
+    # Version (importlib.metadata pulls email + zipfile; defer to keep CLI startup fast)
+    if name == "__version__":
+        try:
+            from importlib.metadata import version
+            return version("mbo_utilities")
+        except Exception:
+            return "0.0.0"  # editable install / metadata unavailable
+
     # Core I/O
     if name == "imread":
         from .reader import imread
