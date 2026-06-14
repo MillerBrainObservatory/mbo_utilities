@@ -165,3 +165,33 @@ def hpc_status(target):
         subprocess.run(["squeue", "-u", user], check=False)
     except FileNotFoundError:
         click.secho("squeue not found (not on a SLURM login node?)", fg="yellow")
+
+
+@hpc.command("watch")
+@click.argument("target", required=False, default="hpc.toml", type=click.Path())
+@click.option("-o", "--out", "stream_out", is_flag=True,
+              help="Start on stdout (.out); default is stderr (.err).")
+@click.option("--no-follow", is_flag=True, help="Print the tail once and exit.")
+@click.option("-n", "--lines", default=40, show_default=True, help="Initial tail lines.")
+def hpc_watch(target, stream_out, no_follow, lines):
+    r"""
+    Follow a run's .err/.out logs, reconstructed from a config or output dir.
+
+    \b
+    Examples:
+      mbo hpc watch                       # newest run from hpc.toml, follow .err
+      mbo hpc watch hpc.toml -o           # follow .out instead
+      mbo hpc watch /data/results/2025_07_27_mk355
+      mbo hpc watch --no-follow           # tail once, don't stream
+
+    While following (in a terminal): o/e switch out/err, n/p switch task logs, q quit.
+    """
+    from mbo_utilities.hpc.logs import watch
+
+    try:
+        watch(target, stream="out" if stream_out else "err",
+              follow=not no_follow, lines=lines)
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e))
+    except KeyboardInterrupt:
+        pass

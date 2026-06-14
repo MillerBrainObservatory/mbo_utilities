@@ -91,6 +91,9 @@ def _print_plan(cfg: HpcConfig, mode: str, output_dir: Path) -> None:
     for k, v in _executor_params(cfg, array=(mode == "array")).items():
         print(f"  {k} = {v}")
     if mode == "array":
+        if not cfg.pipeline_kwargs().get("keep_reg", True):
+            print("WARNING: keep_reg=false + array makes the aggregate re-process "
+                  "every plane; use single/local mode for small outputs.")
         try:
             n, ntasks, shards = plan(cfg)
             print(f"planes:  {n}  ->  {ntasks} array task(s), F={cfg.pipeline.planes_per_gpu}")
@@ -127,6 +130,10 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         return {"mode": "single", "job_id": job.job_id, "output_dir": str(output_dir)}
 
     if mode == "array":
+        if not cfg.pipeline_kwargs().get("keep_reg", True):
+            print("WARNING: keep_reg=false with --mode array makes the aggregate "
+                  "re-process every plane (its binaries are gone). Use single/local "
+                  "mode for small outputs, or keep keep_reg=true for array.")
         n, ntasks, shards = plan(cfg)
         ex = _make_executor(log_folder, _executor_params(cfg, array=True))
         jobs = []

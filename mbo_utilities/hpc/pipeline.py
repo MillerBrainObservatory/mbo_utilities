@@ -62,8 +62,13 @@ def num_tasks(n_planes: int, pack: int) -> int:
 
 
 def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
-         replot=True):
+         replot=True, passthrough=None):
     from lbm_suite2p_python import pipeline
+
+    kw = dict(passthrough or {})
+    keep_reg = kw.pop("keep_reg", True)
+    keep_raw = kw.pop("keep_raw", False)
+    writer_kwargs = kw.pop("writer_kwargs", {"fix_phase": True, "use_fft": True})
 
     t0 = time.perf_counter()
     pipeline(
@@ -71,27 +76,28 @@ def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
         save_path=str(output_dir),
         ops=ops,
         planes=planes,
-        keep_reg=True,
-        keep_raw=False,
+        keep_reg=keep_reg,
+        keep_raw=keep_raw,
         force_reg=force,
         force_detect=force,
         replot=replot,
         skip_volumetric=skip_volumetric,
         workers=workers,
         threads_per_worker=threads,
-        writer_kwargs={"fix_phase": True, "use_fft": True},
+        writer_kwargs=writer_kwargs,
+        **kw,
     )
     return time.perf_counter() - t0
 
 
-def _aggregate(input_dir, output_dir, ops):
+def _aggregate(input_dir, output_dir, ops, passthrough=None):
     from mbo_utilities import imread
 
     arr = imread(input_dir)
     # replot=False: per-plane figures already exist from the shard runs; the
     # aggregate only needs the volumetric merge + volume plots.
     _run(arr, output_dir, ops, planes=None, workers=1, threads=cpu_quota(),
-         skip_volumetric=False, force=False, replot=False)
+         skip_volumetric=False, force=False, replot=False, passthrough=passthrough)
 
 
 def _read_plane_timings(output_dir):
@@ -282,7 +288,7 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
         cfg = HpcConfig.from_dict(cfg)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    ops = cfg.ops
+    ops = cfg.ops()
 
     try:
         # Fail fast: confirm the destination is writable before the long
@@ -291,7 +297,7 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
 
         if role == "aggregate":
             t0 = time.perf_counter()
-            _aggregate(cfg.io.input, output_dir, ops)
+            _aggregate(cfg.io.input, output_dir, ops, passthrough=cfg.pipeline_kwargs())
             write_timing_report(output_dir, {"aggregate": time.perf_counter() - t0})
             return str(output_dir)
 
@@ -328,7 +334,8 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
                 print(f"array task {task_id}: planes {this_shard} "
                       f"workers={workers} threads={threads}", flush=True)
                 _run(arr, work_dir, ops, this_shard, workers, threads,
-                     skip_volumetric=True, force=False)
+                     skip_volumetric=True, force=False,
+                     passthrough=cfg.pipeline_kwargs())
             else:  # single
                 workers, threads = resolve_workers(len(plane_indices), pack, thr)
                 _apply_thread_env(threads)
@@ -336,7 +343,8 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
                 print(f"single job: {len(plane_indices)} planes "
                       f"workers={workers} threads={threads}", flush=True)
                 wall = _run(arr, work_dir, ops, plane_indices, workers, threads,
-                            skip_volumetric=False, force=False)
+                            skip_volumetric=False, force=False,
+                            passthrough=cfg.pipeline_kwargs())
                 write_timing_report(work_dir, {"imread": t_imread, "pipeline": wall},
                                     n_workers=workers)
         finally:

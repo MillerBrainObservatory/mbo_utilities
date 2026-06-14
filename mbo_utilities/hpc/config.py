@@ -5,10 +5,12 @@ One source of truth: the dataclass fields below define defaults and types; the
 loader merges a user TOML over the defaults, coerces types, and validates.
 
 Sections map to TOML tables:
-  [io]        input/output/name
-  [slurm]     scheduler resources (partition, gres, cpus, mem, time)
-  [pipeline]  pack factor F and worker/IO behaviour
-  [ops]       suite2p ops overrides (open-ended)
+  [io]          input/output/name
+  [slurm]       scheduler resources (partition, gres, cpus, mem, time)
+  [pipeline]    cluster/runner knobs (pack factor F, threads, node-local staging)
+  [parameters]  one flat table forwarded to processing: suite2p ops AND lbm
+                pipeline() knobs (keep_reg, norm_method, ...). split_parameters()
+                routes each key to the right place.
 """
 
 from __future__ import annotations
@@ -62,6 +64,66 @@ class PipelineConfig:
     node_local: bool = True
 
 
+# [parameters] keys routed to lbm pipeline() top-level kwargs; everything else
+# in [parameters] is treated as a suite2p ops key.
+_PIPELINE_PARAM_KEYS = frozenset({
+    "keep_reg", "keep_raw", "norm_method", "correct_neuropil",
+    "dff_window_size", "dff_percentile", "dff_smooth_window",
+    "cell_filters", "accept_all_cells", "rastermap_kwargs", "save_json",
+    "reader_kwargs", "roi_mode", "num_timepoints", "frame_indices",
+})
+# routed into writer_kwargs (phase correction).
+_WRITER_PARAM_KEYS = frozenset({"fix_phase", "use_fft"})
+# owned by the runner / [pipeline]; rejected if set in [parameters].
+_MANAGED_PARAM_KEYS = frozenset({
+    "save_path", "ops", "planes", "workers", "threads_per_worker",
+    "skip_volumetric", "force_reg", "force_detect", "replot", "writer_kwargs",
+    "planes_per_gpu", "node_local",
+})
+
+# pipeline-behaviour defaults surfaced in the [parameters] template.
+DEFAULT_PIPELINE_PARAMS: dict = {
+    "keep_reg": True,
+    "keep_raw": False,
+    "fix_phase": True,
+    "use_fft": True,
+}
+
+# inline comments for the pipeline-behaviour keys in the generated template.
+PARAM_HELP: dict = {
+    "keep_reg": "keep registered data.bin (false = only small outputs; array re-runs)",
+    "keep_raw": "keep raw pre-registration data_raw.bin",
+    "fix_phase": "bidirectional scan-phase correction",
+    "use_fft": "FFT phase correction (vs integer)",
+}
+
+
+def split_parameters(params: dict) -> tuple[dict, dict]:
+    """Route a flat [parameters] table into (suite2p ops, lbm pipeline kwargs).
+
+    Dispatch by key name: known pipeline kwargs -> pipeline(); fix_phase/use_fft
+    -> writer_kwargs; runner-owned keys are rejected; all other keys are suite2p
+    ops parameters (so a typo silently becomes an ignored ops key).
+    """
+    ops = dict(DEFAULT_OPS)
+    pipe: dict = {}
+    writer = {"fix_phase": True, "use_fft": True}
+    for k, v in (params or {}).items():
+        if k in _MANAGED_PARAM_KEYS:
+            raise ValueError(
+                f"[parameters] '{k}' is managed by the runner; put cluster knobs "
+                f"in [pipeline], not [parameters]"
+            )
+        if k in _WRITER_PARAM_KEYS:
+            writer[k] = v
+        elif k in _PIPELINE_PARAM_KEYS:
+            pipe[k] = v
+        else:
+            ops[k] = v
+    pipe["writer_kwargs"] = writer
+    return ops, pipe
+
+
 # Comment shown next to each key in the generated template.
 HELP: dict = {
     "io": {
@@ -96,7 +158,9 @@ class HpcConfig:
     io: IOConfig = field(default_factory=IOConfig)
     slurm: SlurmConfig = field(default_factory=SlurmConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
-    ops: dict = field(default_factory=lambda: dict(DEFAULT_OPS))
+    parameters: dict = field(
+        default_factory=lambda: {**DEFAULT_OPS, **DEFAULT_PIPELINE_PARAMS}
+    )
 
     @classmethod
     def from_dict(cls, raw: dict) -> "HpcConfig":
@@ -116,9 +180,10 @@ class HpcConfig:
                 if f.name in section
             }
             kw[name] = klass(**coerced)
-        ops = dict(DEFAULT_OPS)
-        ops.update(raw.get("ops", {}) or {})
-        kw["ops"] = ops
+        params = {**DEFAULT_OPS, **DEFAULT_PIPELINE_PARAMS}
+        params.update(raw.get("ops", {}) or {})  # legacy [ops] alias
+        params.update(raw.get("parameters", {}) or {})
+        kw["parameters"] = params
         cfg = cls(**kw)
         cfg.validate()
         return cfg
@@ -135,13 +200,23 @@ class HpcConfig:
         if self.pipeline.planes_per_gpu < 1:
             raise ValueError("[pipeline] planes_per_gpu must be >= 1")
         _time_to_minutes(self.slurm.time)  # raises on bad format
+        split_parameters(self.parameters)  # raises on a runner-managed [parameters] key
 
     def timeout_min(self) -> int:
         return _time_to_minutes(self.slurm.time)
 
+    def ops(self) -> dict:
+        """suite2p ops dict routed out of [parameters]."""
+        return split_parameters(self.parameters)[0]
+
+    def pipeline_kwargs(self) -> dict:
+        """kwargs forwarded to lbm_suite2p_python.pipeline() routed out of
+        [parameters] (keep_reg, norm_method, writer_kwargs, ...)."""
+        return split_parameters(self.parameters)[1]
+
     def to_dict(self) -> dict:
         d = {name: asdict(getattr(self, name)) for name in _SECTIONS}
-        d["ops"] = dict(self.ops)
+        d["parameters"] = dict(self.parameters)
         return d
 
 
@@ -185,6 +260,10 @@ def _toml_value(v) -> str:
         return "true" if v else "false"
     if isinstance(v, (int, float)):
         return repr(v)
+    if isinstance(v, dict):
+        if not v:
+            return "{}"
+        return "{" + ", ".join(f"{k} = {_toml_value(val)}" for k, val in v.items()) + "}"
     return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -213,9 +292,15 @@ def render_template(input_path: str = "", output_path: str = "") -> str:
             lines.append(f"{row}  # {comment}" if comment else row)
         lines.append("")
 
-    lines.append("[ops]")
-    lines.append("# suite2p ops overrides applied to every plane")
-    for k, v in defaults.ops.items():
+    lines.append("[parameters]")
+    lines.append("# one knob: suite2p ops + lbm pipeline() kwargs, routed by name")
+    for k, v in DEFAULT_OPS.items():
         lines.append(f"{k} = {_toml_value(v)}")
+    lines.append("")
+    lines.append("# pipeline behaviour (keys below route to pipeline(), not ops)")
+    for k, v in DEFAULT_PIPELINE_PARAMS.items():
+        comment = PARAM_HELP.get(k, "")
+        row = f"{k} = {_toml_value(v)}"
+        lines.append(f"{row}  # {comment}" if comment else row)
     lines.append("")
     return "\n".join(lines)
