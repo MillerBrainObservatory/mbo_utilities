@@ -324,7 +324,7 @@ def hpc_compare(output_dirs):
 
 @hpc.command("ioprobe")
 @click.argument("raw", type=click.Path(exists=True))
-@click.option("--plane", default=0, show_default=True, help="0-based z-plane to read.")
+@click.option("--plane", default=1, show_default=True, help="1-based z-plane to read.")
 @click.option("--frames", default=2000, show_default=True, help="Frames to read cold.")
 def hpc_ioprobe(raw, plane, frames):
     """
@@ -351,7 +351,7 @@ def hpc_ioprobe(raw, plane, frames):
 @hpc.command("iobench")
 @click.argument("raw", type=click.Path(exists=True))
 @click.option("--planes", default="",
-              help="0-based z-planes, comma-separated (e.g. 1,7,13). Default: a few evenly-spaced.")
+              help="1-based z-planes, comma-separated (e.g. 1,7,14). Default: a few evenly-spaced.")
 @click.option("--frames", default=500, show_default=True, help="Frames per plane to read.")
 def hpc_iobench(raw, planes, frames):
     """

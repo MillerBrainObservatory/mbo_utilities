@@ -164,8 +164,9 @@ def run_iobench(raw, frames: int = 500, planes=None) -> None:
     Lets you estimate the full run from a few planes without ever processing all
     of them: reads `frames` of each chosen plane (one at a time, low memory),
     reports per-plane, then scales to all planes x all frames. Read only — phase
-    and write are ~1% (see `mbo hpc ioprobe`). `planes` are 0-based; when omitted,
-    a few evenly-spaced planes are sampled (first, middle, last) — not all.
+    and write are ~1% (see `mbo hpc ioprobe`). `planes` are 1-based (mbo
+    convention: plane 1 = zplane01); when omitted, a few evenly-spaced planes are
+    sampled (first, middle, last) — not all.
     """
     import time
 
@@ -177,36 +178,51 @@ def run_iobench(raw, frames: int = 500, planes=None) -> None:
     nt = int(arr.shape[0])
     nz = int(arr.shape[2])
     if planes:
-        zlist = [z for z in planes if 0 <= z < nz]
+        plist = [p for p in planes if 1 <= p <= nz]  # 1-based (mbo convention)
     else:
-        zlist = sorted({0, nz // 2, nz - 1})  # a few evenly-spaced planes, not all
+        plist = sorted({1, (nz + 1) // 2, nz})  # a few evenly-spaced planes, not all
     k = min(int(frames), nt)
 
-    rows = []
-    for z in zlist:
+    # The first data read forces the tiff reader to walk the file's directory
+    # chain (one entry per frame) to locate frames; that table is then stored on
+    # the open file and reused, so only the first read pays for it. Walk it once
+    # up front and time it separately, so the per-plane numbers below are
+    # steady-state and the first plane isn't charged for the rest.
+    t_index = 0.0
+    try:
         s = time.perf_counter()
-        chunk = np.asarray(arr[0:k, 0, z, :, :])
-        rows.append((z, time.perf_counter() - s))
+        for tf in arr.tiff_files:
+            _ = len(tf.pages)
+        t_index = time.perf_counter() - s
+    except AttributeError:
+        pass
+
+    rows = []
+    for p in plist:
+        s = time.perf_counter()
+        chunk = np.asarray(arr[0:k, 0, p - 1, :, :])  # Z axis is 0-based
+        rows.append((p, time.perf_counter() - s))
         del chunk
 
     sampled = sum(dt for _, dt in rows)
     full_sampled = sampled / k * nt              # the sampled planes, full frames
-    per_plane = full_sampled / len(zlist)        # mean full-plane read
-    full_dataset = per_plane * nz                # all planes, full frames
+    per_plane = full_sampled / len(plist)        # mean full-plane read
+    full_dataset = per_plane * nz + t_index      # data + one directory walk per open
 
-    click.echo(f"read {k} of {nt} frames for planes {zlist} of {nz}, "
+    click.echo(f"read {k} of {nt} frames for planes {plist} of {nz}, "
                f"{arr.shape[-2]}x{arr.shape[-1]}  (read only = the io bottleneck)")
+    click.echo(f"directory walk (one-time, all later reads reuse it): {t_index:.1f}s")
     click.echo(f"\n{'plane':>6}{'sampled':>10}{'per-frame':>12}{'full plane':>12}")
-    for z, dt in rows:
-        click.echo(f"{z:>6}{dt:>9.1f}s{dt / k * 1000:>10.2f}ms{dt / k * nt:>11.0f}s")
+    for p, dt in rows:
+        click.echo(f"{p:>6}{dt:>9.1f}s{dt / k * 1000:>10.2f}ms{dt / k * nt:>11.0f}s")
     click.secho(
-        f"\n{len(zlist)} sampled plane(s) at full {nt} frames: "
+        f"\n{len(plist)} sampled plane(s) at full {nt} frames: "
         f"{full_sampled:.0f}s ({full_sampled / 3600:.2f}h)",
         fg="cyan",
     )
     click.secho(
         f"full dataset ({nz} planes x {nt} frames): ~{full_dataset:.0f}s "
-        f"({full_dataset / 3600:.2f}h)  [1 reader; pipeline parallelizes across workers]",
+        f"({full_dataset / 3600:.2f}h)  [1 reader + 1 walk; pipeline parallelizes across workers]",
         fg="cyan",
     )
 
@@ -230,8 +246,11 @@ def run_ioprobe(raw, plane: int = 0, frames: int = 2000) -> None:
 
     arr = imread(raw, fix_phase=False)  # raw, phase correction OFF for the read
     nt = int(arr.shape[0])
+    nz = int(arr.shape[2])
+    z = int(plane) - 1  # planes are 1-based (mbo convention); Z axis is 0-based
+    if not 0 <= z < nz:
+        raise ValueError(f"plane {plane} out of range 1..{nz}")
     k = min(int(frames), nt)
-    z = int(plane)
 
     t = time.perf_counter()
     chunk = np.asarray(arr[0:k, 0, z, :, :])  # COLD strided read from the FS
@@ -274,7 +293,7 @@ def run_ioprobe(raw, plane: int = 0, frames: int = 2000) -> None:
     def full(v, n):
         return v / n * nt
 
-    click.echo(f"plane {z}: read {k} frames (phase timed on {m}), "
+    click.echo(f"plane {plane}: read {k} frames (phase timed on {m}), "
                f"{chunk.shape[-2]}x{chunk.shape[-1]}, offset={off:.2f}"
                + (f", peak RSS {peak_gb:.1f} GB" if peak_gb else ""))
     click.echo(f"\n{'step':<22}{'sampled':>10}{'per-frame':>12}{'full plane':>12}")
