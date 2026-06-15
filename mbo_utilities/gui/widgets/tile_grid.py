@@ -25,7 +25,6 @@ from typing import Any
 import numpy as np
 from imgui_bundle import imgui
 
-from mbo_utilities.gui._imgui_helpers import set_tooltip
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui.widgets.summary_image import (
     _DEFAULT_COLORMAP,
@@ -315,20 +314,35 @@ class TileGridViewer(Widget):
         if self._popup_open:
             self._draw_popup(arr)
 
+    def _zblock_range(self, i: int) -> tuple[float, float]:
+        """Stage-Z interval covered by z-block ``i``: from this block's
+        position to the next block's (the last block mirrors the prior gap).
+        """
+        zb = self._grid["zblocks"]
+        if not zb:
+            return (0.0, 0.0)
+        if len(zb) == 1:
+            return (zb[0], zb[0])
+        if i < len(zb) - 1:
+            return (zb[i], zb[i + 1])
+        return (zb[i], zb[i] + (zb[i] - zb[i - 1]))
+
     def _draw_toolbar(self) -> None:
         g = self._grid
         zblocks = g["zblocks"]
         nz = len(zblocks)
         if nz > 1:
-            imgui.set_next_item_width(260)
+            lo, hi = self._zblock_range(self._zblock)
+            imgui.set_next_item_width(300)
             changed, new_z = imgui.slider_int(
                 "Z-block##tilegrid", self._zblock, 0, nz - 1,
-                f"%d / {nz - 1}  (z={zblocks[self._zblock]:.0f})",
+                f"%d / {nz - 1}   z {lo:.0f}-{hi:.0f} um",
             )
             if changed:
                 self._zblock = int(new_z)
         else:
-            imgui.text_colored(_WHITE, "single z-block")
+            lo, _ = self._zblock_range(0)
+            imgui.text_colored(_WHITE, f"single z-block  (z {lo:.0f} um)")
 
         if len(self._channel_names) > 1:
             imgui.same_line()
@@ -412,7 +426,7 @@ class TileGridViewer(Widget):
                     if clicked:
                         self._jump_to_tile(ti)
                     if imgui.is_item_hovered():
-                        set_tooltip(f"SPM{spc:02d}  (tile {ti})")
+                        imgui.set_tooltip(f"SPM{spc:02d}  (tile {ti})")
                     is_current = ti == cur_tile
                     draw_list.add_rect(
                         pos, cmax, yellow if is_current else grey,
