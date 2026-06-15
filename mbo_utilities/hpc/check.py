@@ -69,6 +69,28 @@ def analyze(cfg, n_planes, nt, ly, lx, partition, mode):
 
     n_tasks = math.ceil(n_planes / F) if F else n_planes
 
+    # node-local /tmp staging capacity (only matters when node_local is on).
+    # The full per-shard binaries are written to the node's /tmp before copy-back;
+    # on a single-node partition all co-resident tasks share that one /tmp.
+    if cfg.pipeline.node_local and partition.tmp_mb:
+        tmp_gb = partition.tmp_mb / 1024
+        keep_raw = cfg.pipeline_kwargs().get("keep_raw", False)
+        per_task = F * bin_gb * (2 if keep_raw else 1)
+        concurrent = 1
+        if mode == "array" and partition.nodes <= 1:
+            fit_cpu = partition.cpus_per_node // max(1, cfg.slurm.cpus_per_task)
+            fit_gpu = partition.gpus_per_node or n_tasks
+            concurrent = max(1, min(n_tasks, fit_cpu, fit_gpu))
+        need = per_task * concurrent
+        line = f"node-local /tmp  : {tmp_gb:.0f} GB/node; staging ~{per_task:.0f} GB/task"
+        if concurrent > 1:
+            line += f" x {concurrent} co-resident = ~{need:.0f} GB"
+        report.append(line)
+        if need > tmp_gb:
+            suggestions.append(("[pipeline] node_local", "false",
+                f"staging ~{need:.0f} GB > {tmp_gb:.0f} GB /tmp on {partition.name}; "
+                f"or lower planes_per_gpu"))
+
     # array buys nothing on a single-node partition
     if mode == "array" and partition.nodes <= 1:
         suggestions.append(("--mode", "single",

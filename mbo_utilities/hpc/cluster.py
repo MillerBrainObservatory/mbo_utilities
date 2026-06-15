@@ -11,8 +11,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 
-# one line per node: partition|host|cpus|mem(MB)|free(MB)|gres|state
-_SINFO_FMT = "%P|%n|%c|%m|%e|%G|%t"
+# one line per node: partition|host|cpus|mem(MB)|free(MB)|gres|state|tmpdisk(MB)
+_SINFO_FMT = "%P|%n|%c|%m|%e|%G|%t|%d"
 
 
 def _int(s) -> int:
@@ -37,6 +37,7 @@ class Partition:
     free_mb_min: int = 0
     free_mb_max: int = 0
     gres: str = ""
+    tmp_mb: int = 0  # configured node-local /tmp (sinfo %d), 0 = unreported
     states: set = field(default_factory=set)
 
     @property
@@ -69,6 +70,8 @@ def parse_sinfo(text: str, pattern: str = "hpc") -> list[Partition]:
             p.gres = g
         if cols[6]:
             p.states.add(cols[6])
+        if len(cols) > 7:
+            p.tmp_mb = max(p.tmp_mb, _int(cols[7]))
     return sorted(parts.values(), key=lambda p: p.name)
 
 
@@ -89,7 +92,7 @@ def _gb(mb: int) -> str:
 
 
 def format_partitions(parts: list[Partition]) -> str:
-    rows = [("PARTITION", "NODES", "CPUS", "MEM", "FREE", "GPUS", "STATE")]
+    rows = [("PARTITION", "NODES", "CPUS", "MEM", "FREE", "TMP", "GPUS", "STATE")]
     for p in parts:
         if p.free_mb_min and p.free_mb_max and p.free_mb_min != p.free_mb_max:
             free = f"{p.free_mb_min / 1024:.0f}-{p.free_mb_max / 1024:.0f} GB"
@@ -97,7 +100,8 @@ def format_partitions(parts: list[Partition]) -> str:
             free = _gb(p.free_mb_max)
         rows.append((
             p.name, str(p.nodes), str(p.cpus_per_node or "?"),
-            _gb(p.mem_mb), free, p.gres or "-", ",".join(sorted(p.states)),
+            _gb(p.mem_mb), free, _gb(p.tmp_mb), p.gres or "-",
+            ",".join(sorted(p.states)),
         ))
     w = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
     return "\n".join("  ".join(c.ljust(w[i]) for i, c in enumerate(r)) for r in rows)

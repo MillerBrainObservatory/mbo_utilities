@@ -224,19 +224,49 @@ def assert_output_writable(path) -> None:
         )
 
 
-def _log_output_estimate(arr, n_planes: int, output_dir) -> None:
-    """Print the expected registered-binary footprint vs. free space."""
+def _bin_gb_per_plane(arr) -> float:
+    """int16 data.bin size for one plane, or 0 if shape is unreadable."""
     try:
         nt, ly, lx = int(arr.shape[0]), int(arr.shape[-2]), int(arr.shape[-1])
     except Exception:
+        return 0.0
+    return nt * ly * lx * 2 / 1e9
+
+
+def _log_output_estimate(arr, n_planes: int, output_dir) -> None:
+    """Print the expected registered-binary footprint vs. free space."""
+    per = _bin_gb_per_plane(arr)
+    if not per:
         return
-    est_gb = nt * ly * lx * 2 * n_planes / 1e9  # int16 data.bin per plane
+    est_gb = per * n_planes  # int16 data.bin per plane
     free_gb = disk_free_gb(output_dir)
     print(f"output estimate: ~{est_gb:.0f} GB for {n_planes} plane(s); "
           f"{free_gb:.0f} GB free on output FS (quota not included)", flush=True)
     if 0 <= free_gb < est_gb:
         print("WARNING: estimated output exceeds free space — likely to fail at "
               "write/copy. Use scratch, or disable keep_reg.", flush=True)
+
+
+def assert_stage_fits(arr, work_dir, n_planes: int, keep_raw: bool = False) -> None:
+    """Fail fast if node-local /tmp can't hold this shard's staged binaries.
+
+    Staging writes the full data.bin per shard plane to ``work_dir`` (and, while
+    keep_raw, data_raw.bin alongside it). Checked on the node where /tmp free is
+    actually known, BEFORE the long compute, so an undersized /tmp costs seconds.
+    """
+    per = _bin_gb_per_plane(arr)
+    if not per:
+        return
+    est_gb = per * n_planes * (2.0 if keep_raw else 1.0)
+    free_gb = disk_free_gb(work_dir)
+    print(f"node-local staging: ~{est_gb:.0f} GB for {n_planes} plane(s); "
+          f"{free_gb:.0f} GB free on {work_dir}", flush=True)
+    if est_gb and 0 <= free_gb < est_gb * 1.1:  # 10% headroom for fs overhead
+        raise RuntimeError(
+            f"node-local /tmp ({work_dir}) has {free_gb:.0f} GB free but staging "
+            f"this shard needs ~{est_gb:.0f} GB. Lower [pipeline] planes_per_gpu, "
+            f"or set [pipeline] node_local = false to write to the output FS directly."
+        )
 
 
 def write_failure_report(output_dir, role, task_id, exc) -> str | None:
@@ -321,6 +351,7 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
             plane_indices = list(range(1, num_planes(arr) + 1))  # lbm planes are 1-based
             pack = cfg.pipeline.planes_per_gpu
             thr = cfg.pipeline.threads_per_worker
+            keep_raw = cfg.pipeline_kwargs().get("keep_raw", False)
 
             if role == "array":
                 this_shard = shard if shard is not None else shard_for_task(
@@ -331,6 +362,8 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
                 workers, threads = resolve_workers(len(this_shard), pack, thr)
                 _apply_thread_env(threads)
                 _log_output_estimate(arr, len(this_shard), output_dir)
+                if node_local:
+                    assert_stage_fits(arr, work_dir, len(this_shard), keep_raw)
                 print(f"array task {task_id}: planes {this_shard} "
                       f"workers={workers} threads={threads}", flush=True)
                 _run(arr, work_dir, ops, this_shard, workers, threads,
@@ -340,6 +373,8 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
                 workers, threads = resolve_workers(len(plane_indices), pack, thr)
                 _apply_thread_env(threads)
                 _log_output_estimate(arr, len(plane_indices), output_dir)
+                if node_local:
+                    assert_stage_fits(arr, work_dir, len(plane_indices), keep_raw)
                 print(f"single job: {len(plane_indices)} planes "
                       f"workers={workers} threads={threads}", flush=True)
                 wall = _run(arr, work_dir, ops, plane_indices, workers, threads,
