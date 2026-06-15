@@ -30,10 +30,10 @@ def hpc():
 
 @hpc.command("init")
 @click.argument("data_path", required=False, type=click.Path())
-@click.option("-o", "--config", "config_path", type=click.Path(), default="hpc.toml",
-              help="Config file to write.")
+@click.option("-o", "--config", "config_path", type=click.Path(), default=None,
+              help="Config file to write (default: <data_path>/hpc.toml, else ./hpc.toml).")
 @click.option("-O", "--output", "output_root", type=click.Path(), default=None,
-              help="Results root (default: <data_path>/../results).")
+              help="Results root (default: <config dir>/results).")
 @click.option("--overwrite/--no-overwrite", default=False)
 def hpc_init(data_path, config_path, output_root, overwrite):
     """
@@ -41,20 +41,26 @@ def hpc_init(data_path, config_path, output_root, overwrite):
 
     \b
     Examples:
-      mbo hpc init                       # hpc.toml in the current directory
-      mbo hpc init /data/raw             # fills input + a results/ output
-      mbo hpc init /data/raw -o run.toml
+      mbo hpc init                       # ./hpc.toml in the current directory
+      mbo hpc init /data/raw             # /data/raw/hpc.toml, fills input + results/
+      mbo hpc init /data/raw -o run.toml # explicit config path
     """
     from mbo_utilities.hpc.config import render_template
 
-    cfg_file = Path(config_path).expanduser()
+    # Config lands in the given path; CWD only when no path is passed.
+    if config_path:
+        cfg_file = Path(config_path).expanduser()
+    elif data_path:
+        cfg_file = Path(data_path).expanduser() / "hpc.toml"
+    else:
+        cfg_file = Path("hpc.toml")
+
     if cfg_file.exists() and not overwrite:
         click.secho(f"Exists: {cfg_file}  (--overwrite to replace)", fg="yellow")
         return
 
     # Absolute paths so the config works from any directory. Results default next
-    # to the config (writable by construction), never the data tree — acquisition
-    # directories are commonly read-only to the submitting user.
+    # to the config.
     inp = str(Path(data_path).expanduser().resolve()) if data_path else ""
     out = output_root or str(cfg_file.resolve().parent / "results")
 
@@ -67,8 +73,8 @@ def hpc_init(data_path, config_path, output_root, overwrite):
     except OSError as e:
         raise click.ClickException(
             f"cannot write {cfg_file}: {e}\n"
-            "The current directory may be read-only (data directories often are). "
-            "Re-run from a writable directory, or pass -o <writable-dir>/hpc.toml."
+            f"{cfg_file.parent} may be read-only (data directories often are). "
+            "Pass -o <writable-dir>/hpc.toml, or run from a writable directory."
         )
     click.secho(f"Created: {cfg_file.resolve()}", fg="green")
     click.echo(f"Edit it, then: mbo hpc run {cfg_file}")
