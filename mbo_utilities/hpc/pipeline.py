@@ -69,6 +69,9 @@ def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
     keep_reg = kw.pop("keep_reg", True)
     keep_raw = kw.pop("keep_raw", False)
     writer_kwargs = kw.pop("writer_kwargs", {"fix_phase": True, "use_fft": True})
+    kw.pop("planes", None)            # runner passes planes explicitly below
+    if not kw.get("frame_indices"):  # [] -> all timepoints (lbm expects None)
+        kw.pop("frame_indices", None)
 
     t0 = time.perf_counter()
     pipeline(
@@ -348,7 +351,8 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
             arr = imread(cfg.io.input)
             t_imread = time.perf_counter() - t0
             print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
-            plane_indices = list(range(1, num_planes(arr) + 1))  # lbm planes are 1-based
+            sel = cfg.pipeline_kwargs().get("planes")
+            plane_indices = list(sel) if sel else list(range(1, num_planes(arr) + 1))  # 1-based; [] = all
             pack = cfg.pipeline.planes_per_gpu
             thr = cfg.pipeline.threads_per_worker
             keep_raw = cfg.pipeline_kwargs().get("keep_raw", False)

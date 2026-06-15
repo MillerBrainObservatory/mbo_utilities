@@ -73,10 +73,11 @@ def plan(cfg: HpcConfig):
     arr = imread(cfg.io.input)
     n = _pipe.num_planes(arr)
     pack = cfg.pipeline.planes_per_gpu
-    ntasks = _pipe.num_tasks(n, pack)
-    planes = list(range(1, n + 1))
+    sel = cfg.pipeline_kwargs().get("planes")
+    planes = list(sel) if sel else list(range(1, n + 1))  # [] = all
+    ntasks = _pipe.num_tasks(len(planes), pack)
     shards = [_pipe.shard_for_task(planes, pack, t) for t in range(ntasks)]
-    return n, ntasks, shards
+    return len(planes), ntasks, shards
 
 
 def _print_plan(cfg: HpcConfig, mode: str, output_dir: Path) -> None:
