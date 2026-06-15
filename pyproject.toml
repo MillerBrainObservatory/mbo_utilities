@@ -193,6 +193,9 @@ exclude_lines = [
 ]
 
 [dependency-groups]
+hpc = [
+    "submitit>=1.5.0",
+]
 dev = [
     "graphviz>=0.21",
     "pillow>=12.1.0",

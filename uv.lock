@@ -2142,6 +2142,9 @@ dev = [
     { name = "pygetwindow" },
     { name = "pytest" },
 ]
+hpc = [
+    { name = "submitit" },
+]
 isoview = [
     { name = "isoview" },
 ]
@@ -2223,6 +2226,7 @@ dev = [
     { name = "pygetwindow", specifier = ">=0.0.9" },
     { name = "pytest", specifier = ">=8.4.2" },
 ]
+hpc = [{ name = "submitit", specifier = ">=1.5.0" }]
 isoview = [{ name = "isoview" }]
 
 [[package]]
