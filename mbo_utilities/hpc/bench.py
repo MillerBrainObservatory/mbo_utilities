@@ -157,6 +157,77 @@ def run_compare(dirs) -> None:
                    f"{r['detect_sum']:>9.1f}{r['total_sum']:>10.1f}")
 
 
+def run_ioprobe(raw, plane: int = 0, frames: int = 2000) -> None:
+    """Decompose tiff->bin into read / phase-apply / write on real data.
+
+    Reads `frames` of one plane COLD (no phase), then times the phase-correct and
+    write on that in-memory chunk — so read is the only step that touches the
+    filesystem and there's no page-cache confound on the phase numbers. Extrapolates
+    each step to the full plane so you can see which dominates `io`.
+    """
+    import os
+    import tempfile
+    import time
+
+    import click
+    import numpy as np
+    from mbo_utilities import imread
+    from mbo_utilities.analysis.phasecorr import _apply_offset, bidir_phasecorr
+
+    arr = imread(raw, fix_phase=False)  # raw, phase correction OFF for the read
+    nt = int(arr.shape[0])
+    k = min(int(frames), nt)
+    z = int(plane)
+
+    t = time.perf_counter()
+    chunk = np.asarray(arr[0:k, 0, z, :, :])  # COLD strided read from the FS
+    t_read = time.perf_counter() - t
+
+    def _t(fn, *a, **kw):
+        c = chunk.copy()
+        s = time.perf_counter()
+        fn(c, *a, **kw)
+        return time.perf_counter() - s
+
+    t_fft = _t(_apply_offset, 2.3, use_fft=True)   # subpixel -> the FFT path
+    t_int = _t(_apply_offset, 2.0, use_fft=False)  # integer -> np.roll
+    s = time.perf_counter()
+    _, off = bidir_phasecorr(chunk, method="mean", use_fft=True)
+    t_compute = time.perf_counter() - s
+
+    tmp = os.path.join(os.environ.get("TMPDIR") or tempfile.gettempdir(),
+                       f"ioprobe_{os.getpid()}.bin")
+    s = time.perf_counter()
+    chunk.astype(np.int16).tofile(tmp)
+    t_write = time.perf_counter() - s
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+    def full(v):
+        return v / k * nt
+
+    click.echo(f"plane {z}: {k} of {nt} frames, {chunk.shape[-2]}x{chunk.shape[-1]}, "
+               f"computed offset={off:.2f}")
+    click.echo(f"\n{'step':<22}{'chunk':>10}{'per-frame':>12}{'full plane':>12}")
+    for name, v in (("read (filesystem)", t_read),
+                    ("phase FFT (subpix)", t_fft),
+                    ("phase int (roll)", t_int),
+                    ("write (tmp)", t_write)):
+        click.echo(f"{name:<22}{v:>9.1f}s{v / k * 1000:>10.2f}ms{full(v):>11.0f}s")
+    click.echo(f"{'compute offset(once)':<22}{t_compute:>9.1f}s")
+
+    rd, ph = full(t_read), full(t_fft)
+    click.secho(
+        f"\n-> read {rd:.0f}s/plane vs phase {ph:.0f}s/plane: "
+        + (f"read is {rd / max(ph, 0.01):.0f}x the phase -> read-bound (stage input)"
+           if rd > ph else
+           f"phase is {ph / max(rd, 0.01):.0f}x the read -> phase-bound (drop use_fft)"),
+        fg="cyan",
+    )
+
+
 def run_bench(output_dir) -> None:
     import click
 

@@ -320,3 +320,29 @@ def hpc_compare(output_dirs):
     from mbo_utilities.hpc.bench import run_compare
 
     run_compare(output_dirs)
+
+
+@hpc.command("ioprobe")
+@click.argument("raw", type=click.Path(exists=True))
+@click.option("--plane", default=0, show_default=True, help="0-based z-plane to read.")
+@click.option("--frames", default=2000, show_default=True, help="Frames to read cold.")
+def hpc_ioprobe(raw, plane, frames):
+    """
+    Decompose tiff->bin into read / phase-correct / write on real data.
+
+    Proves whether `io` is read-bound (strided filesystem reads -> staging helps)
+    or phase-bound (FFT scan-phase correction -> drop use_fft). Reads N frames of
+    one plane cold, then times phase-apply and write on that in-memory chunk.
+    Run it on a fresh range so the read isn't served from page cache.
+
+    \b
+    Examples:
+      mbo hpc ioprobe /lustre/.../raw
+      mbo hpc ioprobe /lustre/.../raw --plane 3 --frames 4000
+    """
+    from mbo_utilities.hpc.bench import run_ioprobe
+
+    try:
+        run_ioprobe(raw, plane=plane, frames=frames)
+    except (OSError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e))
