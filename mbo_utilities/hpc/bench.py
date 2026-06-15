@@ -183,8 +183,14 @@ def run_ioprobe(raw, plane: int = 0, frames: int = 2000) -> None:
     chunk = np.asarray(arr[0:k, 0, z, :, :])  # COLD strided read from the FS
     t_read = time.perf_counter() - t
 
+    # Phase/write timed on a bounded sub-sample so the probe's own memory stays
+    # small (per-frame cost is linear, so it extrapolates the same). The read
+    # still uses the full k frames — that's the read measurement.
+    m = min(k, 512)
+    sub = np.ascontiguousarray(chunk[:m])
+
     def _t(fn, *a, **kw):
-        c = chunk.copy()
+        c = sub.copy()
         s = time.perf_counter()
         fn(c, *a, **kw)
         return time.perf_counter() - s
@@ -192,38 +198,45 @@ def run_ioprobe(raw, plane: int = 0, frames: int = 2000) -> None:
     t_fft = _t(_apply_offset, 2.3, use_fft=True)   # subpixel -> the FFT path
     t_int = _t(_apply_offset, 2.0, use_fft=False)  # integer -> np.roll
     s = time.perf_counter()
-    _, off = bidir_phasecorr(chunk, method="mean", use_fft=True)
+    _, off = bidir_phasecorr(sub, method="mean", use_fft=True)
     t_compute = time.perf_counter() - s
 
     tmp = os.path.join(os.environ.get("TMPDIR") or tempfile.gettempdir(),
                        f"ioprobe_{os.getpid()}.bin")
     s = time.perf_counter()
-    chunk.astype(np.int16).tofile(tmp)
+    sub.astype(np.int16).tofile(tmp)
     t_write = time.perf_counter() - s
     try:
         os.remove(tmp)
     except OSError:
         pass
 
-    def full(v):
-        return v / k * nt
+    try:
+        import resource
+        peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6  # KB->GB (Linux)
+    except Exception:
+        peak_gb = None
 
-    click.echo(f"plane {z}: {k} of {nt} frames, {chunk.shape[-2]}x{chunk.shape[-1]}, "
-               f"computed offset={off:.2f}")
-    click.echo(f"\n{'step':<22}{'chunk':>10}{'per-frame':>12}{'full plane':>12}")
-    for name, v in (("read (filesystem)", t_read),
-                    ("phase FFT (subpix)", t_fft),
-                    ("phase int (roll)", t_int),
-                    ("write (tmp)", t_write)):
-        click.echo(f"{name:<22}{v:>9.1f}s{v / k * 1000:>10.2f}ms{full(v):>11.0f}s")
+    def full(v, n):
+        return v / n * nt
+
+    click.echo(f"plane {z}: read {k} frames (phase timed on {m}), "
+               f"{chunk.shape[-2]}x{chunk.shape[-1]}, offset={off:.2f}"
+               + (f", peak RSS {peak_gb:.1f} GB" if peak_gb else ""))
+    click.echo(f"\n{'step':<22}{'sampled':>10}{'per-frame':>12}{'full plane':>12}")
+    for name, v, n in (("read (filesystem)", t_read, k),
+                       ("phase FFT (subpix)", t_fft, m),
+                       ("phase int (roll)", t_int, m),
+                       ("write (tmp)", t_write, m)):
+        click.echo(f"{name:<22}{v:>9.1f}s{v / n * 1000:>10.2f}ms{full(v, n):>11.0f}s")
     click.echo(f"{'compute offset(once)':<22}{t_compute:>9.1f}s")
 
-    rd, ph = full(t_read), full(t_fft)
+    rd, ph = full(t_read, k), full(t_fft, m)
     click.secho(
         f"\n-> read {rd:.0f}s/plane vs phase {ph:.0f}s/plane: "
         + (f"read is {rd / max(ph, 0.01):.0f}x the phase -> read-bound (stage input)"
            if rd > ph else
-           f"phase is {ph / max(rd, 0.01):.0f}x the read -> phase-bound (drop use_fft)"),
+           f"phase is {ph / max(rd, 0.01):.0f}x the read -> phase-bound (optimize the FFT apply)"),
         fg="cyan",
     )
 
