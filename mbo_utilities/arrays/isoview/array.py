@@ -547,6 +547,40 @@ def _collect_isoview_xmls(input_dir: Path, specimen: int) -> list[Path]:
     return out
 
 
+def _meta_eq(v1, v2) -> bool:
+    """Equality for metadata values, treating numpy arrays element-wise."""
+    if isinstance(v1, np.ndarray) and isinstance(v2, np.ndarray):
+        return v1.shape == v2.shape and np.allclose(v1, v2)
+    return v1 == v2
+
+
+def _split_common_vs_tile(
+    per_tile_common: dict[int, dict],
+) -> tuple[dict, dict[int, dict]]:
+    """Factor per-tile metadata dicts into shared vs per-tile fields.
+
+    A field present and equal across every tile lands in ``shared``;
+    any field that is missing from a tile or differs between tiles lands
+    in ``per_tile[ti]`` for each tile that carries it.
+    """
+    tiles = sorted(per_tile_common)
+    all_keys: set[str] = set()
+    for d in per_tile_common.values():
+        all_keys.update(d.keys())
+
+    shared: dict = {}
+    per_tile: dict[int, dict] = {}
+    for key in all_keys:
+        present = [(ti, per_tile_common[ti][key]) for ti in tiles if key in per_tile_common[ti]]
+        values = [v for _, v in present]
+        if len(present) == len(tiles) and all(_meta_eq(values[0], v) for v in values[1:]):
+            shared[key] = values[0]
+        else:
+            for ti, v in present:
+                per_tile.setdefault(ti, {})[key] = v
+    return shared, per_tile
+
+
 def _read_all_isoview_xml(
     candidate_dirs: list[Path],
     specimen: int = 0,
@@ -612,11 +646,6 @@ def _read_all_isoview_xml(
         if len(arms_seen) >= 2:
             camera_view_map = {0: 0, 1: 0, 2: 90, 3: 90}
 
-    def _eq(v1, v2) -> bool:
-        if isinstance(v1, np.ndarray) and isinstance(v2, np.ndarray):
-            return v1.shape == v2.shape and np.allclose(v1, v2)
-        return v1 == v2
-
     all_keys: set[str] = set()
     for meta in parsed:
         all_keys.update(meta.keys())
@@ -627,7 +656,7 @@ def _read_all_isoview_xml(
         values = [meta.get(key) for meta in parsed if key in meta]
         if not values:
             continue
-        if all(_eq(values[0], v) for v in values[1:]):
+        if all(_meta_eq(values[0], v) for v in values[1:]):
             common[key] = values[0]
         else:
             for ch, meta in zip(channels, parsed):
@@ -858,6 +887,15 @@ _RAW_STACK_RE = re.compile(
     r"SPC(\d+)_TM(\d+)_ANG\d+_CM(\d+)_CHN(\d+)_PH\d+\.stack$"
 )
 _KLB_TM_RE = re.compile(r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)\.klb$")
+
+# Per-kind filename regex whose group(1) is the specimen (tile) number.
+# Used to recover the SPC/SPM id of each tile slot for per-tile XML reads.
+_KIND_SPECIMEN_RE = {
+    "raw": _RAW_STACK_RE,
+    "corrected": _CORRECTED_RE,
+    "fused": _FUSED_RE,
+    "clusterpt": _KLB_TM_RE,
+}
 
 _PROJ_FLAT_RE = re.compile(
     r"^SPM(\d+)(?:_TM(\d+))?_CM(\d+)(?:_CHN\d+)?\.(xy|xz|yz)Projection\.tif$",
@@ -1570,6 +1608,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         self._raw_dims: tuple[int, int, int] | None = None
         self._metadata: dict = {}
         self._camera_metadata: dict[int, dict] = {}
+        self._tile_metadata: dict[int, dict] = {}
         if self._kind_cfg["needs_raw_dims"]:
             self._probe_raw_xml()
 
@@ -1665,6 +1704,9 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         xml_dirs_fn = self._kind_cfg.get("xml_dirs")
         if xml_dirs_fn is None:
             return
+        if self._is_tiled:
+            self._load_tiled_xml_metadata(xml_dirs_fn)
+            return
         try:
             candidate_dirs = xml_dirs_fn(self)
         except Exception as exc:
@@ -1679,6 +1721,100 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         self._metadata.update(common)
         if per_cam:
             self._camera_metadata.update(per_cam)
+
+    def _load_tiled_xml_metadata(self, xml_dirs_fn) -> None:
+        """Read each tile's XML and split fields three ways.
+
+        Shared fields (identical across every tile) merge into
+        ``self._metadata``; per-camera fields (scan direction, wavelength,
+        view) into ``self._camera_metadata`` — both shared the same way a
+        timelapse dataset would surface them. Fields that differ per tile
+        (stage_x/y/z, specimen_XYZT, specimen_name, specimen) land in
+        ``self._tile_metadata`` keyed by tile (T-axis) index.
+
+        Reuses :func:`_read_all_isoview_xml` per tile (which already does
+        the per-camera split + camera_view_map synthesis) and then folds
+        the per-tile ``common`` dicts into shared vs per-tile.
+        """
+        try:
+            base_dirs = xml_dirs_fn(self)
+        except Exception as exc:
+            logger.debug("xml_dirs lookup failed for %s: %s", self.kind, exc)
+            base_dirs = []
+
+        specimens = self._tile_specimen_ids()
+        per_tile_common: dict[int, dict] = {}
+        cameras: dict[int, dict] = {}
+        for ti in self._timepoints:
+            spc = specimens.get(ti, ti)
+            dirs = self._tile_xml_dirs(ti, base_dirs)
+            common_ti, per_cam_ti = _read_all_isoview_xml(dirs, specimen=spc)
+            if not common_ti and not per_cam_ti:
+                continue
+            common_ti["specimen"] = spc
+            per_tile_common[ti] = common_ti
+            # camera intrinsics are identical across tiles — keep the first
+            # tile's per-camera split as the shared cameras section.
+            if per_cam_ti and not cameras:
+                cameras = per_cam_ti
+
+        if not per_tile_common:
+            return
+
+        shared, per_tile = _split_common_vs_tile(per_tile_common)
+        if "dimensions" in self._metadata:
+            shared.pop("dimensions", None)
+        # Drop tile-varying fields seeded into _metadata by the single-XML
+        # probe (e.g. stage_x/y/z, specimen_name from spec00) so they don't
+        # linger as stale "shared" values once they live in the tiles section.
+        for key in {k for d in per_tile.values() for k in d}:
+            if key != "dimensions":
+                self._metadata.pop(key, None)
+        self._metadata.update(shared)
+        if cameras:
+            self._camera_metadata.update(cameras)
+        self._tile_metadata.update(per_tile)
+
+    def _tile_specimen_ids(self) -> dict[int, int]:
+        """Map each tile (T-axis) index to its specimen (SPC/SPM) number.
+
+        Recovered from the volume filename via the per-kind specimen regex.
+        Falls back to the tile index when no number can be parsed.
+        """
+        rx = _KIND_SPECIMEN_RE.get(self.kind)
+        out: dict[int, int] = {}
+        for ti in self._timepoints:
+            spc = None
+            if rx is not None:
+                for p in self._tp_paths.get(ti, {}).values():
+                    if p is None:
+                        continue
+                    m = rx.match(Path(p).name)
+                    if m:
+                        spc = int(m.group(1))
+                        break
+            out[ti] = spc if spc is not None else ti
+        return out
+
+    def _tile_xml_dirs(self, ti: int, base_dirs: list[Path]) -> list[Path]:
+        """Candidate XML dirs for one tile: the tile's own volume dirs
+        first (where per-tile sidecars live for corrected/fused), then the
+        kind's base dirs (raw root etc.) as fallback.
+        """
+        dirs: list[Path] = []
+        seen: set[Path] = set()
+        for p in self._tp_paths.get(ti, {}).values():
+            if p is None:
+                continue
+            parent = Path(p).parent
+            if parent not in seen:
+                seen.add(parent)
+                dirs.append(parent)
+        for d in base_dirs or []:
+            if d is not None and d not in seen:
+                seen.add(d)
+                dirs.append(d)
+        return dirs
 
     def _probe_shape(self, sample_path: Path) -> None:
         # Finalize raw_dims depth from on-disk file size before LazyVolume needs it.
@@ -1796,6 +1932,18 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         return {k: dict(v) for k, v in self._camera_metadata.items()}
 
     @property
+    def tile_metadata(self) -> dict[int, dict]:
+        """Per-tile XML metadata, keyed by tile (T-axis) index.
+
+        Populated only for tiled acquisitions. Carries fields that differ
+        between tiles (stage_x/y/z, specimen_XYZT, specimen_name,
+        specimen); fields shared across tiles live on :attr:`metadata`
+        and per-camera fields on :attr:`camera_metadata`. Empty for
+        timelapse / non-tiled datasets.
+        """
+        return {k: dict(v) for k, v in self._tile_metadata.items()}
+
+    @property
     def filenames(self) -> list[Path]:
         return list(self._filenames_snapshot)
 
@@ -1839,6 +1987,11 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             # the IsoviewArray.camera_metadata property is the programmatic
             # accessor for the same data.
             meta["cameras"] = {k: dict(v) for k, v in self._camera_metadata.items()}
+        if self._tile_metadata:
+            # Tiled-only: the GUI metadata viewer renders a "Tiles" panel
+            # from metadata["tiles"]; IsoviewArray.tile_metadata is the
+            # programmatic accessor for the same per-tile data.
+            meta["tiles"] = {k: dict(v) for k, v in self._tile_metadata.items()}
         return meta
 
     @metadata.setter

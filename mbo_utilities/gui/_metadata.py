@@ -539,6 +539,31 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                             imgui.tree_pop()
                 shown_keys.add("cameras")
 
+            # Tiles section (tiled acquisitions only)
+            tiles = metadata.get("tiles")
+            if tiles and isinstance(tiles, dict):
+                tiles_match = not _metadata_search_filter
+                if _metadata_search_filter:
+                    tiles_match = _matches_filter_recursive("tiles", tiles, _metadata_search_filter)
+
+                if tiles_match:
+                    imgui.spacing()
+                    imgui.text_colored(_TREE_NODE_COLOR, "Tiles")
+                    imgui.separator()
+                    for tile_idx, tile_meta in sorted(tiles.items()):
+                        label = tile_meta.get("specimen_name") or f"tile_{tile_idx}"
+                        if _metadata_search_filter and not _matches_filter_recursive(label, tile_meta, _metadata_search_filter):
+                            continue
+                        if _colored_tree_node(f"{label}##tile_{tile_idx}"):
+                            for k, v in sorted(tile_meta.items()):
+                                if _metadata_search_filter and not _matches_filter_recursive(k, v, _metadata_search_filter):
+                                    continue
+                                imgui.text_colored(_NAME_COLORS[0], k)
+                                imgui.same_line(value_col)
+                                imgui.text_colored(_VALUE_COLOR, fmt_multivalue(v))
+                            imgui.tree_pop()
+                shown_keys.add("tiles")
+
             # Other metadata section
             remaining = {k: v for k, v in metadata.items() if k not in shown_keys}
             if _metadata_search_filter:
