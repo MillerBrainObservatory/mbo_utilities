@@ -71,7 +71,9 @@ _PIPELINE_PARAM_KEYS = frozenset({
     "keep_reg", "keep_raw", "norm_method", "correct_neuropil",
     "dff_window_size", "dff_percentile", "dff_smooth_window",
     "cell_filters", "accept_all_cells", "rastermap_kwargs", "save_json",
-    "reader_kwargs", "roi_mode", "num_timepoints", "frame_indices", "planes",
+    "reader_kwargs", "roi_mode", "planes", "num_zplanes",
+    "timepoints", "num_timepoints",
+    "frames", "frame_indices",  # deprecated aliases of timepoints
 })
 # routed into writer_kwargs (phase correction).
 _WRITER_PARAM_KEYS = frozenset({"fix_phase", "use_fft"})
@@ -115,7 +117,9 @@ TEMPLATE_PARAM_KEYS: tuple = (
 # accepted. None / [] / omitted all mean every plane / every timepoint.
 TEMPLATE_COMMENTED: tuple = (
     ("planes", "[1, 7, 13]", "z-planes (1-based); omit for all. None or [] = all"),
-    ("frame_indices", "[0, 1, 2]", "timepoints (0-based); omit for all. None or [] = all"),
+    ("num_zplanes", "3", "first N z-planes; omit for all"),
+    ("timepoints", "[1, 2, 3]", "timepoints (1-based); omit for all. None or [] = all"),
+    ("num_timepoints", "500", "first N timepoints; omit for all"),
 )
 
 

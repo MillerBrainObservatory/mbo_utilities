@@ -395,10 +395,28 @@ def view(data_in=None, roi=None, widget=True, metadata=False, gpu_index=None, li
     help="Z-planes to export (1-based): -p 1 -p 7 -p 14",
 )
 @click.option(
+    "-t", "--timepoints",
+    multiple=True,
+    type=int,
+    help="Timepoints to export (1-based): -t 1 -t 50 -t 100",
+)
+@click.option(
+    "--num-timepoints",
+    type=int,
+    default=None,
+    help="Number of timepoints to export (first N).",
+)
+@click.option(
+    "--num-zplanes",
+    type=int,
+    default=None,
+    help="Number of z-planes to export (first N).",
+)
+@click.option(
     "-n", "--num-frames",
     type=int,
     default=None,
-    help="Number of frames to export.",
+    help="Deprecated, use --num-timepoints.",
 )
 @click.option(
     "--roi",
@@ -454,6 +472,9 @@ def convert(
     output_path,
     ext,
     planes,
+    timepoints,
+    num_timepoints,
+    num_zplanes,
     num_frames,
     roi,
     register_z,
@@ -503,6 +524,11 @@ def convert(
             parsed_roi = int(roi)
 
     parsed_planes = list(planes) if planes else None
+    parsed_timepoints = list(timepoints) if timepoints else None
+
+    if num_frames and not num_timepoints:
+        click.echo("--num-frames is deprecated, use --num-timepoints.")
+        num_timepoints = num_frames
 
     click.echo(f"Reading: {input_path}")
 
@@ -539,8 +565,12 @@ def convert(
 
     if parsed_planes:
         imwrite_kwargs["planes"] = parsed_planes
-    if num_frames:
-        imwrite_kwargs["num_frames"] = num_frames
+    if parsed_timepoints:
+        imwrite_kwargs["timepoints"] = parsed_timepoints
+    if num_timepoints:
+        imwrite_kwargs["num_timepoints"] = num_timepoints
+    if num_zplanes:
+        imwrite_kwargs["num_zplanes"] = num_zplanes
     if parsed_roi is not None:
         imwrite_kwargs["roi"] = parsed_roi
     if register_z:

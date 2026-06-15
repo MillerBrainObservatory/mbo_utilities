@@ -74,7 +74,13 @@ def plan(cfg: HpcConfig):
     n = _pipe.num_planes(arr)
     pack = cfg.pipeline.planes_per_gpu
     sel = cfg.pipeline_kwargs().get("planes")
-    planes = list(sel) if sel else list(range(1, n + 1))  # [] = all
+    nzp = cfg.pipeline_kwargs().get("num_zplanes")
+    if sel:
+        planes = list(sel)  # explicit 1-based selection
+    elif nzp:
+        planes = list(range(1, min(int(nzp), n) + 1))  # first N
+    else:
+        planes = list(range(1, n + 1))  # all
     ntasks = _pipe.num_tasks(len(planes), pack)
     shards = [_pipe.shard_for_task(planes, pack, t) for t in range(ntasks)]
     return len(planes), ntasks, shards
