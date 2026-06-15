@@ -346,3 +346,31 @@ def hpc_ioprobe(raw, plane, frames):
         run_ioprobe(raw, plane=plane, frames=frames)
     except (OSError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e))
+
+
+@hpc.command("iobench")
+@click.argument("raw", type=click.Path(exists=True))
+@click.option("--planes", default="",
+              help="0-based z-planes, comma-separated (e.g. 1,7,13). Default: a few evenly-spaced.")
+@click.option("--frames", default=500, show_default=True, help="Frames per plane to read.")
+def hpc_iobench(raw, planes, frames):
+    """
+    Estimate the full run's io from a few planes, without processing all of them.
+
+    Reads `frames` of each chosen plane (strided -> the io bottleneck), then
+    scales to all planes x all frames. Compare a few planes against the
+    full-dataset estimate without the multi-hour pipeline. Run on a fresh range
+    so the read isn't served from page cache.
+
+    \b
+    Examples:
+      mbo hpc iobench /lustre/.../raw
+      mbo hpc iobench /lustre/.../raw --planes 1,7,13 --frames 1000
+    """
+    from mbo_utilities.hpc.bench import run_iobench
+
+    pl = [int(p) for p in planes.split(",") if p.strip()] if planes else None
+    try:
+        run_iobench(raw, frames=frames, planes=pl)
+    except (OSError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e))

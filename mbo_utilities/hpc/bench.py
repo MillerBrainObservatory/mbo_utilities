@@ -157,6 +157,60 @@ def run_compare(dirs) -> None:
                    f"{r['detect_sum']:>9.1f}{r['total_sum']:>10.1f}")
 
 
+def run_iobench(raw, frames: int = 500, planes=None) -> None:
+    """Time the strided read (the tiff->bin bottleneck) of a frame subset for a
+    few planes, then extrapolate to the full dataset.
+
+    Lets you estimate the full run from a few planes without ever processing all
+    of them: reads `frames` of each chosen plane (one at a time, low memory),
+    reports per-plane, then scales to all planes x all frames. Read only — phase
+    and write are ~1% (see `mbo hpc ioprobe`). `planes` are 0-based; when omitted,
+    a few evenly-spaced planes are sampled (first, middle, last) — not all.
+    """
+    import time
+
+    import click
+    import numpy as np
+    from mbo_utilities import imread
+
+    arr = imread(raw, fix_phase=False)
+    nt = int(arr.shape[0])
+    nz = int(arr.shape[2])
+    if planes:
+        zlist = [z for z in planes if 0 <= z < nz]
+    else:
+        zlist = sorted({0, nz // 2, nz - 1})  # a few evenly-spaced planes, not all
+    k = min(int(frames), nt)
+
+    rows = []
+    for z in zlist:
+        s = time.perf_counter()
+        chunk = np.asarray(arr[0:k, 0, z, :, :])
+        rows.append((z, time.perf_counter() - s))
+        del chunk
+
+    sampled = sum(dt for _, dt in rows)
+    full_sampled = sampled / k * nt              # the sampled planes, full frames
+    per_plane = full_sampled / len(zlist)        # mean full-plane read
+    full_dataset = per_plane * nz                # all planes, full frames
+
+    click.echo(f"read {k} of {nt} frames for planes {zlist} of {nz}, "
+               f"{arr.shape[-2]}x{arr.shape[-1]}  (read only = the io bottleneck)")
+    click.echo(f"\n{'plane':>6}{'sampled':>10}{'per-frame':>12}{'full plane':>12}")
+    for z, dt in rows:
+        click.echo(f"{z:>6}{dt:>9.1f}s{dt / k * 1000:>10.2f}ms{dt / k * nt:>11.0f}s")
+    click.secho(
+        f"\n{len(zlist)} sampled plane(s) at full {nt} frames: "
+        f"{full_sampled:.0f}s ({full_sampled / 3600:.2f}h)",
+        fg="cyan",
+    )
+    click.secho(
+        f"full dataset ({nz} planes x {nt} frames): ~{full_dataset:.0f}s "
+        f"({full_dataset / 3600:.2f}h)  [1 reader; pipeline parallelizes across workers]",
+        fg="cyan",
+    )
+
+
 def run_ioprobe(raw, plane: int = 0, frames: int = 2000) -> None:
     """Decompose tiff->bin into read / phase-apply / write on real data.
 
