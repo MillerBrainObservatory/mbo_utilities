@@ -1611,5 +1611,11 @@ def shortcut(name):
     click.secho(f"Created: {path}", fg="green")
 
 
+# hpc subcommand group (light import: heavy deps load lazily inside the commands).
+from mbo_utilities.hpc.cli import hpc as _hpc_group  # noqa: E402
+
+main.add_command(_hpc_group)
+
+
 if __name__ == "__main__":
     main()

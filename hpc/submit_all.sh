@@ -28,6 +28,8 @@ echo "array size: $NTASKS task(s) (planes / MBO_PLANES_PER_GPU)"
 SB=()
 [ -n "${MBO_PARTITION:-}" ] && SB+=(--partition="$MBO_PARTITION")
 [ -n "${MBO_GRES:-}" ] && SB+=(--gres="$MBO_GRES")
+# Reserve the whole node so other tenants' CPU jobs can't contend (uniform timing).
+[ -n "${MBO_EXCLUSIVE:-}" ] && SB+=(--exclusive)
 
 ARRAY_JID=$(sbatch --parsable --job-name="${NAME}-arr" --array=0-$((NTASKS - 1)) \
   --output="$FINAL/%x_%A_%a.out" --error="$FINAL/%x_%A_%a.err" \
