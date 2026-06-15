@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .config import HpcConfig
 from . import pipeline as _pipe
+from .slurm import slurm_available
 
 
 def resolve_output_dir(cfg: HpcConfig) -> Path:
@@ -123,6 +124,12 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
     if dry_run:
         _print_plan(cfg, mode, output_dir)
         return {"mode": mode, "output_dir": str(output_dir), "dry_run": True}
+
+    if mode in ("single", "array") and not slurm_available():
+        raise RuntimeError(
+            f"SLURM not found (no scontrol/sacct on PATH); --mode {mode} needs a "
+            "scheduler. To run here without SLURM:  mbo hpc run --local <config>"
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _pipe.assert_output_writable(output_dir)
