@@ -66,15 +66,19 @@ def ensure_cellpose_model(
         if path.exists():
             reason = "forced refresh" if force and valid else "corrupt"
             _log(logger, f"cellpose model {reason}; re-downloading cpsam")
-            # cache_CPSAM_model_path only downloads when the file is absent,
-            # so remove the bad/forced one first.
+            # the cache call only downloads when the file is absent, so remove
+            # the bad/forced one first.
             try:
                 path.unlink()
             except OSError:
                 pass
         _log(logger, "Pre-fetching cellpose model (cpsam, ~1.15 GB)...")
         try:
-            models.cache_CPSAM_model_path()
+            # cellpose 4.x renamed cache_CPSAM_model_path() -> cache_model_path(backbone)
+            if hasattr(models, "cache_model_path"):
+                models.cache_model_path("cpsam")
+            else:
+                models.cache_CPSAM_model_path()
         except Exception as e:
             _log(logger, f"cellpose model download failed: {e}")
             return None

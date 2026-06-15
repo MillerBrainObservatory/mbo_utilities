@@ -63,6 +63,7 @@ class PipelineConfig:
     planes_per_gpu: int = 4
     threads_per_worker: int = 0
     node_local: bool = True
+    gpu: int = -1
 
 
 # [parameters] keys routed to lbm pipeline() top-level kwargs; everything else
@@ -172,6 +173,7 @@ HELP: dict = {
         "planes_per_gpu": "pack factor F: most planes that fit one GPU before OOM",
         "threads_per_worker": "BLAS/OMP threads per worker (0 = cpus // workers)",
         "node_local": "compute on node-local NVMe, copy results back",
+        "gpu": "local-run CUDA device index (nvidia-smi order); -1 = auto. ignored under SLURM",
     },
 }
 

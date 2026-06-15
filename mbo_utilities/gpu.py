@@ -374,8 +374,11 @@ def apply_gpu_policy(value: str | int | bool | None = None) -> str | None:
     if token in ("0", "off", "false", "no", "cpu", "none"):
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         return ""
-    # device index or comma list -> pin
+    # device index or comma list -> pin. Order by PCI bus so the index
+    # matches nvidia-smi (CUDA defaults to FASTEST_FIRST otherwise); a
+    # user-set CUDA_DEVICE_ORDER still wins.
     if re.fullmatch(r"\d+(,\d+)*", token):
+        os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
         os.environ["CUDA_VISIBLE_DEVICES"] = token
         return token
     return None

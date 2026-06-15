@@ -185,6 +185,24 @@ def write_timing_report(output_dir, wall=None, n_workers=None):
     return report
 
 
+def _pin_local_gpu(index) -> None:
+    """Pin CUDA to one device by nvidia-smi index for a local (non-SLURM) run.
+
+    Sets CUDA_DEVICE_ORDER=PCI_BUS_ID so the index matches nvidia-smi, then
+    CUDA_VISIBLE_DEVICES. Must run before torch/cupy import. No-op when
+    index < 0 (auto) or under SLURM, where gres owns device assignment.
+    """
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return
+    if idx < 0 or os.environ.get("SLURM_JOB_ID"):
+        return
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(idx)
+    print(f"pinned GPU {idx} (CUDA_DEVICE_ORDER=PCI_BUS_ID)", flush=True)
+
+
 def _apply_thread_env(threads: int) -> None:
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
         os.environ.setdefault(var, str(threads))
@@ -323,6 +341,7 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
     """
     if isinstance(cfg, dict):
         cfg = HpcConfig.from_dict(cfg)
+    _pin_local_gpu(getattr(cfg.pipeline, "gpu", -1))
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     ops = cfg.ops()
@@ -337,6 +356,15 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
             _aggregate(cfg.io.input, output_dir, ops, passthrough=cfg.pipeline_kwargs())
             write_timing_report(output_dir, {"aggregate": time.perf_counter() - t0})
             return str(output_dir)
+
+        # Prefetch the cellpose model serially here so the N plane workers don't
+        # race to download it (concurrent writes corrupt the file). Best-effort.
+        if ops.get("algorithm") == "cellpose":
+            try:
+                from mbo_utilities._cellpose_model import ensure_cellpose_model
+                ensure_cellpose_model()
+            except Exception as e:
+                print(f"cellpose prefetch skipped: {e}", flush=True)
 
         from mbo_utilities import imread
 

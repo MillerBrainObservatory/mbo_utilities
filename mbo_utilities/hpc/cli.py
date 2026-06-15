@@ -93,8 +93,10 @@ def hpc_init(data_path, config_path, output_root, overwrite):
 @click.option("--gres", default=None, help="Override [slurm] gres.")
 @click.option("--time", "time_", default=None, help="Override [slurm] time.")
 @click.option("--planes-per-gpu", type=int, default=None, help="Override pack factor F.")
+@click.option("--gpu", type=int, default=None,
+              help="Local-run CUDA device index (nvidia-smi order); -1 = auto. Ignored under SLURM.")
 def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
-            partition, gres, time_, planes_per_gpu):
+            partition, gres, time_, planes_per_gpu, gpu):
     """
     Submit the pipeline described by CONFIG_PATH.
 
@@ -104,6 +106,7 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
       mbo hpc run hpc.toml                       # single GPU job
       mbo hpc run hpc.toml --mode array          # array + dependent aggregate
       mbo hpc run hpc.toml --local               # run here, no SLURM
+      mbo hpc run hpc.toml --local --gpu 1       # run here on CUDA device 1
       mbo hpc run hpc.toml --partition hpc_l40s --gres gpu:l40s:1
     """
     from mbo_utilities.hpc.config import HpcConfig
@@ -125,6 +128,8 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
             cfg.slurm.time = time_
         if planes_per_gpu:
             cfg.pipeline.planes_per_gpu = planes_per_gpu
+        if gpu is not None:
+            cfg.pipeline.gpu = gpu
         cfg.validate()
     except ValueError as e:  # bad TOML or failed validation
         raise click.ClickException(str(e))
