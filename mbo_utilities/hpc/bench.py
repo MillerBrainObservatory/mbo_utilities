@@ -183,20 +183,6 @@ def run_iobench(raw, frames: int = 500, planes=None) -> None:
         plist = sorted({1, (nz + 1) // 2, nz})  # a few evenly-spaced planes, not all
     k = min(int(frames), nt)
 
-    # The first data read forces the tiff reader to walk the file's directory
-    # chain (one entry per frame) to locate frames; that table is then stored on
-    # the open file and reused, so only the first read pays for it. Walk it once
-    # up front and time it separately, so the per-plane numbers below are
-    # steady-state and the first plane isn't charged for the rest.
-    t_index = 0.0
-    try:
-        s = time.perf_counter()
-        for tf in arr.tiff_files:
-            _ = len(tf.pages)
-        t_index = time.perf_counter() - s
-    except AttributeError:
-        pass
-
     rows = []
     for p in plist:
         s = time.perf_counter()
@@ -207,11 +193,10 @@ def run_iobench(raw, frames: int = 500, planes=None) -> None:
     sampled = sum(dt for _, dt in rows)
     full_sampled = sampled / k * nt              # the sampled planes, full frames
     per_plane = full_sampled / len(plist)        # mean full-plane read
-    full_dataset = per_plane * nz + t_index      # data + one directory walk per open
+    full_dataset = per_plane * nz                # all planes, full frames
 
     click.echo(f"read {k} of {nt} frames for planes {plist} of {nz}, "
                f"{arr.shape[-2]}x{arr.shape[-1]}  (read only = the io bottleneck)")
-    click.echo(f"directory walk (one-time, all later reads reuse it): {t_index:.1f}s")
     click.echo(f"\n{'plane':>6}{'sampled':>10}{'per-frame':>12}{'full plane':>12}")
     for p, dt in rows:
         click.echo(f"{p:>6}{dt:>9.1f}s{dt / k * 1000:>10.2f}ms{dt / k * nt:>11.0f}s")
@@ -222,7 +207,7 @@ def run_iobench(raw, frames: int = 500, planes=None) -> None:
     )
     click.secho(
         f"full dataset ({nz} planes x {nt} frames): ~{full_dataset:.0f}s "
-        f"({full_dataset / 3600:.2f}h)  [1 reader + 1 walk; pipeline parallelizes across workers]",
+        f"({full_dataset / 3600:.2f}h)  [1 reader; pipeline parallelizes across workers]",
         fg="cyan",
     )
 

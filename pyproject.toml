@@ -113,7 +113,7 @@ docs = [
 all = ["mbo_utilities[rastermap,isoview,hpc]"]
 
 [tool.uv]
-default-groups = ["dev", "isoview"]
+default-groups = ["dev", "isoview", "hpc"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -121,7 +121,6 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.uv.sources]
-# isoview = { path = "../isoview", editable = true }
 torch = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
