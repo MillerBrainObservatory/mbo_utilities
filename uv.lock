@@ -1397,7 +1397,7 @@ wheels = [
 
 [[package]]
 name = "isoview"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mbo-utilities" },
@@ -1406,9 +1406,9 @@ dependencies = [
     { name = "tifffile" },
     { name = "xmltodict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/41/e3/cae5f24f1623497db662315bc7433e486d89ff49d2fe312093f5d2f46c48/isoview-0.3.0.tar.gz", hash = "sha256:b7d200a6caf2179365eead92cdc915ddd4f567b6049f9b59aafb03dd6be21496", size = 2747982, upload-time = "2026-06-12T20:36:24.323Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/44/9cd25ae3b3e8f7bc2ee9d0335f51ccb4196100f99545fdde06e3b7ac7eb8/isoview-0.4.0.tar.gz", hash = "sha256:edaa93f548b5e41e3d8827716d67fc80e9eae5d50684ae2eba7f00e02d23c782", size = 2748200, upload-time = "2026-06-15T16:56:18.748Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/78/a1aee193e0749600b14cc5cc9e5a7e83bceb869bdc9a832a264ca0463095/isoview-0.3.0-py3-none-any.whl", hash = "sha256:692d059256decbd213f11945468c599a023762c219434fd67906f2006b48b38c", size = 107435, upload-time = "2026-06-12T20:36:23.036Z" },
+    { url = "https://files.pythonhosted.org/packages/85/dd/2cd7ab97b8462a1c1f18523f8ce94cfa789be4ca083b80769943b6c17450/isoview-0.4.0-py3-none-any.whl", hash = "sha256:b0f9a927931bfb5e59492819e2ce0c4ec10cc49d7723fef2767390f3dad9b1a2", size = 107654, upload-time = "2026-06-15T16:56:17.613Z" },
 ]
 
 [[package]]
@@ -2159,7 +2159,7 @@ requires-dist = [
     { name = "ipykernel" },
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipywidgets", specifier = ">=8.0.0,<9" },
-    { name = "isoview", marker = "extra == 'isoview'", specifier = ">=0.3.0" },
+    { name = "isoview", marker = "extra == 'isoview'", specifier = ">=0.4.0" },
     { name = "jupyter-rfb", specifier = ">=0.5.1" },
     { name = "jupyterlab", specifier = ">=4.2.6" },
     { name = "jupytext", marker = "extra == 'docs'" },

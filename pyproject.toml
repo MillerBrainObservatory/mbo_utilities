@@ -85,7 +85,7 @@ rastermap = [
     "rastermap",
 ]
 isoview = [
-    "isoview>=0.3.0",
+    "isoview>=0.4.0",
 ]
 hpc = [
     "submitit>=1.5.0",
