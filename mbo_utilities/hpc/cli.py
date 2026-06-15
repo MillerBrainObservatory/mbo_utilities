@@ -277,3 +277,46 @@ def hpc_check(config_path, mode):
         run_check(cfg, mode=mode)
     except (ValueError, OSError, RuntimeError) as e:
         raise click.ClickException(str(e))
+
+
+@hpc.command("bench")
+@click.argument("output_dir", type=click.Path(exists=True))
+def hpc_bench(output_dir):
+    """
+    Join an array run's per-plane `io` to the node each task ran on.
+
+    Tells you whether SLURM actually spread the tasks across nodes, and whether
+    `io` is lower on less-loaded nodes (packing hurts -> spreading helps) or
+    uniform regardless (a lustre/OST or external-load limit). Run it on the
+    output dir of a finished `--mode array` run.
+
+    \b
+    Examples:
+      mbo hpc bench /lustre/.../2026_06_14_s2p
+    """
+    from mbo_utilities.hpc.bench import run_bench
+
+    try:
+        run_bench(output_dir)
+    except (FileNotFoundError, RuntimeError, OSError) as e:
+        raise click.ClickException(str(e))
+
+
+@hpc.command("compare")
+@click.argument("output_dirs", nargs=-1, type=click.Path(exists=True), required=True)
+def hpc_compare(output_dirs):
+    """
+    Tabulate timings.json across runs side-by-side (no SLURM needed).
+
+    Works for local runs, so it's the way to compare a local sweep:
+    run `mbo hpc run hpc.toml --local --planes-per-gpu N` for N=1,2,4 (different
+    --name each), then compare their `io` to see if the tiff->bin step
+    parallelizes on local disk.
+
+    \b
+    Examples:
+      mbo hpc compare ./cmp/*_f1 ./cmp/*_f2 ./cmp/*_f4
+    """
+    from mbo_utilities.hpc.bench import run_compare
+
+    run_compare(output_dirs)
