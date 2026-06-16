@@ -271,24 +271,89 @@ and it will resolve to the parent `.zarr` store automatically.
 (numpyarray)=
 ### NumpyArray
 
-Wraps `.npy` files (memory-mapped) or in-memory numpy arrays. Numpy input
-of any rank up to 5D is accepted; the missing dims are inferred from shape
-heuristics and filled into the 5D `.shape`.
+Wraps `.npy` files (memory-mapped) or in-memory numpy arrays. Input of any
+rank up to 5D is accepted and presented as a 5D **TCZYX** array.
 
 ```python
-# from file
+import numpy as np
+import mbo_utilities as mbo
+
+# from file (memory-mapped)
 arr = mbo.imread("/path/to/data.npy")
 
 # from in-memory array
-import numpy as np
 data = np.random.randn(100, 512, 512).astype(np.float32)
 arr = mbo.imread(data)
-
 print(arr.shape)  # (100, 1, 1, 512, 512)
 
-# enables imwrite to any format
-mbo.imwrite(arr, "output", ext=".zarr")
+mbo.imwrite(arr, "output", ext=".zarr")  # imwrite to any format
 ```
+
+#### Dimension labels
+
+Axes are declared with `dims`; when omitted they are inferred from the rank:
+
+| Input rank | Inferred `dims` | `.shape` |
+|------------|-----------------|----------|
+| 2D | `YX`   | `(1, 1, 1, Y, X)` |
+| 3D | `TYX`  | `(T, 1, 1, Y, X)` |
+| 4D | `TZYX` | `(T, 1, Z, Y, X)` |
+| 5D | `TCZYX`| `(T, C, Z, Y, X)` |
+
+`imread()` prints the inferred order for a bare array. If the guess is wrong
+(e.g. a 4D two-channel movie read as `TZYX`), declare the axes:
+
+```python
+data = np.random.randn(100, 2, 512, 512).astype(np.float32)
+
+mbo.imread(data).shape                 # (100, 1, 2, 512, 512)  -> the 2 is Z
+mbo.imread(data, dims="TCYX").shape    # (100, 2, 1, 512, 512)  -> the 2 is C
+```
+
+`dims` describes the *source* axes (length == input ndim, chars from
+`TCZYX`). The array is canonicalized to 5D TCZYX, so `.dims` always reports
+`('T', 'C', 'Z', 'Y', 'X')` and `.shape` places each source axis
+accordingly; the declared order is kept on `.input_dims`. Labels can be set
+after construction — this is reactive and updates the derived OME axes and
+voxel scale:
+
+```python
+arr.dims = "TCYX"                 # equivalently: arr.metadata = {"dims": "TCYX"}
+```
+
+#### Adding metadata
+
+`.metadata` is a plain dict you can read or replace. Set the frame rate and
+voxel size so they flow into OME-Zarr / ImageJ output and downstream tools:
+
+```python
+arr = mbo.imread(data, dims="TZYX")
+arr.metadata = {**arr.metadata, "fs": 9.6, "dz": 15.0, "dx": 1.0, "dy": 1.0}
+```
+
+Keys use OME-compatible names (`fs`, `dx`/`dy`/`dz`, `PhysicalSizeX`, …). A
+`"dims"` key in the dict is applied as the axis order.
+
+#### Running through a pipeline
+
+Declare the axes once, write a canonical file, then hand the path to a
+pipeline. A `TZYX` volume becomes a multi-plane OME-Zarr that Suite2p runs
+per plane:
+
+```python
+import lbm_suite2p_python as lsp
+
+vol = np.random.randn(120, 2, 256, 256).astype(np.float32)   # T, Z, Y, X
+
+arr = mbo.imread(vol, dims="TZYX")          # (120, 1, 2, 256, 256)
+arr.metadata = {**arr.metadata, "fs": 10.0}
+
+zarr_path = mbo.imwrite(arr, "out", ext=".zarr", overwrite=True)
+lsp.run_volume(zarr_path, save_path="out/suite2p")   # one Suite2p run per z-plane
+```
+
+Correct labels mean the writer tags the OME-Zarr axes correctly (`t, z, y,
+x`) and the pipeline extracts the right number of planes.
 
 ## Common Properties
 
