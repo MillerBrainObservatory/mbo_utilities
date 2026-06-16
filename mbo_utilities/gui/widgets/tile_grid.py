@@ -6,19 +6,19 @@ tiles of a chosen z-block out in a grid (columns/rows from the per-tile
 stage positions in ``metadata["tiles"]``) for a quick glimpse across the
 whole acquisition.
 
-Thumbnails are read straight from the raw data: a few evenly-spaced Z
-planes, strided down in Y/X to ~128 px, max-projected. That decimated read
-is ~1 ms/tile off a memmap (vs minutes to build full-resolution
-projections), so the grid fills in immediately. Tiles load incrementally
-(a budget per frame) so the UI never blocks, and clicking a cell drives the
-main viewer's Tile slider.
+Thumbnails are read straight from the raw data: the full depth strided
+down in Y/X to ~128 px and max-projected. That decimated read is a few
+ms/tile off a memmap (vs minutes to build full-resolution projections), so
+the grid fills in over a few frames. Tiles load incrementally (a budget per
+frame) so the UI never blocks, and clicking a cell drives the main viewer's
+Tile slider.
 
 An orientation control adds 90°-multiple rotations + X/Y/Z flips (the same
 ops the BigStitcher export bakes onto VW00), applied as a live preview only
 — nothing is saved. For a faithful out-of-plane view (rotate about X/Y, flip
 Z) the displayed tile is the matching source MIP (xy/xz/yz) with a 2D
-transpose + flips, so the in-plane (default) case stays a cheap sparse-Z
-read and only an out-of-plane orientation pays the full-Z read for xz/yz.
+transpose + flips. One read per tile fills all three axes, so every
+orientation — the default included — shows the same real projection.
 
 Activates for any array that is tiled and carries per-tile metadata
 (see :class:`mbo_utilities.arrays.isoview.IsoviewArray`).
@@ -46,9 +46,6 @@ _WHITE = (1.0, 1.0, 1.0, 1.0)
 
 # Longest thumbnail edge (px). The Y/X stride is chosen to land near this.
 _THUMB_MAX = 128
-
-# Z planes sampled per tile for the sparse max-projection thumbnail.
-_THUMB_MIP_PLANES = 3
 
 # Uncached tiles read per frame, so opening a big z-block never blocks the
 # UI — tiles pop in over a few frames.
@@ -336,17 +333,14 @@ class TileGridViewer(Widget):
             return s, sz, s * dxy, sz * dz
         return s, 1, 1.0, 1.0
 
-    def _sparse_planes(self, arr) -> list[int]:
-        nz = int(arr.shape[2])
-        n = max(1, min(_THUMB_MIP_PLANES, nz))
-        return [int((i + 0.5) * nz / n) for i in range(n)]
+    def _load_source_mip(self, arr, ti, c, axis) -> np.ndarray | None:
+        """Decimated MIP for one axis, cached per ``(ti, c, axis)``.
 
-    def _load_source_mip(self, arr, ti, c, axis, sparse_ok) -> np.ndarray | None:
-        """Decimated source MIP for one axis, cached per ``(ti, c, axis)``.
-
-        The in-plane (``xy``) default takes the cheap sparse-Z read; any
-        other axis needs full Z, so that read computes and caches all three
-        MIPs at once (xz/yz come for free from the same block).
+        Maxes over the full depth (Y/X strided down to thumbnail size) so
+        every orientation shows a real projection, and one read fills all
+        three axes (xz/yz come for free from the same block). The default
+        xy and the post-rotation xy are therefore the same image — no
+        sparse-vs-full mismatch where the untransformed tile looks worse.
         """
         key = (ti, c, axis)
         cached = self._mip_cache.get(key)
@@ -355,30 +349,14 @@ class TileGridViewer(Widget):
             return cached
         s, sz, _, _ = self._mip_params(arr)
         try:
-            if axis == "xy" and sparse_ok:
-                block = np.squeeze(
-                    np.asarray(arr[ti, c, self._sparse_planes(arr), ::s, ::s])
-                )
-                if block.ndim == 3:
-                    m = block.max(axis=0)
-                elif block.ndim == 2:
-                    m = block
-                else:
-                    return None
-                self._mip_cache[(ti, c, "xy")] = np.ascontiguousarray(m)
-            else:
-                block = np.asarray(arr[ti, c, :, ::s, ::s])
-                if block.ndim != 3:
-                    block = np.squeeze(block)
-                if block.ndim != 3:
-                    return None
-                self._mip_cache[(ti, c, "xy")] = np.ascontiguousarray(block.max(axis=0))
-                self._mip_cache[(ti, c, "xz")] = np.ascontiguousarray(
-                    block.max(axis=1)[::sz]
-                )
-                self._mip_cache[(ti, c, "yz")] = np.ascontiguousarray(
-                    block.max(axis=2)[::sz]
-                )
+            block = np.asarray(arr[ti, c, :, ::s, ::s])
+            if block.ndim != 3:
+                block = np.squeeze(block)
+            if block.ndim != 3:
+                return None
+            self._mip_cache[(ti, c, "xy")] = np.ascontiguousarray(block.max(axis=0))
+            self._mip_cache[(ti, c, "xz")] = np.ascontiguousarray(block.max(axis=1)[::sz])
+            self._mip_cache[(ti, c, "yz")] = np.ascontiguousarray(block.max(axis=2)[::sz])
         except Exception:
             return None
         while len(self._mip_cache) > _THUMB_CACHE_MAX:
@@ -601,7 +579,6 @@ class TileGridViewer(Widget):
         ops = self._orientation_ops()
         plan = _orient_2d_plan(_compose_R(ops))
         plan_key = (plan["mip"], plan["transpose"], plan["flip_h"], plan["flip_v"])
-        sparse_ok = plan["mip"] == "xy"
         _s, _sz, pix_xy, pix_z = self._mip_params(arr)
 
         loaded = [
@@ -642,9 +619,7 @@ class TileGridViewer(Widget):
                     gkey = (ti, c, *plan_key)
                     thumb = self._thumb_cache.get(gkey)
                     if thumb is None and budget > 0:
-                        src = self._load_source_mip(
-                            arr, ti, c, plan["mip"], sparse_ok
-                        )
+                        src = self._load_source_mip(arr, ti, c, plan["mip"])
                         if src is not None:
                             thumb = self._apply_plan(src, plan)
                             self._thumb_cache[gkey] = thumb
