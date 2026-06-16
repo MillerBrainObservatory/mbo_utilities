@@ -18,6 +18,14 @@ from os.path import commonpath
 from pathlib import Path
 from typing import ClassVar
 
+# canonical dims by reported rank (OME-NGFF 0.5: time -> channel -> space)
+_DEFAULT_DIMS_BY_NDIM: dict[int, tuple[str, ...]] = {
+    2: ("Y", "X"),
+    3: ("T", "Y", "X"),
+    4: ("T", "Z", "Y", "X"),
+    5: ("T", "C", "Z", "Y", "X"),
+}
+
 
 class LazyArray:
     """Base class for every array ``imread()`` can return.
@@ -68,6 +76,82 @@ class LazyArray:
     def nx(self) -> int:
         """spatial width."""
         return self._shape5d()[4]
+
+    _metadata: dict | None = None
+    _declared_dims: tuple[str, ...] | None = None
+    _dimension_specs = None
+
+    @property
+    def dims(self) -> tuple[str, ...]:
+        """Dimension labels; declared order if set, else canonical by rank."""
+        if self._declared_dims is not None:
+            return self._declared_dims
+        return _DEFAULT_DIMS_BY_NDIM.get(self.ndim, ("T", "C", "Z", "Y", "X"))
+
+    @dims.setter
+    def dims(self, value) -> None:
+        from mbo_utilities import log
+        from mbo_utilities.arrays.features._dim_labels import parse_dims
+
+        # never raise on a rank mismatch: warn and chain-guess by rank
+        self._declared_dims = parse_dims(value, self.ndim, strict=False)
+        self.invalidate_dimension_specs()
+        log.get().info("dims %s  shape %s", "".join(self._declared_dims), self.shape)
+
+    @property
+    def metadata(self) -> dict:
+        """Metadata dict (never None). Subclasses may override the getter."""
+        if self._metadata is None:
+            self._metadata = {}
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise TypeError(f"metadata must be a dict, got {type(value)}")
+        # `dims` is kept as plain metadata here; reported dims come from the
+        # array's rank. Classes that re-permute on dims (NumpyArray) override
+        # this setter. A stored `dims` of a different length must not raise.
+        self._metadata = dict(value)
+
+    @property
+    def dimension_specs(self):
+        """Reactive DimensionSpecs built from dims/shape/metadata."""
+        if self._dimension_specs is None:
+            from mbo_utilities.arrays.features._dim_spec import DimensionSpecs
+
+            self._dimension_specs = DimensionSpecs.from_array(self)
+        return self._dimension_specs
+
+    def invalidate_dimension_specs(self) -> None:
+        self._dimension_specs = None
+
+    @property
+    def spatial_dims(self) -> tuple[str, ...]:
+        return self.dimension_specs.spatial_dims
+
+    @property
+    def iteratable_dims(self) -> tuple[str, ...]:
+        return self.dimension_specs.iteratable_dims
+
+    @property
+    def batch_dims(self) -> tuple[str, ...]:
+        return self.dimension_specs.batch_dims
+
+    @property
+    def slider_dims(self) -> tuple[str, ...] | None:
+        from mbo_utilities.arrays.features._dim_labels import get_slider_dims
+
+        return get_slider_dims(self)
+
+    def dim_index(self, label: str) -> int | None:
+        try:
+            return self.dims.index(label.upper())
+        except ValueError:
+            return None
+
+    def has_dim(self, label: str) -> bool:
+        return self.dim_index(label) is not None
 
     @property
     def source_path(self) -> Path | None:

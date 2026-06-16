@@ -18,7 +18,6 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin, Shape5DMixin
 from mbo_utilities.lazy_array import register_array_class
-from mbo_utilities.arrays.features import DimLabels
 
 from mbo_utilities.metadata import get_param
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
@@ -348,14 +347,6 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         else:
             raise ValueError(f"Unsupported input: {path}")
 
-        # initialize dimension labels
-        self._dim_labels = DimLabels(dims, ndim=self.ndim)
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        """Dimension labels."""
-        return self._dim_labels.value
-
     @property
     def source_path(self) -> Path:
         # volume: parent of the plane subdirs (suite2p root).
@@ -473,37 +464,13 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         """Number of Z-planes."""
         return len(self._planes)
 
-    @property
-    def shape(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
-
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         return (self._nframes, 1, self._nz, self._ly, self._lx)
-
-    @property
-    def ndim(self) -> int:
-        return 5
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        from mbo_utilities.arrays._base import DIMS
-        return DIMS
 
     @property
     def dtype(self):
         from mbo_utilities.arrays._base import get_dtype
         return self._target_dtype if hasattr(self, "_target_dtype") and self._target_dtype else get_dtype(self._dtype)
-
-    @property
-    def metadata(self) -> dict:
-        """Return metadata as dict. Always returns dict, never None."""
-        return self._metadata if self._metadata is not None else {}
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata = value
 
     @property
     def size(self) -> int:

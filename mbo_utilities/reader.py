@@ -182,6 +182,8 @@ def _imread_impl(
     # Wrap numpy arrays in NumpyArray for full imwrite/protocol support
     if isinstance(inputs, np.ndarray):
         logger.debug(f"Wrapping numpy array with shape {inputs.shape} as NumpyArray")
+        # NumpyArray logs the resolved dims + 5D shape on construction
+        # (see _apply_dim_order), so no extra hint is needed here.
         return NumpyArray(inputs, **_filter_kwargs(NumpyArray, kwargs))
     # A SqueezedView is a display lens over a canonical 5D array; normalize
     # back to that base so imread()/pipeline() operate on the real 5D array

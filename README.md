@@ -21,7 +21,7 @@ Image processing utilities for the [Miller Brain Observatory](https://github.com
 - **Modern Image Reader/Writer**: Fast, lazy I/O for ScanImage/generic TIFFs, Suite2p `.bin`, Zarr, HDF5, and Numpy (in memeory or saved to `.npy`)
 - **Run processing pipelines** for calcium imaging - motion correction, cell extraction, and signal analysis
 - Operates on **3D timeseries** natively and is extendable to ND-arrays
-- **Visualize data interactively** with the **Miller Brain Suite**, a GPU-accelerated GUI for exploring large datasets with [fastplotlib](https://fastplotlib.org/user_guide/guide.html#what-is-fastplotlib)
+- **Visualize data interactively** with the **Miller Brain Studio**, a GPU-accelerated GUI for exploring large datasets with [fastplotlib](https://fastplotlib.org/user_guide/guide.html#what-is-fastplotlib)
 
 <p align="center">
   <img src="docs/_images/gui/readme/01_step_file_dialog.png" height="280" alt="File Selection" />
@@ -107,6 +107,19 @@ curl -sSL https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities
 
 ## Usage
 
+### Supported Formats
+
+| Format | Read | Write | Description |
+|--------|:----:|:-----:|-------------|
+| ScanImage TIFF | ✓ | ✓ | Native LBM acquisition format |
+| Generic TIFF | ✓ | ✓ | Standard TIFF stacks |
+| Zarr | ✓ | ✓ | Chunked cloud-ready arrays |
+| HDF5 | ✓ | ✓ | Hierarchical data format |
+| Suite2p | ✓ | ✓ | Binary and ops.npy files |
+| NumPy | ✓ | ✓ | In-memory arrays or `.npy` files |
+
+→ [Formats Guide](https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html)
+
 To get started quickly, `mbo init path/to/data` will download the starter notebooks and auto-fill your data path.
 
 The [user-guide](https://millerbrainobservatory.github.io/mbo_utilities/user_guide.html) covers usage in a jupyter notebook.
@@ -128,7 +141,7 @@ The [ScanPhase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usa
 
 → [CLI Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/cli.html)
 
-### Miller Brain Suite
+### Miller Brain Studio
 
 Launch an interactive GPU-accelerated viewer for exploring large imaging datasets. Supports all MBO file formats with real-time visualization.
 
@@ -153,17 +166,31 @@ mbo scanphase /path/to/data.tiff -o ./output
 
 → [Scan-Phase Guide](https://millerbrainobservatory.github.io/mbo_utilities/usage/cli.html#scan-phase-analysis)
 
-### Supported Formats
+### Axial (Z-plane) Registration
 
-| Format | Read | Write | Description |
-|--------|:----:|:-----:|-------------|
-| ScanImage TIFF | ✓ | ✓ | Native LBM acquisition format |
-| Generic TIFF | ✓ | ✓ | Standard TIFF stacks |
-| Zarr | ✓ | ✓ | Chunked cloud-ready arrays |
-| HDF5 | ✓ | ✓ | Hierarchical data format |
-| Suite2p | ✓ | ✓ | Binary and ops.npy files |
+Compute per-plane rigid shifts that align z-planes to each other. Shifts are
+stored in metadata, **not** baked into the saved pixels, so they can be applied
+or removed non-destructively at read time.
 
-→ [Formats Guide](https://millerbrainobservatory.github.io/mbo_utilities/file_formats.html)
+```python
+import mbo_utilities as mbo
+
+# compute shifts on save; they are written to metadata["plane_shifts"]
+mbo.imwrite(arr, "registered.zarr", ext=".zarr", register_z=True)
+
+# apply them on read (reversible, source never modified)
+data = mbo.imread("registered.zarr")
+aligned = mbo.with_axial_shifts(data)        # reads metadata["plane_shifts"]
+aligned.enabled = False                       # back to the raw frames
+
+# or supply your own shifts (one (dy, dx) row per z-plane)
+shifts = [[0, 0], [2, -1], [3, -2]]           # len must equal the Z size
+aligned = mbo.with_axial_shifts(data, plane_shifts=shifts)
+```
+
+In Miller Brain Studio, datasets that carry valid `plane_shifts` are aligned
+automatically on load. Saving the aligned view bakes the shifts into the output
+pixels.
 
 ### Upgrade
 

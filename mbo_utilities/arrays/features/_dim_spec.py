@@ -160,22 +160,10 @@ class DimensionSpec:
         )
 
     def to_ome_axis(self) -> dict[str, Any]:
-        """convert to OME-NGFF axis dict."""
-        axis = {"name": self.name.lower()}
+        """convert to OME-NGFF axis dict (single builder in _dim_tags)."""
+        from mbo_utilities.arrays.features._dim_tags import dim_to_ome_axis
 
-        # set type based on role and name
-        if self.name == "T":
-            axis["type"] = "time"
-        elif self.name == "C":
-            axis["type"] = "channel"
-        else:
-            axis["type"] = "space"
-
-        # add unit if present
-        if self.unit:
-            axis["unit"] = self.unit
-
-        return axis
+        return dim_to_ome_axis(self.name)
 
 
 @dataclass
@@ -493,51 +481,3 @@ class DimensionSpecs:
     def to_ome_scale(self) -> list[float]:
         """get scale values in dimension order for OME-NGFF."""
         return [spec.scale for spec in self.specs]
-
-
-class DimensionSpecMixin:
-    """
-    mixin providing dimension specification interface for arrays.
-
-    arrays can override _build_dimension_specs() to customize their
-    dimension structure.
-    """
-
-    _dimension_specs: DimensionSpecs | None = None
-
-    def _build_dimension_specs(self) -> DimensionSpecs:
-        """
-        build dimension specs for this array.
-
-        override in subclasses for custom dimension handling.
-        default implementation infers from shape and dims.
-        """
-        return DimensionSpecs.from_array(self)
-
-    @property
-    def dimension_specs(self) -> DimensionSpecs:
-        """dimension specifications for this array."""
-        if self._dimension_specs is None:
-            self._dimension_specs = self._build_dimension_specs()
-        return self._dimension_specs
-
-    def invalidate_dimension_specs(self):
-        """clear cached dimension specs (call when shape/dims change)."""
-        self._dimension_specs = None
-
-    # convenience properties that delegate to dimension_specs
-
-    @property
-    def spatial_dims(self) -> tuple[str, ...]:
-        """dimensions that form the 2D display plane."""
-        return self.dimension_specs.spatial_dims
-
-    @property
-    def iteratable_dims(self) -> tuple[str, ...]:
-        """dimensions that can be scrolled/indexed."""
-        return self.dimension_specs.iteratable_dims
-
-    @property
-    def batch_dims(self) -> tuple[str, ...]:
-        """dimensions that should produce separate output files."""
-        return self.dimension_specs.batch_dims

@@ -71,10 +71,6 @@ class _ChannelView(LazyArray):
     def num_channels(self):
         return 1
 
-    @property
-    def dims(self):
-        return ("T", "Z", "Y", "X")
-
     def __getitem__(self, key):
         if not isinstance(key, tuple):
             key = (key,)

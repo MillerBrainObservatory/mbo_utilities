@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .config import HpcConfig
 from . import pipeline as _pipe
+from .slurm import slurm_available
 
 
 def resolve_output_dir(cfg: HpcConfig) -> Path:
@@ -73,10 +74,17 @@ def plan(cfg: HpcConfig):
     arr = imread(cfg.io.input)
     n = _pipe.num_planes(arr)
     pack = cfg.pipeline.planes_per_gpu
-    ntasks = _pipe.num_tasks(n, pack)
-    planes = list(range(1, n + 1))
+    sel = cfg.pipeline_kwargs().get("planes")
+    nzp = cfg.pipeline_kwargs().get("num_zplanes")
+    if sel:
+        planes = list(sel)  # explicit 1-based selection
+    elif nzp:
+        planes = list(range(1, min(int(nzp), n) + 1))  # first N
+    else:
+        planes = list(range(1, n + 1))  # all
+    ntasks = _pipe.num_tasks(len(planes), pack)
     shards = [_pipe.shard_for_task(planes, pack, t) for t in range(ntasks)]
-    return n, ntasks, shards
+    return len(planes), ntasks, shards
 
 
 def _print_plan(cfg: HpcConfig, mode: str, output_dir: Path) -> None:
@@ -116,6 +124,12 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
     if dry_run:
         _print_plan(cfg, mode, output_dir)
         return {"mode": mode, "output_dir": str(output_dir), "dry_run": True}
+
+    if mode in ("single", "array") and not slurm_available():
+        raise RuntimeError(
+            f"SLURM not found (no scontrol/sacct on PATH); --mode {mode} needs a "
+            "scheduler. To run here without SLURM:  mbo hpc run --local <config>"
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _pipe.assert_output_writable(output_dir)

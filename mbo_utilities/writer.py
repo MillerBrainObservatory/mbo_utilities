@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+import warnings
 from pathlib import Path
 
 
@@ -36,9 +37,10 @@ def imwrite(
     outpath: str | Path,
     ext: str = ".tiff",
     planes: list | tuple | int | None = None,
-    frames: list | tuple | int | None = None,
+    timepoints: list | tuple | int | None = None,
     channels: list | tuple | int | None = None,
-    num_frames: int | None = None,
+    num_timepoints: int | None = None,
+    num_zplanes: int | None = None,
     register_z: bool = False,
     roi_mode: RoiMode | str = RoiMode.concat_y,
     roi: int | Sequence[int] | None = None,
@@ -53,6 +55,9 @@ def imwrite(
     output_suffix: str | None = None,
     dataset_name: str | None = None,
     dim_order: str | Sequence[str] | None = None,
+    # deprecated aliases (use timepoints / num_timepoints)
+    frames: list | tuple | int | None = None,
+    num_frames: int | None = None,
     **kwargs,
 ):
     """
@@ -86,12 +91,12 @@ def imwrite(
         - int : Single plane, e.g. `planes=7` exports only plane 7
         - list/tuple : Specific planes, e.g. `planes=[1, 7, 14]`
 
-    frames : list | tuple | int | None, optional
+    timepoints : list | tuple | int | None, optional
         Timepoints to export (1-based indexing). Options:
-        - None (default) : Export all frames
-        - int : Single frame, e.g. `frames=100` exports only frame 100
-        - list/tuple : Specific frames, e.g. `frames=[1, 50, 100]`
-        - range : Range of frames, e.g. `frames=list(range(1, 101))`
+        - None (default) : Export all timepoints
+        - int : Single timepoint, e.g. `timepoints=100` exports only timepoint 100
+        - list/tuple : Specific timepoints, e.g. `timepoints=[1, 50, 100]`
+        - range : Range of timepoints, e.g. `timepoints=list(range(1, 101))`
 
     channels : list | tuple | int | None, optional
         Color channels to export (1-based indexing). Only applies to arrays
@@ -113,15 +118,25 @@ def imwrite(
         - list/tuple : Export specific ROIs, e.g. `roi=[1, 3]`
         Note: When roi_mode=RoiMode.concat_y, this parameter is ignored.
 
+    num_timepoints : int, optional
+        Number of timepoints to export (first N). If None (default), exports all.
+
+    num_zplanes : int, optional
+        Number of z-planes to export (first N). If None (default), exports all.
+        Shortcut for ``planes=[1..N]``; ignored when ``planes`` is given.
+
+    frames : list | tuple | int | None, optional
+        Deprecated alias for ``timepoints`` (1-based). Emits a DeprecationWarning.
+
     num_frames : int, optional
-        Number of frames to export. If None (default), exports all frames.
+        Deprecated alias for ``num_timepoints``. Emits a DeprecationWarning.
 
     register_z : bool, default=False
         Compute per-plane rigid shifts via phase correlation and store
         them in ``metadata["plane_shifts"]``. The shifts are not applied
-        to the output pixels; viewers consume ``plane_shifts`` to align
-        planes at render time (e.g. napari layer ``translate`` or
-        ``AxiallyAlignedView``).
+        to the output pixels; apply them non-destructively at read time
+        with ``mbo.with_axial_shifts(arr)`` (Miller Brain Studio does this
+        automatically when valid ``plane_shifts`` are present).
         Optional tunables via kwargs: ``max_frames`` (subsample count,
         default 200), ``chunk_frames`` (streaming batch, default 10),
         ``max_reg_xy`` (search radius in pixels, default 30). GPU is
@@ -221,6 +236,30 @@ def imwrite(
     else:
         logger.setLevel(logging.WARNING)
         logger.propagate = False
+
+    # timepoints/num_timepoints are canonical; frames/num_frames are deprecated
+    # aliases. num_zplanes is a count shortcut for planes=[1..N].
+    if frames is not None:
+        warnings.warn(
+            "imwrite(frames=...) is deprecated, use timepoints= (1-based)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if timepoints is None:
+            timepoints = frames
+    if num_frames is not None:
+        warnings.warn(
+            "imwrite(num_frames=...) is deprecated, use num_timepoints=",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if num_timepoints is None:
+            num_timepoints = num_frames
+    if num_zplanes is not None and planes is None:
+        planes = list(range(1, int(num_zplanes) + 1))
+    # collapse onto the internal names the rest of this function uses.
+    frames = timepoints
+    num_frames = num_timepoints
 
     # normalize roi_mode to enum
     if isinstance(roi_mode, str):

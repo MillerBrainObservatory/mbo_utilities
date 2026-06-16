@@ -6,7 +6,7 @@ Following the fastplotlib pattern, each feature is a self-contained class
 that manages its own state and events.
 
 Available features:
-- DimLabels: dimension labeling system (T, Z, Y, X, etc.)
+- DimensionSpecs: dimension structure (names, roles, scales) + OME axes
 - VoxelSizeFeature: physical pixel/voxel dimensions
 - FrameRateFeature: temporal sampling frequency
 - DisplayRangeFeature: min/max for display scaling
@@ -16,9 +16,6 @@ Available features:
 - ChunkSizeFeature: chunking configuration
 - StatsFeature: per-slice statistics (z-planes, cameras, rois, etc.)
 - PhaseCorrectionFeature: bidirectional scan correction
-
-Mixins:
-- DimLabelsMixin: adds dims property and related methods to array classes
 """
 
 from __future__ import annotations
@@ -40,7 +37,6 @@ from mbo_utilities.arrays.features._compression import (
 from mbo_utilities.arrays.features._dim_labels import (
     DEFAULT_DIMS,
     DIM_DESCRIPTIONS,
-    DimLabels,
     KNOWN_ORDERINGS,
     find_slider_name,
     get_dim_index,
@@ -67,7 +63,6 @@ from mbo_utilities.arrays.features._dim_spec import (
     DimRole,
     DimensionSpec,
     DimensionSpecs,
-    DimensionSpecMixin,
 )
 from mbo_utilities.arrays.features._display_range import (
     DisplayRange,
@@ -75,7 +70,6 @@ from mbo_utilities.arrays.features._display_range import (
 )
 from mbo_utilities.arrays.features._dtype import DataTypeFeature
 from mbo_utilities.arrays.features._frame_rate import FrameRateFeature, FrameRateMixin
-from mbo_utilities.arrays.features._mixin import DimLabelsMixin
 from mbo_utilities.arrays.features._phase_correction import (
     PhaseCorrectionFeature,
     PhaseCorrectionMixin,
@@ -139,9 +133,6 @@ __all__ = [
     "CompressionSettings",
     # dtype
     "DataTypeFeature",
-    # dim labels
-    "DimLabels",
-    "DimLabelsMixin",
     # dim tags
     "DimensionTag",
     "OutputFilename",
@@ -155,7 +146,6 @@ __all__ = [
     "DimRole",
     "DimensionSpec",
     "DimensionSpecs",
-    "DimensionSpecMixin",
     # display range
     "DisplayRange",
     "DisplayRangeFeature",

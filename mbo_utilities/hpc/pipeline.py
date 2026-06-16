@@ -69,6 +69,13 @@ def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
     keep_reg = kw.pop("keep_reg", True)
     keep_raw = kw.pop("keep_raw", False)
     writer_kwargs = kw.pop("writer_kwargs", {"fix_phase": True, "use_fft": True})
+    kw.pop("planes", None)            # runner passes planes explicitly below
+    kw.pop("num_zplanes", None)       # consumed by the runner when building planes
+    # [] / None selection -> all timepoints (lbm pipeline expects the kwarg
+    # absent or None).
+    for _sel in ("timepoints", "frames", "frame_indices"):
+        if not kw.get(_sel):
+            kw.pop(_sel, None)
 
     t0 = time.perf_counter()
     pipeline(
@@ -176,6 +183,38 @@ def write_timing_report(output_dir, wall=None, n_workers=None):
     for k, v in (wall or {}).items():
         print(f"wall.{k}: {v:.1f}s", flush=True)
     return report
+
+
+def _pin_local_gpu(index) -> None:
+    """Pin CUDA to one device by nvidia-smi index for a local (non-SLURM) run.
+
+    Sets CUDA_DEVICE_ORDER=PCI_BUS_ID so the index matches nvidia-smi, then
+    CUDA_VISIBLE_DEVICES. Must run before torch/cupy import. No-op when
+    index < 0 (auto) or under SLURM, where gres owns device assignment.
+    """
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return
+    if idx < 0 or os.environ.get("SLURM_JOB_ID"):
+        return
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(idx)
+    print(f"pinned GPU {idx} (CUDA_DEVICE_ORDER=PCI_BUS_ID)", flush=True)
+    # Fail loudly if CUDA can't use the pinned device, instead of silently
+    # running the whole job on CPU. A device that nvidia-smi shows (e.g. a
+    # TCC card the GeForce driver won't expose) can still be unusable here.
+    try:
+        import torch
+    except Exception:
+        return
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"gpu={idx}: CUDA can't use that device (torch.cuda.is_available() is "
+            f"False under CUDA_VISIBLE_DEVICES={idx}). Check `nvidia-smi -L` and "
+            f"`python -c \"import torch; print(torch.cuda.device_count())\"`; pick a "
+            f"CUDA-visible index or set [pipeline] gpu = -1."
+        )
 
 
 def _apply_thread_env(threads: int) -> None:
@@ -316,6 +355,7 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
     """
     if isinstance(cfg, dict):
         cfg = HpcConfig.from_dict(cfg)
+    _pin_local_gpu(getattr(cfg.pipeline, "gpu", -1))
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     ops = cfg.ops()
@@ -330,6 +370,15 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
             _aggregate(cfg.io.input, output_dir, ops, passthrough=cfg.pipeline_kwargs())
             write_timing_report(output_dir, {"aggregate": time.perf_counter() - t0})
             return str(output_dir)
+
+        # Prefetch the cellpose model serially here so the N plane workers don't
+        # race to download it (concurrent writes corrupt the file). Best-effort.
+        if ops.get("algorithm") == "cellpose":
+            try:
+                from mbo_utilities._cellpose_model import ensure_cellpose_model
+                ensure_cellpose_model()
+            except Exception as e:
+                print(f"cellpose prefetch skipped: {e}", flush=True)
 
         from mbo_utilities import imread
 
@@ -348,7 +397,15 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
             arr = imread(cfg.io.input)
             t_imread = time.perf_counter() - t0
             print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
-            plane_indices = list(range(1, num_planes(arr) + 1))  # lbm planes are 1-based
+            sel = cfg.pipeline_kwargs().get("planes")
+            nzp = cfg.pipeline_kwargs().get("num_zplanes")
+            total_planes = num_planes(arr)
+            if sel:
+                plane_indices = list(sel)  # 1-based explicit selection
+            elif nzp:
+                plane_indices = list(range(1, min(int(nzp), total_planes) + 1))  # first N
+            else:
+                plane_indices = list(range(1, total_planes + 1))  # all
             pack = cfg.pipeline.planes_per_gpu
             thr = cfg.pipeline.threads_per_worker
             keep_raw = cfg.pipeline_kwargs().get("keep_raw", False)

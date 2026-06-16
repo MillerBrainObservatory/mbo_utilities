@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mbo_utilities.arrays.features._base import ArrayFeature, ArrayFeatureEvent
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -54,7 +52,9 @@ KNOWN_ORDERINGS = {
 }
 
 
-def parse_dims(dims: str | Sequence[str] | None, ndim: int) -> tuple[str, ...]:
+def parse_dims(
+    dims: str | Sequence[str] | None, ndim: int, *, strict: bool = True
+) -> tuple[str, ...]:
     """
     Parse dimension labels from various input formats.
 
@@ -97,10 +97,19 @@ def parse_dims(dims: str | Sequence[str] | None, ndim: int) -> tuple[str, ...]:
         result = tuple(str(d).upper() for d in dims)
 
     if len(result) != ndim:
-        raise ValueError(
-            f"dimension labels {result} have {len(result)} elements, "
-            f"but array has {ndim} dimensions"
+        if strict:
+            raise ValueError(
+                f"dimension labels {result} have {len(result)} elements, "
+                f"but array has {ndim} dimensions"
+            )
+        fallback = DEFAULT_DIMS.get(ndim, result)
+        from mbo_utilities import log
+
+        log.get().warning(
+            "dims %s have %d elements but array is %dD; inferring %s",
+            result, len(result), ndim, "".join(fallback),
         )
+        return fallback
 
     return result
 
@@ -199,137 +208,6 @@ def get_dim_index(dims: tuple[str, ...], label: str) -> int | None:
         return None
 
 
-class DimLabels(ArrayFeature):
-    """
-    Dimension labels feature for arrays.
-
-    Manages dimension labels with sensible defaults and validation.
-    Emits events when labels change.
-
-    Parameters
-    ----------
-    dims : str | Sequence[str] | None
-        initial dimension labels. if None, inferred from ndim.
-    ndim : int
-        number of dimensions (required for validation)
-
-    Attributes
-    ----------
-    value : tuple[str, ...]
-        current dimension labels
-    slider_dims : tuple[str, ...]
-        dimensions that should have sliders (non-spatial)
-    spatial_dims : tuple[str, ...]
-        spatial dimensions (Y, X)
-
-    Examples
-    --------
-    >>> labels = DimLabels(None, ndim=4)
-    >>> labels.value
-    ('T', 'Z', 'Y', 'X')
-
-    >>> labels = DimLabels("ZYX", ndim=3)
-    >>> labels.value
-    ('Z', 'Y', 'X')
-
-    >>> labels = DimLabels("sTZYX", ndim=5)
-    >>> labels.value
-    ('S', 'T', 'Z', 'Y', 'X')
-    """
-
-    def __init__(
-        self,
-        dims: str | Sequence[str] | None = None,
-        ndim: int = 0,
-        property_name: str = "dim_labels",
-    ):
-        super().__init__(property_name=property_name)
-        self._ndim = ndim
-        self._dims = parse_dims(dims, ndim) if ndim > 0 else ()
-
-    @property
-    def value(self) -> tuple[str, ...]:
-        """Current dimension labels."""
-        return self._dims
-
-    @property
-    def slider_dims(self) -> tuple[str, ...]:
-        """Dimensions that should have sliders (non-spatial)."""
-        return get_slider_dims(self._dims)
-
-    @property
-    def spatial_dims(self) -> tuple[str, ...]:
-        """Spatial dimensions (Y, X)."""
-        return tuple(d for d in self._dims if d in ("Y", "X"))
-
-    @property
-    def ndim(self) -> int:
-        """Number of dimensions."""
-        return self._ndim
-
-    def set_value(self, array, value: str | Sequence[str] | None) -> None:
-        """
-        Set dimension labels.
-
-        Parameters
-        ----------
-        array : array-like
-            the array this feature belongs to (for ndim validation)
-        value : str | Sequence[str] | None
-            new dimension labels
-        """
-        ndim = getattr(array, "ndim", self._ndim)
-        old_dims = self._dims
-        self._dims = parse_dims(value, ndim)
-        self._ndim = ndim
-
-        if old_dims != self._dims:
-            event = ArrayFeatureEvent(
-                type=self._property_name,
-                info={"value": self._dims, "old_value": old_dims},
-            )
-            self._call_event_handlers(event)
-
-    def index(self, label: str) -> int | None:
-        """
-        Get index of a dimension label.
-
-        Parameters
-        ----------
-        label : str
-            dimension to find (case-insensitive)
-
-        Returns
-        -------
-        int | None
-            index or None if not found
-        """
-        return get_dim_index(self._dims, label)
-
-    def has(self, label: str) -> bool:
-        """Check if a dimension label exists."""
-        return self.index(label) is not None
-
-    def __getitem__(self, idx: int) -> str:
-        """Get dimension label by index."""
-        return self._dims[idx]
-
-    def __len__(self) -> int:
-        return len(self._dims)
-
-    def __iter__(self):
-        return iter(self._dims)
-
-    def __contains__(self, item: str) -> bool:
-        return item.upper() in self._dims
-
-    def __repr__(self) -> str:
-        return f"DimLabels({self._dims!r})"
-
-    def __str__(self) -> str:
-        return "".join(self._dims)
-
-
 # convenience functions for use outside feature system
 
 
@@ -357,12 +235,8 @@ def get_dims(arr, *, normalize: bool = True) -> tuple[str, ...]:
     Get dimension labels from an array in canonical form.
 
     Always returns uppercase single-letter labels (T, Z, C, Y, X, etc.)
-    regardless of how the array's dims property is defined.
-
-    Checks for:
-    1. DimLabels feature (_dim_labels attribute)
-    2. dims property
-    3. Falls back to inference from ndim
+    regardless of how the array's dims property is defined. Uses the array's
+    `dims` property when present, else infers from ndim.
 
     Parameters
     ----------
@@ -385,12 +259,6 @@ def get_dims(arr, *, normalize: bool = True) -> tuple[str, ...]:
     """
     from mbo_utilities.arrays.features._dim_tags import normalize_dims
 
-    # check for DimLabels feature
-    if hasattr(arr, "_dim_labels") and arr._dim_labels is not None:
-        dims = arr._dim_labels.value
-        return normalize_dims(dims) if normalize else dims
-
-    # check for dims property
     if hasattr(arr, "dims") and arr.dims is not None:
         dims = arr.dims
         if isinstance(dims, str):

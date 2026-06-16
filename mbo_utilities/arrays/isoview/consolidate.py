@@ -451,6 +451,7 @@ def _create_sharded_array(
         compressors=compressors,
         overwrite=True,
         zarr_format=3,
+        dimension_names=("t", "c", "z", "y", "x"),
     )
 
 

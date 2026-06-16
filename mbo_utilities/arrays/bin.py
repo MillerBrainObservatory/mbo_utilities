@@ -169,17 +169,6 @@ class BinArray(ReductionMixin, Shape5DMixin):
         return self.shape[2]
 
     @property
-    def metadata(self) -> dict:
-        """Return metadata as dict. Always returns dict, never None."""
-        return self._metadata if self._metadata is not None else {}
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata = value
-
-    @property
     def file(self):
         """Alias for _file, for backwards compatibility with BinaryFile API."""
         return self._file

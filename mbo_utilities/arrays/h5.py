@@ -122,14 +122,6 @@ class H5Array(ReductionMixin, Shape5DMixin):
             return False  # pollen calibration output, not source data
         return p.is_file() and p.suffix.lower() in (".h5", ".hdf5", ".hdf")
 
-    @property
-    def shape(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
-
-    @property
-    def ndim(self) -> int:
-        return 5
-
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         s = self._raw_shape
         if len(s) == 5:

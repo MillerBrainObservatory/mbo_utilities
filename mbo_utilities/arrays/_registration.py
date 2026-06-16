@@ -9,6 +9,8 @@ public api:
     compute_axial_shifts(arr, ...)  -> tvecs (nz, 2)  # streams from a lazy array,
                                                       # writes shifts into metadata
     validate_axial_shifts(metadata) -> bool           # metadata-only check
+    with_axial_shifts(arr, plane_shifts=None)         # apply shifts on read (5D)
+    AxialShiftView(source, plane_shifts)              # lazy 5D padded-canvas view
     AxiallyAlignedView(planes, shifts)                # lazy 4D padded-canvas view
 
 backend is auto-detected: cupy if a cuda runtime is reachable, else numpy.
@@ -503,6 +505,32 @@ class AxiallyAlignedView:
 _TCZYX = ("T", "C", "Z", "Y", "X")
 
 
+def _validated_tczyx_shape(source) -> tuple[int, int, int, int, int]:
+    """Return the source's 5D (T, C, Z, Y, X) shape, validating it is a
+    genuine TCZYX layout so per-plane shifts apply to the Z axis.
+
+    Prefers ``_shape5d()`` (the always-5D contract), else ``shape``. When the
+    source exposes 5D ``dims``, they must equal ``("T","C","Z","Y","X")`` so
+    ``shape``'s Z entry and the ``"Z"`` dim agree; a 4D-presenting wrapper
+    (dims length != 5) is left to the shape-only path.
+    """
+    if hasattr(source, "_shape5d"):
+        shape5d = tuple(source._shape5d())
+    else:
+        shape5d = tuple(getattr(source, "shape", ()))
+    if len(shape5d) != 5:
+        raise ValueError(
+            f"axial shifts need a 5D TCZYX source; got shape {shape5d!r}"
+        )
+    dims = getattr(source, "dims", None)
+    if dims is not None and len(dims) == 5 and tuple(dims) != _TCZYX:
+        raise ValueError(
+            f"axial shifts assume TCZYX (Z at axis 2); source dims are "
+            f"{tuple(dims)}. shape and the 'Z' dim must agree."
+        )
+    return tuple(int(s) for s in shape5d)
+
+
 def _is_int_index(k) -> bool:
     return isinstance(k, (int, np.integer))
 
@@ -530,10 +558,13 @@ class AxialShiftView:
     ----------
     source : array-like
         Any 5D TCZYX lazy array (5D `shape`) supporting
-        `source[t, c, z, :, :]` indexing.
+        `source[t, c, z, :, :]` indexing. If it reports 5D `dims`, they
+        must be `("T", "C", "Z", "Y", "X")` so the shift count is checked
+        against the same Z axis the view indexes.
     plane_shifts : array-like (nz, 2)
-        Cumulative per-plane integer (dy, dx) shifts, as produced by
-        `compute_axial_shifts`. Length must equal the source Z size.
+        Per-plane integer (dy, dx) shifts. Either computed (e.g. by
+        `compute_axial_shifts` / `imwrite(register_z=True)`) or supplied by
+        the user. Length must equal the source Z size.
     enabled : bool, default True
         If True, reads return aligned frames on a zero-padded canvas of
         shape `(Y + pt + pb, X + pl + pr)`. If False, reads pass straight
@@ -546,6 +577,13 @@ class AxialShiftView:
     Reversal is exact: flipping `enabled` to False (or reading `source`)
     yields the original pixels; nothing is ever written back.
 
+    The view is a transparent stand-in for the source: `.shape`, `.dims`,
+    `.dtype` and `.metadata` are reported directly, and any other attribute
+    (`nz`, `num_planes`, `filenames`, ...) is forwarded to the source.
+    `.metadata` passes through live and writable; `plane_shifts` are dropped
+    from it only while the view saves itself (so a reopened, already-aligned
+    output is not shifted a second time).
+
     Examples
     --------
     >>> view = with_axial_shifts(arr)        # shifts applied on read
@@ -557,16 +595,7 @@ class AxialShiftView:
     def __init__(self, source, plane_shifts, enabled: bool = True):
         self._source = source
 
-        if hasattr(source, "_shape5d"):
-            shape5d = tuple(source._shape5d())
-        else:
-            shape5d = tuple(getattr(source, "shape", ()))
-            if len(shape5d) != 5:
-                raise ValueError(
-                    "AxialShiftView needs a 5D TCZYX source (with a 5D shape); "
-                    f"got shape {shape5d!r}"
-                )
-        self._T, self._C, self._Z, self._Y, self._X = (int(s) for s in shape5d)
+        self._T, self._C, self._Z, self._Y, self._X = _validated_tczyx_shape(source)
 
         self._shifts = np.asarray(plane_shifts, dtype=int)
         if self._shifts.ndim != 2 or self._shifts.shape[1] != 2:
@@ -588,10 +617,21 @@ class AxialShiftView:
         self._W = self._X + self._pl + self._pr
 
         self.enabled = bool(enabled)
+        # set True only while this view saves itself (see _imwrite); strips
+        # plane_shifts from the written metadata so the baked output isn't
+        # re-shifted on reopen. False everywhere else, so metadata passes
+        # through live and writable for GUI editing.
+        self._hide_shifts = False
 
     @property
     def source(self):
         """the wrapped source array (never modified)."""
+        return self._source
+
+    @property
+    def _arr(self):
+        """the wrapped source, for one-level `_arr` unwrapping by callers
+        (e.g. the GUI's isinstance peel). Mirrors `.source`."""
         return self._source
 
     @property
@@ -615,10 +655,12 @@ class AxialShiftView:
     @property
     def metadata(self):
         md = getattr(self._source, "metadata", None)
-        if md is not None and self.enabled:
-            # this view's pixels are already aligned, so don't advertise the
-            # still-pending shifts — a reader (or with_axial_shifts) applying
-            # them again would double-shift the saved data.
+        if md is not None and self._hide_shifts:
+            # only while this view saves itself: its pixels are already
+            # aligned, so drop the still-pending shifts to avoid a reader
+            # double-shifting the baked output. at all other times the source
+            # dict passes through live (and writable), so GUI metadata edits
+            # reach the underlying array.
             md = {
                 k: v
                 for k, v in md.items()
@@ -704,6 +746,18 @@ class AxialShiftView:
     def astype(self, dtype, *args, **kwargs):
         return np.asarray(self).astype(dtype, *args, **kwargs)
 
+    def __getattr__(self, name):
+        # forward domain attributes (nz, num_planes, num_color_channels,
+        # num_rois, filenames, roi_mode, iter_rois, stack_type, fs, ...) to
+        # the wrapped source so the view is a transparent stand-in. shape /
+        # dims / metadata / dtype and the numpy protocol are defined
+        # explicitly above and never reach here. underscore names are not
+        # forwarded so internal state and the `_arr` peel property resolve
+        # normally (and __init__ stays recursion-safe before _source is set).
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(object.__getattribute__(self, "_source"), name)
+
     def _imwrite(self, outpath, **kwargs):
         """Stream this view (aligned when enabled) to disk via the writers.
 
@@ -712,7 +766,12 @@ class AxialShiftView:
         plane_shifts when enabled (they are baked into the saved pixels).
         """
         from mbo_utilities.arrays._base import _imwrite_base
-        return _imwrite_base(self, outpath, **kwargs)
+        prev = self._hide_shifts
+        self._hide_shifts = self.enabled
+        try:
+            return _imwrite_base(self, outpath, **kwargs)
+        finally:
+            self._hide_shifts = prev
 
     def save(self, outpath, **kwargs):
         return self._imwrite(outpath, **kwargs)
@@ -739,7 +798,9 @@ def with_axial_shifts(arr, *, enabled: bool = True, plane_shifts=None) -> AxialS
     enabled : bool, default True
         Initial state. True applies shifts on read; False passes through.
     plane_shifts : array-like (nz, 2), optional
-        Shifts to use. Defaults to `arr.metadata["plane_shifts"]`.
+        Shifts to use, one (dy, dx) row per z-plane; its length must equal
+        the array's Z size. Defaults to `arr.metadata["plane_shifts"]`
+        (written by `imwrite(register_z=True)` / `compute_axial_shifts`).
 
     Returns
     -------
@@ -749,11 +810,14 @@ def with_axial_shifts(arr, *, enabled: bool = True, plane_shifts=None) -> AxialS
     ------
     ValueError
         If `plane_shifts` is not given and no valid `plane_shifts` is
-        present in `arr.metadata`.
+        present in `arr.metadata`, if the count does not match the Z size,
+        or if `arr` is not a TCZYX 5D array.
     """
     if plane_shifts is None:
         md = getattr(arr, "metadata", None)
-        nz = int(arr._shape5d()[2]) if hasattr(arr, "_shape5d") else None
+        # plane count from the validated TCZYX 'Z' axis, so the metadata
+        # shift count is checked against the same Z the view will index.
+        nz = _validated_tczyx_shape(arr)[2]
         if not validate_axial_shifts(md, nz):
             raw = md.get("plane_shifts") if md else None
             # shifts present and well-formed, but the count doesn't match the

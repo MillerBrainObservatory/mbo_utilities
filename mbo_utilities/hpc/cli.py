@@ -30,10 +30,10 @@ def hpc():
 
 @hpc.command("init")
 @click.argument("data_path", required=False, type=click.Path())
-@click.option("-o", "--config", "config_path", type=click.Path(), default="hpc.toml",
-              help="Config file to write.")
+@click.option("-o", "--config", "config_path", type=click.Path(), default=None,
+              help="Config file to write (default: <data_path>/hpc.toml, else ./hpc.toml).")
 @click.option("-O", "--output", "output_root", type=click.Path(), default=None,
-              help="Results root (default: <data_path>/../results).")
+              help="Results root (default: <config dir>/results).")
 @click.option("--overwrite/--no-overwrite", default=False)
 def hpc_init(data_path, config_path, output_root, overwrite):
     """
@@ -41,20 +41,26 @@ def hpc_init(data_path, config_path, output_root, overwrite):
 
     \b
     Examples:
-      mbo hpc init                       # hpc.toml in the current directory
-      mbo hpc init /data/raw             # fills input + a results/ output
-      mbo hpc init /data/raw -o run.toml
+      mbo hpc init                       # ./hpc.toml in the current directory
+      mbo hpc init /data/raw             # /data/raw/hpc.toml, fills input + results/
+      mbo hpc init /data/raw -o run.toml # explicit config path
     """
     from mbo_utilities.hpc.config import render_template
 
-    cfg_file = Path(config_path).expanduser()
+    # Config lands in the given path; CWD only when no path is passed.
+    if config_path:
+        cfg_file = Path(config_path).expanduser()
+    elif data_path:
+        cfg_file = Path(data_path).expanduser() / "hpc.toml"
+    else:
+        cfg_file = Path("hpc.toml")
+
     if cfg_file.exists() and not overwrite:
         click.secho(f"Exists: {cfg_file}  (--overwrite to replace)", fg="yellow")
         return
 
     # Absolute paths so the config works from any directory. Results default next
-    # to the config (writable by construction), never the data tree — acquisition
-    # directories are commonly read-only to the submitting user.
+    # to the config.
     inp = str(Path(data_path).expanduser().resolve()) if data_path else ""
     out = output_root or str(cfg_file.resolve().parent / "results")
 
@@ -67,8 +73,8 @@ def hpc_init(data_path, config_path, output_root, overwrite):
     except OSError as e:
         raise click.ClickException(
             f"cannot write {cfg_file}: {e}\n"
-            "The current directory may be read-only (data directories often are). "
-            "Re-run from a writable directory, or pass -o <writable-dir>/hpc.toml."
+            f"{cfg_file.parent} may be read-only (data directories often are). "
+            "Pass -o <writable-dir>/hpc.toml, or run from a writable directory."
         )
     click.secho(f"Created: {cfg_file.resolve()}", fg="green")
     click.echo(f"Edit it, then: mbo hpc run {cfg_file}")
@@ -87,8 +93,10 @@ def hpc_init(data_path, config_path, output_root, overwrite):
 @click.option("--gres", default=None, help="Override [slurm] gres.")
 @click.option("--time", "time_", default=None, help="Override [slurm] time.")
 @click.option("--planes-per-gpu", type=int, default=None, help="Override pack factor F.")
+@click.option("--gpu", type=int, default=None,
+              help="Local-run CUDA device index (nvidia-smi order); -1 = auto. Ignored under SLURM.")
 def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
-            partition, gres, time_, planes_per_gpu):
+            partition, gres, time_, planes_per_gpu, gpu):
     """
     Submit the pipeline described by CONFIG_PATH.
 
@@ -98,6 +106,7 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
       mbo hpc run hpc.toml                       # single GPU job
       mbo hpc run hpc.toml --mode array          # array + dependent aggregate
       mbo hpc run hpc.toml --local               # run here, no SLURM
+      mbo hpc run hpc.toml --local --gpu 1       # run here on CUDA device 1
       mbo hpc run hpc.toml --partition hpc_l40s --gres gpu:l40s:1
     """
     from mbo_utilities.hpc.config import HpcConfig
@@ -119,6 +128,8 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
             cfg.slurm.time = time_
         if planes_per_gpu:
             cfg.pipeline.planes_per_gpu = planes_per_gpu
+        if gpu is not None:
+            cfg.pipeline.gpu = gpu
         cfg.validate()
     except ValueError as e:  # bad TOML or failed validation
         raise click.ClickException(str(e))

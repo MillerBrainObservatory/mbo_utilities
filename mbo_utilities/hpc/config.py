@@ -21,14 +21,15 @@ from pathlib import Path
 
 # suite2p ops overrides applied to every plane (was DEFAULT_OPS in run_pipeline.py).
 DEFAULT_OPS: dict = {
-    "anatomical_only": 4,
+    "algorithm": "cellpose",
+    "img": "max_proj",
     "diameter": 2,
     "cellprob_threshold": -4,
     "flow_threshold": 0,
     "spatial_hp_cp": 3,
     "niter": 200,
     "do_registration": 1,
-    "two_step_registration": 1,
+    "two_step_registration": 0,
     "do_regmetrics": False,
     "lam_percentile": 0,
     "min_neuropil_pixels": 0,
@@ -62,6 +63,7 @@ class PipelineConfig:
     planes_per_gpu: int = 4
     threads_per_worker: int = 0
     node_local: bool = True
+    gpu: int = -1
 
 
 # [parameters] keys routed to lbm pipeline() top-level kwargs; everything else
@@ -70,32 +72,56 @@ _PIPELINE_PARAM_KEYS = frozenset({
     "keep_reg", "keep_raw", "norm_method", "correct_neuropil",
     "dff_window_size", "dff_percentile", "dff_smooth_window",
     "cell_filters", "accept_all_cells", "rastermap_kwargs", "save_json",
-    "reader_kwargs", "roi_mode", "num_timepoints", "frame_indices",
+    "reader_kwargs", "roi_mode", "planes", "num_zplanes",
+    "timepoints", "num_timepoints",
+    "frames", "frame_indices",  # deprecated aliases of timepoints
 })
 # routed into writer_kwargs (phase correction).
 _WRITER_PARAM_KEYS = frozenset({"fix_phase", "use_fft"})
 # owned by the runner / [pipeline]; rejected if set in [parameters].
 _MANAGED_PARAM_KEYS = frozenset({
-    "save_path", "ops", "planes", "workers", "threads_per_worker",
+    "save_path", "ops", "workers", "threads_per_worker",
     "skip_volumetric", "force_reg", "force_detect", "replot", "writer_kwargs",
     "planes_per_gpu", "node_local",
 })
 
-# pipeline-behaviour defaults surfaced in the [parameters] template.
+# pipeline-behaviour defaults merged into every run (see from_dict).
 DEFAULT_PIPELINE_PARAMS: dict = {
-    "keep_reg": True,
+    "keep_reg": False,
     "keep_raw": False,
     "fix_phase": True,
     "use_fft": True,
 }
 
-# inline comments for the pipeline-behaviour keys in the generated template.
+# inline comments for the keys shown in the generated template.
 PARAM_HELP: dict = {
-    "keep_reg": "keep registered data.bin (false = only small outputs; array re-runs)",
+    "algorithm": "detection: cellpose | sourcery | sparsery",
+    "img": "cellpose image: max_proj | meanImg | 'max_proj / meanImg'",
+    "do_regmetrics": "registration PCA metrics, computationally intensive",
+    "keep_reg": "keep registered data.bin (false will delete after processing)",
     "keep_raw": "keep raw pre-registration data_raw.bin",
     "fix_phase": "bidirectional scan-phase correction",
     "use_fft": "FFT phase correction (vs integer)",
 }
+
+# keys written into the generated [parameters] block. The rest of DEFAULT_OPS /
+# DEFAULT_PIPELINE_PARAMS still applies at runtime (from_dict seeds them); they're
+# just not surfaced in the file. Add any by hand to override.
+TEMPLATE_PARAM_KEYS: tuple = (
+    "algorithm", "img", "diameter", "cellprob_threshold", "flow_threshold",
+    "do_registration", "two_step_registration", "do_regmetrics",
+    "keep_reg", "keep_raw",
+)
+
+# subset knobs surfaced as commented hints. "Everything" is the default,
+# expressed canonically as None (omit the key); a list restricts. [] is also
+# accepted. None / [] / omitted all mean every plane / every timepoint.
+TEMPLATE_COMMENTED: tuple = (
+    ("planes", "[1, 7, 13]", "z-planes (1-based); omit for all. None or [] = all"),
+    ("num_zplanes", "3", "first N z-planes; omit for all"),
+    ("timepoints", "[1, 2, 3]", "timepoints (1-based); omit for all. None or [] = all"),
+    ("num_timepoints", "500", "first N timepoints; omit for all"),
+)
 
 
 def split_parameters(params: dict) -> tuple[dict, dict]:
@@ -147,6 +173,7 @@ HELP: dict = {
         "planes_per_gpu": "pack factor F: most planes that fit one GPU before OOM",
         "threads_per_worker": "BLAS/OMP threads per worker (0 = cpus // workers)",
         "node_local": "compute on node-local NVMe, copy results back",
+        "gpu": "local-run CUDA device index (nvidia-smi order); -1 = auto. ignored under SLURM",
     },
 }
 
@@ -260,6 +287,8 @@ def _toml_value(v) -> str:
         return "true" if v else "false"
     if isinstance(v, (int, float)):
         return repr(v)
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
     if isinstance(v, dict):
         if not v:
             return "{}"
@@ -293,14 +322,14 @@ def render_template(input_path: str = "", output_path: str = "") -> str:
         lines.append("")
 
     lines.append("[parameters]")
-    lines.append("# one knob: suite2p ops + lbm pipeline() kwargs, routed by name")
-    for k, v in DEFAULT_OPS.items():
-        lines.append(f"{k} = {_toml_value(v)}")
-    lines.append("")
-    lines.append("# pipeline behaviour (keys below route to pipeline(), not ops)")
-    for k, v in DEFAULT_PIPELINE_PARAMS.items():
+    allp = {**DEFAULT_OPS, **DEFAULT_PIPELINE_PARAMS}
+    shown = [(k, _toml_value(allp[k])) for k in TEMPLATE_PARAM_KEYS if k in allp]
+    width = max((len(f"{k} = {v}") for k, v in shown if PARAM_HELP.get(k)), default=0)
+    for k, v in shown:
+        row = f"{k} = {v}"
         comment = PARAM_HELP.get(k, "")
-        row = f"{k} = {_toml_value(v)}"
-        lines.append(f"{row}  # {comment}" if comment else row)
+        lines.append(f"{row:<{width}}  # {comment}" if comment else row)
+    for k, example, comment in TEMPLATE_COMMENTED:
+        lines.append(f"# {k} = {example}   # {comment}")
     lines.append("")
     return "\n".join(lines)
