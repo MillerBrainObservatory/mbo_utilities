@@ -82,9 +82,16 @@ class TestExplicitDims:
         assert arr.shape == (10, 2, 1, 32, 32)
 
     @pytest.mark.parametrize("bad", ["TZY", "TTYX", "TQYX"])
-    def test_invalid_dims_raise(self, bad):
-        with pytest.raises(ValueError):
-            NumpyArray(np.zeros((10, 3, 32, 32)), dims=bad)
+    def test_invalid_dims_warn_and_chain_guess(self, bad):
+        # unusable dims must NOT raise: warn and fall back to the rank guess
+        arr = NumpyArray(np.zeros((10, 3, 32, 32)), dims=bad)
+        assert arr.shape == (10, 1, 3, 32, 32)  # inferred TZYX
+        assert arr.input_dims == ("T", "Z", "Y", "X")
+
+    def test_setter_mismatch_does_not_raise(self):
+        arr = NumpyArray(np.zeros((10, 2, 32, 32), dtype=np.uint16))
+        arr.dims = "TZY"  # wrong length -> warn + chain guess, no raise
+        assert arr.shape == (10, 1, 2, 32, 32)
 
 
 class TestReactivity:
@@ -123,6 +130,21 @@ class TestReactivity:
         arr = NumpyArray(np.zeros((10, 2, 32, 32), dtype=np.uint16),
                          metadata={"dims": "TCYX"})
         assert arr.shape == (10, 2, 1, 32, 32)
+
+    def test_ctor_dimension_names_alias(self):
+        # NGFF-style lowercase dimension_names is accepted as a dims alias
+        arr = NumpyArray(np.zeros((10, 2, 32, 32), dtype=np.uint16),
+                         metadata={"dimension_names": ["t", "c", "y", "x"]})
+        assert arr.shape == (10, 2, 1, 32, 32)
+
+    def test_metadata_dimension_names_setter(self):
+        arr = NumpyArray(np.zeros((10, 2, 32, 32), dtype=np.uint16))
+        arr.metadata = {"dimension_names": ["t", "c", "y", "x"]}
+        assert arr.shape == (10, 2, 1, 32, 32)
+
+    def test_metadata_exposes_dimension_names(self):
+        arr = NumpyArray(np.zeros((10, 2, 3, 32, 32), dtype=np.uint16))
+        assert arr.metadata["dimension_names"] == ["t", "c", "z", "y", "x"]
 
 
 class TestOmeWriterLabeling:
