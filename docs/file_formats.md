@@ -291,7 +291,8 @@ mbo.imwrite(arr, "output", ext=".zarr")  # imwrite to any format
 
 #### Dimension labels
 
-Axes are declared with `dims`; when omitted they are inferred from the rank:
+Axes are declared with `dims`; when omitted they are **chain-guessed from the
+rank**:
 
 | Input rank | Inferred `dims` | `.shape` |
 |------------|-----------------|----------|
@@ -300,8 +301,10 @@ Axes are declared with `dims`; when omitted they are inferred from the rank:
 | 4D | `TZYX` | `(T, 1, Z, Y, X)` |
 | 5D | `TCZYX`| `(T, C, Z, Y, X)` |
 
-`imread()` prints the inferred order for a bare array. If the guess is wrong
-(e.g. a 4D two-channel movie read as `TZYX`), declare the axes:
+`imread()` never errors on dimensions: it logs the order it picked. If a
+declared order is unusable (wrong length, duplicate or unknown axis), it
+**warns and falls back to the rank guess above** rather than raising. If the
+guess is wrong (e.g. a 4D two-channel movie read as `TZYX`), declare the axes:
 
 ```python
 data = np.random.randn(100, 2, 512, 512).astype(np.float32)
@@ -318,8 +321,15 @@ after construction — this is reactive and updates the derived OME axes and
 voxel scale:
 
 ```python
-arr.dims = "TCYX"                 # equivalently: arr.metadata = {"dims": "TCYX"}
+arr.dims = "TCYX"                                  # or
+arr.metadata = {"dims": "TCYX"}                    # or
+arr.metadata = {"dimension_names": ["t","c","y","x"]}   # NGFF lowercase form
 ```
+
+Because the read step only guesses, **labels must be correct before
+`imwrite`** — the writer uses whatever `dims` resolved to for the OME-Zarr
+`dimension_names`. Set `dims` (or `dimension_names`) if the rank guess put
+your channel axis on Z.
 
 #### Adding metadata
 
