@@ -9,6 +9,8 @@ public api:
     compute_axial_shifts(arr, ...)  -> tvecs (nz, 2)  # streams from a lazy array,
                                                       # writes shifts into metadata
     validate_axial_shifts(metadata) -> bool           # metadata-only check
+    with_axial_shifts(arr, plane_shifts=None)         # apply shifts on read (5D)
+    AxialShiftView(source, plane_shifts)              # lazy 5D padded-canvas view
     AxiallyAlignedView(planes, shifts)                # lazy 4D padded-canvas view
 
 backend is auto-detected: cupy if a cuda runtime is reachable, else numpy.
@@ -556,10 +558,13 @@ class AxialShiftView:
     ----------
     source : array-like
         Any 5D TCZYX lazy array (5D `shape`) supporting
-        `source[t, c, z, :, :]` indexing.
+        `source[t, c, z, :, :]` indexing. If it reports 5D `dims`, they
+        must be `("T", "C", "Z", "Y", "X")` so the shift count is checked
+        against the same Z axis the view indexes.
     plane_shifts : array-like (nz, 2)
-        Cumulative per-plane integer (dy, dx) shifts, as produced by
-        `compute_axial_shifts`. Length must equal the source Z size.
+        Per-plane integer (dy, dx) shifts. Either computed (e.g. by
+        `compute_axial_shifts` / `imwrite(register_z=True)`) or supplied by
+        the user. Length must equal the source Z size.
     enabled : bool, default True
         If True, reads return aligned frames on a zero-padded canvas of
         shape `(Y + pt + pb, X + pl + pr)`. If False, reads pass straight
@@ -571,6 +576,13 @@ class AxialShiftView:
     offset window of a zero canvas — no interpolation, O(Y*X) per plane.
     Reversal is exact: flipping `enabled` to False (or reading `source`)
     yields the original pixels; nothing is ever written back.
+
+    The view is a transparent stand-in for the source: `.shape`, `.dims`,
+    `.dtype` and `.metadata` are reported directly, and any other attribute
+    (`nz`, `num_planes`, `filenames`, ...) is forwarded to the source.
+    `.metadata` passes through live and writable; `plane_shifts` are dropped
+    from it only while the view saves itself (so a reopened, already-aligned
+    output is not shifted a second time).
 
     Examples
     --------
@@ -786,7 +798,9 @@ def with_axial_shifts(arr, *, enabled: bool = True, plane_shifts=None) -> AxialS
     enabled : bool, default True
         Initial state. True applies shifts on read; False passes through.
     plane_shifts : array-like (nz, 2), optional
-        Shifts to use. Defaults to `arr.metadata["plane_shifts"]`.
+        Shifts to use, one (dy, dx) row per z-plane; its length must equal
+        the array's Z size. Defaults to `arr.metadata["plane_shifts"]`
+        (written by `imwrite(register_z=True)` / `compute_axial_shifts`).
 
     Returns
     -------
@@ -796,7 +810,8 @@ def with_axial_shifts(arr, *, enabled: bool = True, plane_shifts=None) -> AxialS
     ------
     ValueError
         If `plane_shifts` is not given and no valid `plane_shifts` is
-        present in `arr.metadata`.
+        present in `arr.metadata`, if the count does not match the Z size,
+        or if `arr` is not a TCZYX 5D array.
     """
     if plane_shifts is None:
         md = getattr(arr, "metadata", None)
