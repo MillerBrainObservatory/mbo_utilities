@@ -416,7 +416,13 @@ class _ScrubTimingProxy:
         import numpy as np
         from mbo_utilities.log import get as get_logger
         self._wrapped = arr
-        self._arr = getattr(arr, "_arr", arr)
+        # peel every wrapper layer (_SqueezeSingletonDims, AxialShiftView,
+        # _ChannelView, ...) so isinstance checks downstream see the real
+        # reader. No reader class defines `_arr`, so this terminates there.
+        inner = arr
+        while hasattr(inner, "_arr"):
+            inner = inner._arr
+        self._arr = inner
         self._np = np
         self._logger = get_logger("gui.scrub")
 
@@ -745,6 +751,27 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
             return None
         _show_metadata_viewer(metadata)
         return None
+
+    # if the dataset carries valid per-plane axial shifts (written by
+    # imwrite(register_z=True)), show the aligned view by default. transparent
+    # wrap: shape/dims/metadata/domain attrs forward to the source; only the
+    # (y, x) of each plane is remapped on read.
+    try:
+        from mbo_utilities.arrays._registration import (
+            validate_axial_shifts,
+            with_axial_shifts,
+        )
+        _md = getattr(data_array, "metadata", None)
+        _nz = (
+            int(data_array._shape5d()[2])
+            if hasattr(data_array, "_shape5d")
+            else None
+        )
+        if validate_axial_shifts(_md, _nz):
+            data_array = with_axial_shifts(data_array)
+            logger.info(f"axial alignment applied ({_nz} planes)")
+    except Exception as e:
+        logger.debug(f"axial alignment skipped: {e}")
 
     import fastplotlib as fpl
     t1 = _time.perf_counter()
