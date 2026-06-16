@@ -201,6 +201,20 @@ def _pin_local_gpu(index) -> None:
     os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
     os.environ["CUDA_VISIBLE_DEVICES"] = str(idx)
     print(f"pinned GPU {idx} (CUDA_DEVICE_ORDER=PCI_BUS_ID)", flush=True)
+    # Fail loudly if CUDA can't use the pinned device, instead of silently
+    # running the whole job on CPU. A device that nvidia-smi shows (e.g. a
+    # TCC card the GeForce driver won't expose) can still be unusable here.
+    try:
+        import torch
+    except Exception:
+        return
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"gpu={idx}: CUDA can't use that device (torch.cuda.is_available() is "
+            f"False under CUDA_VISIBLE_DEVICES={idx}). Check `nvidia-smi -L` and "
+            f"`python -c \"import torch; print(torch.cuda.device_count())\"`; pick a "
+            f"CUDA-visible index or set [pipeline] gpu = -1."
+        )
 
 
 def _apply_thread_env(threads: int) -> None:
