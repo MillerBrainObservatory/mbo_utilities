@@ -29,7 +29,6 @@ from mbo_utilities.analysis.phasecorr import bidir_phasecorr, _apply_offset
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 from mbo_utilities.arrays.features._slicing import listify_index, index_length
 from mbo_utilities.arrays.features import (
-    DimensionSpecMixin,
     PhaseCorrectionFeature,
     PhaseCorrectionMixin,
     RoiFeatureMixin,
@@ -365,7 +364,7 @@ class _SingleTiffPlaneReader:
             tf.close()
 
 
-class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin):
+class TiffArray(TiffReaderMixin, ReductionMixin, Shape5DMixin):
     """
     Lazy TIFF array reader with auto-detection of single file vs volume.
 
@@ -488,7 +487,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
             # STEP 3: fall back to file structure heuristics
             self._init_from_file_structure(file_list)
 
-        self._dim_labels = None
 
     def _init_volume_from_groups(self, plane_groups: list[list[Path]]):
         """initialize as volumetric array from groups of files (one group per plane)."""
@@ -716,10 +714,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
         """Number of Z-planes."""
         return self._nz
 
-    @property
-    def shape(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
-
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         return (self._nframes, self._nc, self._nz, self._ly, self._lx)
 
@@ -732,26 +726,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
             if self._target_dtype is not None
             else get_dtype(self._dtype)
         )
-
-    @property
-    def ndim(self) -> int:
-        return 5
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        from mbo_utilities.arrays._base import DIMS
-        return DIMS
-
-    @property
-    def metadata(self) -> dict:
-        """Return metadata as dict. Always returns dict, never None."""
-        return self._metadata if self._metadata is not None else {}
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata = value
 
     def __len__(self) -> int:
         return self._nframes
@@ -861,7 +835,7 @@ class TiffArray(TiffReaderMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixi
             plane.close()
 
 
-class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, DimensionSpecMixin, PhaseCorrectionMixin, Shape5DMixin):
+class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, PhaseCorrectionMixin, Shape5DMixin):
     """
     Base class for raw ScanImage TIFF readers with phase correction support.
 
@@ -1085,7 +1059,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
 
         self.phase_correction.add_event_handler(self._on_feature_change)
 
-        self._dim_labels = None
 
     def _on_feature_change(self, event):
         # Optional: handle feature changes (log, etc)
@@ -1104,15 +1077,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, Dimension
                 f"ROI structure: {[(r['y_start'], r['y_end'], r['height']) for r in rois]}"
             )
         return rois
-
-    @property
-    def ndim(self):
-        return 5
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        from mbo_utilities.arrays._base import DIMS
-        return DIMS
 
     @property
     def stack_type(self) -> StackType:
@@ -1610,7 +1574,6 @@ class LBMArray(ScanImageArray):
                 f"LBMArray requires LBM stack data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
-        self._dim_labels = None
 
     @property
     def dims(self) -> tuple[str, ...]:
@@ -1755,7 +1718,6 @@ class PiezoArray(ScanImageArray):
 
         self._average_frames = average_frames and self.can_average
 
-        self._dim_labels = None
 
     @property
     def num_slices(self) -> int:
@@ -1985,7 +1947,6 @@ class SinglePlaneArray(ScanImageArray):
                 f"SinglePlaneArray requires single-plane data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
-        self._dim_labels = None
 
     @property
     def dims(self) -> tuple[str, ...]:
@@ -2071,7 +2032,6 @@ class LBMPiezoArray(ScanImageArray):
                 f"LBMPiezoArray requires pollen calibration data, but detected '{self.stack_type}'. "
                 f"Use open_scanimage() for automatic detection or ScanImageArray directly."
             )
-        self._dim_labels = None
 
     @property
     def dims(self) -> tuple[str, ...]:

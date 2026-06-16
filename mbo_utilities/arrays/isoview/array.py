@@ -1856,14 +1856,6 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         return self.shape
 
     @property
-    def ndim(self) -> int:
-        return 5
-
-    @property
-    def dims(self) -> tuple[str, str, str, str, str]:
-        return ("T", "C", "Z", "Y", "X")
-
-    @property
     def is_tiled(self) -> bool:
         return self._is_tiled
 

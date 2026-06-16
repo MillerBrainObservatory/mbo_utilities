@@ -14,10 +14,6 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, _normalize_key, ReductionMixin, Shape5DMixin
 from mbo_utilities.lazy_array import register_array_class
-from mbo_utilities.arrays.features import (
-    DimLabelsMixin,
-    DimensionSpecMixin,
-)
 from mbo_utilities.file_io import HAS_ZARR, logger
 from mbo_utilities.arrays.suite2p import _add_suite2p_labels
 from mbo_utilities.metadata import _build_ome_metadata, get_param, get_voxel_size
@@ -50,7 +46,7 @@ _ZARR_INFO = PipelineInfo(
 register_pipeline(_ZARR_INFO)
 
 
-class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin):
+class ZarrArray(ReductionMixin, Shape5DMixin):
     """
     Reader for Zarr stores (including OME-Zarr).
 
@@ -170,73 +166,6 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin
         self.compressor = compressor
         self._target_dtype = None
 
-        # initialize dimension labels feature
-        # try to read dims from OME metadata first, then fall back to parameter
-        ome_dims = self._read_ome_dims()
-        if ome_dims is not None:
-            self._init_dim_labels(ome_dims)
-        elif dims is not None:
-            self._init_dim_labels(dims)
-        else:
-            self._init_dim_labels(None)  # will infer from ndim
-
-    def _read_ome_dims(self) -> tuple[str, ...] | None:
-        """extract dimension labels from ome-zarr metadata.
-
-        returns
-        -------
-        tuple[str, ...] | None
-            canonical dimension labels (e.g., ("T", "Z", "Y", "X")) or None
-            if not an OME-Zarr or axes not found
-        """
-        # check if we have an OME-Zarr group
-        if not self._groups or self._groups[0] is None:
-            return None
-
-        try:
-            attrs = dict(self._groups[0].attrs)
-            ome = attrs.get("ome", {})
-            multiscales = ome.get("multiscales", [])
-            if not multiscales:
-                return None
-
-            axes = multiscales[0].get("axes", [])
-            if not axes:
-                return None
-
-            # convert lowercase axis names to uppercase dim labels
-            dims = tuple(ax.get("name", "?").upper() for ax in axes)
-
-            # always 5D TCZYX
-            if len(dims) == 5:
-                return dims
-
-            # underlying zarr may be 3D/4D; pad to 5D
-            underlying_ndim = len(self.zs[0].shape)
-            dims_list = list(dims)
-
-            # insert missing C dimension after T
-            if "C" not in dims_list and len(dims_list) < 5:
-                insert_pos = (dims_list.index("T") + 1) if "T" in dims_list else 0
-                dims_list.insert(insert_pos, "C")
-
-            # insert missing Z dimension after C
-            if "Z" not in dims_list and len(dims_list) < 5:
-                insert_pos = (dims_list.index("C") + 1) if "C" in dims_list else 1
-                dims_list.insert(insert_pos, "Z")
-
-            if len(dims_list) == 5:
-                return tuple(dims_list)
-
-            # can't reconcile, fall back to default inference
-            logger.warning(
-                "OME axes %s couldn't be reconciled to 5D; ignoring OME dims",
-                dims,
-            )
-            return None
-        except Exception:
-            return None
-
     @property
     def metadata(self) -> dict:
         """Return metadata as dict. Always returns dict, never None."""
@@ -337,10 +266,6 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin
             self._metadata[0] = value
 
     @property
-    def shape(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
-
-    @property
     def _shape_tzyx(self) -> tuple[int, int, int, int]:
         """internal 4D shape for zarr indexing (used by 2D/3D/4D source paths;
         5D sources skip this and feed _shape5d directly)."""
@@ -391,15 +316,6 @@ class ZarrArray(DimLabelsMixin, ReductionMixin, DimensionSpecMixin, Shape5DMixin
             return first_shape
         s = self._shape_tzyx
         return (s[0], 1, s[1], s[2], s[3])
-
-    @property
-    def ndim(self):
-        return 5
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        from mbo_utilities.arrays._base import DIMS
-        return DIMS
 
     def __len__(self) -> int:
         return self.nt

@@ -659,17 +659,6 @@ class MP4Array(ReductionMixin, Shape5DMixin):
         except Exception:
             pass
 
-    @property
-    def metadata(self) -> dict:
-        """Return metadata as dict. Always returns dict, never None."""
-        return self._metadata if self._metadata is not None else {}
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise TypeError(f"metadata must be a dict, got {type(value)}")
-        self._metadata = value
-
     def _imwrite(
         self,
         outpath: Path | str,
