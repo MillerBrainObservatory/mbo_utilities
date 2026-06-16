@@ -13,6 +13,13 @@ projections), so the grid fills in immediately. Tiles load incrementally
 (a budget per frame) so the UI never blocks, and clicking a cell drives the
 main viewer's Tile slider.
 
+An orientation control adds 90°-multiple rotations + X/Y/Z flips (the same
+ops the BigStitcher export bakes onto VW00), applied as a live preview only
+— nothing is saved. For a faithful out-of-plane view (rotate about X/Y, flip
+Z) the displayed tile is the matching source MIP (xy/xz/yz) with a 2D
+transpose + flips, so the in-plane (default) case stays a cheap sparse-Z
+read and only an out-of-plane orientation pays the full-Z read for xz/yz.
+
 Activates for any array that is tiled and carries per-tile metadata
 (see :class:`mbo_utilities.arrays.isoview.IsoviewArray`).
 """
@@ -99,6 +106,100 @@ def _unwrap(arr):
         arr = inner
 
 
+def _axis_rot_local(axis: str, deg: float) -> np.ndarray:
+    """3x3 right-hand rotation about X/Y/Z by a 90° multiple (mirrors
+    isoview.views._axis_rotation; used only when isoview isn't importable)."""
+    d = int(round(deg)) % 360
+    c = {0: 1.0, 90: 0.0, 180: -1.0, 270: 0.0}[d]
+    s = {0: 0.0, 90: 1.0, 180: 0.0, 270: -1.0}[d]
+    if axis == "X":
+        return np.array([[1, 0, 0], [0, c, -s], [0, s, c]], dtype=float)
+    if axis == "Y":
+        return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], dtype=float)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=float)
+
+
+def _axis_flip_local(axis: str) -> np.ndarray:
+    diag = {"X": (-1.0, 1, 1), "Y": (1, -1.0, 1), "Z": (1, 1, -1.0)}[axis]
+    return np.diag(np.array(diag, dtype=float))
+
+
+def _compose_R(ops: list) -> np.ndarray:
+    """Composed 3x3 signed-permutation matrix for an orientation op list.
+
+    Prefers isoview's own ``_orientation_affine`` so the preview matches
+    exactly what the BigStitcher export bakes; falls back to a local build
+    when isoview isn't importable. ``ops`` are ``["rot", axis, deg]`` /
+    ``["flip", axis]`` entries (the format isoview accepts).
+    """
+    try:
+        from isoview.views import _orientation_affine
+
+        aff = _orientation_affine(ops)
+        return np.eye(3) if aff is None else np.asarray(aff, dtype=float)[:3, :3]
+    except Exception:
+        R = np.eye(3)
+        for op in ops:
+            M = (
+                _axis_rot_local(op[1], op[2])
+                if op[0] == "rot"
+                else _axis_flip_local(op[1])
+            )
+            R = M @ R
+        return R
+
+
+def _orient_2d_plan(R: np.ndarray) -> dict:
+    """Reduce a 90°-multiple orientation to a 2D projection-display plan.
+
+    For a signed axis permutation, the reoriented volume's max-projection
+    down the new Z is one of the three source MIPs (xy/xz/yz) with an
+    in-plane transpose + flips. Returns the source ``mip`` axis, whether to
+    transpose, the horizontal/vertical flips, and which source axis
+    (0=X, 1=Y, 2=Z) drives the displayed X/Y (so Z's anisotropy can be
+    applied to the right screen axis).
+    """
+    R = np.asarray(R, dtype=float)
+
+    def _src(row: int) -> tuple[int, float]:
+        j = int(np.argmax(np.abs(R[row])))
+        return j, (1.0 if R[row, j] >= 0 else -1.0)
+
+    try:
+        xsrc, sx = _src(0)
+        ysrc, sy = _src(1)
+        zsrc, _sz = _src(2)
+        if len({xsrc, ysrc, zsrc}) != 3:
+            raise ValueError("not a clean axis permutation")
+    except Exception:
+        xsrc, ysrc, zsrc, sx, sy = 0, 1, 2, 1.0, 1.0
+
+    mip = {2: "xy", 1: "xz", 0: "yz"}[zsrc]
+    # source MIP layout in (row_axis, col_axis) of source-volume axes
+    row_axis, _col_axis = {"xy": (1, 0), "xz": (2, 0), "yz": (2, 1)}[mip]
+    return {
+        "mip": mip,
+        "transpose": row_axis == xsrc,  # want rows=ysrc, cols=xsrc
+        "flip_h": sx < 0,
+        "flip_v": sy < 0,
+        "xsrc": xsrc,
+        "ysrc": ysrc,
+    }
+
+
+def _ops_label(ops: list) -> str:
+    if not ops:
+        return "identity"
+    parts = []
+    for op in ops:
+        if op[0] == "rot":
+            d = int(op[2])
+            parts.append(f"{op[1]}{'+' if d >= 0 else ''}{d}")
+        else:
+            parts.append(f"flip{op[1]}")
+    return " ".join(parts)
+
+
 class TileGridViewer(Widget):
     """Preview all tiles of a tiled acquisition laid out per z-block."""
 
@@ -114,13 +215,21 @@ class TileGridViewer(Widget):
         self._cmap_idx: int = self._cmaps.index(_DEFAULT_COLORMAP)
         self._contrast_mode: int = _CONTRAST_DISPLAY
 
+        # live preview orientation (not persisted): rotations applied in
+        # order, then flips. Composed to the same ops the export bakes.
+        self._rotations: list[dict] = []
+        self._flips: list[str] = []
+
         self._sig: str | None = None
         self._grid: dict | None = None
         self._channel_names: list[str] = []
 
-        # thumbnails keyed by (tile_index, c_index); GPU textures by the same
-        self._thumb_cache: OrderedDict[tuple[int, int], np.ndarray] = OrderedDict()
-        self._gpu_cache: OrderedDict[tuple[int, int], _GpuImage] = OrderedDict()
+        # source MIPs keyed by (ti, c, axis); oriented display thumbs and
+        # GPU textures keyed by (ti, c, *plan_key) so changing orientation
+        # swaps to its own cache slot instead of re-uploading every frame.
+        self._mip_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
+        self._thumb_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
+        self._gpu_cache: OrderedDict[tuple, _GpuImage] = OrderedDict()
         self._range: tuple[float, float] | None = None
         self._range_sig: tuple | None = None
 
@@ -189,47 +298,113 @@ class TileGridViewer(Widget):
             gpu.destroy()
         self._gpu_cache.clear()
         self._thumb_cache.clear()
+        self._mip_cache.clear()
         self._range = None
         self._range_sig = None
 
-    def _thumb_params(self, arr) -> tuple[int, list[int]]:
-        nz, ny, nx = int(arr.shape[2]), int(arr.shape[3]), int(arr.shape[4])
-        stride = max(1, -(-max(ny, nx) // _THUMB_MAX))  # ceil
-        n = max(1, min(_THUMB_MIP_PLANES, nz))
-        planes = [int((i + 0.5) * nz / n) for i in range(n)]
-        return stride, planes
+    def _orientation_ops(self) -> list:
+        """Current orientation as an op list: rotations first, then flips.
 
-    def _load_thumb(self, arr, ti: int, c: int) -> np.ndarray | None:
-        """Decimated sparse-MIP read straight from the raw data (~1 ms)."""
-        key = (ti, c)
-        cached = self._thumb_cache.get(key)
+        Matches the order ``pipelines.isoview`` composes for the export, so
+        the preview and the baked seed agree.
+        """
+        ops: list = []
+        for rot in self._rotations:
+            deg = int(rot["deg"])
+            if rot["sign"] == "-":
+                deg = -deg
+            ops.append(["rot", rot["axis"], deg])
+        for axis in self._flips:
+            ops.append(["flip", axis])
+        return ops
+
+    def _mip_params(self, arr) -> tuple[int, int, float, float]:
+        """``(xy_stride, z_stride, pix_xy_um, pix_z_um)`` for the MIP reads.
+
+        ``z_stride`` is chosen so a decimated Z pixel spans about the same
+        physical distance as a decimated Y/X pixel — that keeps xz/yz
+        thumbnails close to square-pixelled. Falls back to no Z decimation
+        and unit pixels when the voxel sizes aren't in the metadata.
+        """
+        ny, nx = int(arr.shape[3]), int(arr.shape[4])
+        s = max(1, -(-max(ny, nx) // _THUMB_MAX))  # ceil
+        md = getattr(arr, "metadata", {}) or {}
+        dxy = float(md.get("dx") or md.get("pixel_resolution_um") or 0.0)
+        dz = float(md.get("dz") or md.get("axial_step") or md.get("z_step") or 0.0)
+        if dxy > 0 and dz > 0:
+            sz = max(1, int(round(s * dxy / dz)))
+            return s, sz, s * dxy, sz * dz
+        return s, 1, 1.0, 1.0
+
+    def _sparse_planes(self, arr) -> list[int]:
+        nz = int(arr.shape[2])
+        n = max(1, min(_THUMB_MIP_PLANES, nz))
+        return [int((i + 0.5) * nz / n) for i in range(n)]
+
+    def _load_source_mip(self, arr, ti, c, axis, sparse_ok) -> np.ndarray | None:
+        """Decimated source MIP for one axis, cached per ``(ti, c, axis)``.
+
+        The in-plane (``xy``) default takes the cheap sparse-Z read; any
+        other axis needs full Z, so that read computes and caches all three
+        MIPs at once (xz/yz come for free from the same block).
+        """
+        key = (ti, c, axis)
+        cached = self._mip_cache.get(key)
         if cached is not None:
-            self._thumb_cache.move_to_end(key)
+            self._mip_cache.move_to_end(key)
             return cached
-        stride, planes = self._thumb_params(arr)
+        s, sz, _, _ = self._mip_params(arr)
         try:
-            block = np.asarray(arr[ti, c, planes, ::stride, ::stride])
+            if axis == "xy" and sparse_ok:
+                block = np.squeeze(
+                    np.asarray(arr[ti, c, self._sparse_planes(arr), ::s, ::s])
+                )
+                if block.ndim == 3:
+                    m = block.max(axis=0)
+                elif block.ndim == 2:
+                    m = block
+                else:
+                    return None
+                self._mip_cache[(ti, c, "xy")] = np.ascontiguousarray(m)
+            else:
+                block = np.asarray(arr[ti, c, :, ::s, ::s])
+                if block.ndim != 3:
+                    block = np.squeeze(block)
+                if block.ndim != 3:
+                    return None
+                self._mip_cache[(ti, c, "xy")] = np.ascontiguousarray(block.max(axis=0))
+                self._mip_cache[(ti, c, "xz")] = np.ascontiguousarray(
+                    block.max(axis=1)[::sz]
+                )
+                self._mip_cache[(ti, c, "yz")] = np.ascontiguousarray(
+                    block.max(axis=2)[::sz]
+                )
         except Exception:
             return None
-        block = np.squeeze(block)
-        if block.ndim == 3:
-            thumb = block.max(axis=0)
-        elif block.ndim == 2:
-            thumb = block
-        else:
-            return None
-        thumb = np.ascontiguousarray(thumb)
-        self._thumb_cache[key] = thumb
-        while len(self._thumb_cache) > _THUMB_CACHE_MAX:
-            self._thumb_cache.popitem(last=False)
-        return thumb
+        while len(self._mip_cache) > _THUMB_CACHE_MAX:
+            self._mip_cache.popitem(last=False)
+        return self._mip_cache.get(key)
 
-    def _contrast_range(self, arr, loaded: list[np.ndarray]) -> tuple[float, float]:
+    @staticmethod
+    def _apply_plan(m: np.ndarray, plan: dict) -> np.ndarray:
+        """Transpose + flip a source MIP into display orientation."""
+        out = m
+        if plan["transpose"]:
+            out = out.T
+        if plan["flip_v"]:
+            out = out[::-1, :]
+        if plan["flip_h"]:
+            out = out[:, ::-1]
+        return np.ascontiguousarray(out)
+
+    def _contrast_range(
+        self, arr, loaded: list[np.ndarray], plan_key: tuple
+    ) -> tuple[float, float]:
         if self._contrast_mode == _CONTRAST_DISPLAY:
             lo = float(getattr(arr, "_cached_vmin", 0.0) or 0.0)
             hi = float(getattr(arr, "_cached_vmax", 1000.0) or 1000.0)
             return lo, (hi if hi > lo else lo + 1.0)
-        sig = (self._zblock, self._c_index, len(loaded))
+        sig = (self._zblock, self._c_index, plan_key, len(loaded))
         if sig == self._range_sig and self._range is not None:
             return self._range
         if loaded:
@@ -369,6 +544,53 @@ class TileGridViewer(Widget):
         if ctr_changed:
             self._contrast_mode = new_ctr
 
+        self._draw_orient_row()
+
+    def _orient_toggle(self, label: str, active: bool) -> bool:
+        """Highlighted small button; returns True when clicked."""
+        if active:
+            imgui.push_style_color(
+                imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
+            imgui.push_style_color(
+                imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
+            imgui.push_style_color(
+                imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
+        clicked = imgui.small_button(label)
+        if active:
+            imgui.pop_style_color(3)
+        return clicked
+
+    def _draw_orient_row(self) -> None:
+        """Preview-only orientation: 90° rotations + X/Y/Z flips (not saved)."""
+        imgui.align_text_to_frame_padding()
+        imgui.text("Rotate")
+        for axis in ("X", "Y", "Z"):
+            imgui.same_line()
+            if imgui.small_button(f"+{axis}##rot_{axis}"):
+                self._rotations.append({"sign": "+", "axis": axis, "deg": 90})
+        for axis in ("X", "Y", "Z"):
+            imgui.same_line()
+            if imgui.small_button(f"-{axis}##rotn_{axis}"):
+                self._rotations.append({"sign": "-", "axis": axis, "deg": 90})
+
+        imgui.same_line()
+        imgui.text("Flip")
+        for axis in ("X", "Y", "Z"):
+            imgui.same_line()
+            active = axis in self._flips
+            if self._orient_toggle(f"{axis}##flip_{axis}", active):
+                if active:
+                    self._flips.remove(axis)
+                else:
+                    self._flips.append(axis)
+
+        imgui.same_line()
+        if imgui.small_button("Reset##orient"):
+            self._rotations = []
+            self._flips = []
+        imgui.same_line()
+        imgui.text_colored(_WHITE, _ops_label(self._orientation_ops()))
+
     def _draw_grid(self, arr) -> None:
         g = self._grid
         ncols = max(1, len(g["cols"]))
@@ -376,12 +598,18 @@ class TileGridViewer(Widget):
         placed = g["placed"].get(self._zblock, {})
         c = self._c_index
 
+        ops = self._orientation_ops()
+        plan = _orient_2d_plan(_compose_R(ops))
+        plan_key = (plan["mip"], plan["transpose"], plan["flip_h"], plan["flip_v"])
+        sparse_ok = plan["mip"] == "xy"
+        _s, _sz, pix_xy, pix_z = self._mip_params(arr)
+
         loaded = [
-            self._thumb_cache[(ti, c)]
+            self._thumb_cache[(ti, c, *plan_key)]
             for (ti, _spc) in placed.values()
-            if (ti, c) in self._thumb_cache
+            if (ti, c, *plan_key) in self._thumb_cache
         ]
-        lo, hi = self._contrast_range(arr, loaded)
+        lo, hi = self._contrast_range(arr, loaded, plan_key)
 
         avail = imgui.get_content_region_avail()
         spacing = 4.0
@@ -411,16 +639,37 @@ class TileGridViewer(Widget):
                         draw_list.add_rect(pos, cmax, grey)
                         continue
                     ti, spc = entry
-                    thumb = self._thumb_cache.get((ti, c))
+                    gkey = (ti, c, *plan_key)
+                    thumb = self._thumb_cache.get(gkey)
                     if thumb is None and budget > 0:
-                        thumb = self._load_thumb(arr, ti, c)
+                        src = self._load_source_mip(
+                            arr, ti, c, plan["mip"], sparse_ok
+                        )
+                        if src is not None:
+                            thumb = self._apply_plan(src, plan)
+                            self._thumb_cache[gkey] = thumb
+                            while len(self._thumb_cache) > _THUMB_CACHE_MAX:
+                                self._thumb_cache.popitem(last=False)
                         budget -= 1
                     gpu = (
-                        self._ensure_gpu((ti, c), thumb, lo, hi)
+                        self._ensure_gpu(gkey, thumb, lo, hi)
                         if thumb is not None else None
                     )
                     if gpu is not None:
-                        draw_list.add_image(gpu.ref, pos, cmax)
+                        h, w = thumb.shape
+                        psx = pix_z if plan["xsrc"] == 2 else pix_xy
+                        psy = pix_z if plan["ysrc"] == 2 else pix_xy
+                        pw = max(w * psx, 1e-6)
+                        ph = max(h * psy, 1e-6)
+                        sc = min(cell / pw, cell / ph)
+                        dw, dh = pw * sc, ph * sc
+                        ix = pos.x + (cell - dw) * 0.5
+                        iy = pos.y + (cell - dh) * 0.5
+                        draw_list.add_image(
+                            gpu.ref,
+                            imgui.ImVec2(ix, iy),
+                            imgui.ImVec2(ix + dw, iy + dh),
+                        )
                     else:
                         draw_list.add_rect_filled(pos, cmax, dark)
                     if clicked:
