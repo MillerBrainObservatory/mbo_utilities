@@ -15,7 +15,6 @@ import numpy as np
 from mbo_utilities import log
 from mbo_utilities.arrays._base import _imwrite_base, _index_5d_into_raw, DIMS, ReductionMixin, Shape5DMixin
 from mbo_utilities.arrays.features._dim_labels import DEFAULT_DIMS
-from mbo_utilities.arrays.features._dim_spec import DimensionSpecMixin
 from mbo_utilities.lazy_array import register_array_class
 from mbo_utilities.pipeline_registry import PipelineInfo, register_pipeline
 import contextlib
@@ -77,7 +76,7 @@ def _normalize_declared(value: str | Sequence[str]) -> tuple[str, ...]:
     return tuple(str(c).upper() for c in value)
 
 
-class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
+class NumpyArray(ReductionMixin, Shape5DMixin):
     """
     Lazy array wrapper for NumPy arrays and .npy files.
 
@@ -92,13 +91,19 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         or a path to a .npy file (memory-mapped for lazy loading).
     metadata : dict, optional
         Metadata dictionary. If not provided, basic metadata is inferred
-        from array shape. A ``"dims"`` key is treated as ``dims`` below.
+        from array shape. A ``"dims"`` or ``"dimension_names"`` key is
+        treated as ``dims`` below.
     dims : str or sequence of str, optional
         Axis order of the wrapped array (e.g. ``"TCYX"``, ``("Z","Y","X")``),
-        length must equal the array's ndim, chars from ``TCZYX``. The array
-        is canonicalized to 5D TCZYX. If omitted, inferred from rank:
-        3D=TYX, 4D=TZYX, 5D=TCZYX. Settable after construction via
-        ``arr.dims = ...`` or ``arr.metadata = {"dims": ...}``.
+        length should equal the array's ndim, chars from ``TCZYX``. The array
+        is canonicalized to 5D TCZYX. If omitted — or if the declared order is
+        unusable (wrong length, duplicate/unknown axis) — the axes are
+        chain-guessed from the rank and a warning is logged (never raises):
+        2D=YX, 3D=TYX, 4D=TZYX, 5D=TCZYX. Settable after construction via
+        ``arr.dims = ...``, ``arr.metadata = {"dims": ...}``, or
+        ``arr.metadata = {"dimension_names": [...]}`` (NGFF lowercase form).
+        ``imwrite`` uses whatever ``dims`` resolved to, so label channel-vs-Z
+        before writing if the rank guess is wrong.
     dim_order : str or sequence of str, optional
         Alias for ``dims`` (back-compat).
 
@@ -170,20 +175,19 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
             self._metadata = metadata
 
         # `dims` (preferred) / `dim_order` (alias) declare the axes of the
-        # wrapped array; metadata["dims"] is honored when neither is passed.
-        # The array is canonicalized to 5D TCZYX so .shape/.dims always report
-        # that layout, matching the rest of the codebase.
+        # wrapped array; metadata["dims"] or metadata["dimension_names"] are
+        # honored when neither is passed. Canonicalized to 5D TCZYX. An
+        # unusable declaration warns and chain-guesses by rank (never raises).
         declared = dims if dims is not None else dim_order
-        from_metadata = False
         if declared is None and isinstance(self._metadata, dict):
-            md_dims = self._metadata.get("dims")
-            if md_dims:
-                declared, from_metadata = md_dims, True
+            declared = self._metadata.get("dims") or self._metadata.get(
+                "dimension_names"
+            )
 
         self._source = source
         self._dims_inferred = declared is None
         self._target_dtype = None
-        self._apply_dim_order(declared, strict=not from_metadata)
+        self._apply_dim_order(declared)
         self._dtype = self.data.dtype
 
     PRIORITY = 50
@@ -196,14 +200,6 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         if (p.parent / "pmd_demixer.npy").is_file():
             return False  # PMD demixer arrays are not supported (legacy raises)
         return p.is_file()
-
-    @property
-    def shape(self) -> tuple[int, int, int, int, int]:
-        return self._shape5d()
-
-    @property
-    def ndim(self) -> int:
-        return 5
 
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         s = self._raw_shape
@@ -226,9 +222,7 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         self._target_dtype = np.dtype(dtype)
         return self
 
-    def _apply_dim_order(
-        self, declared: str | Sequence[str] | None, strict: bool = True
-    ) -> None:
+    def _apply_dim_order(self, declared: str | Sequence[str] | None) -> None:
         """Canonicalize ``self._source`` to 5D TCZYX given a declared axis order.
 
         ``declared`` describes the source axes (length == source.ndim). When
@@ -237,6 +231,7 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         dimension specs so the reactive metadata recomputes.
         """
         source = self._source
+        inferred = declared is None
         if declared is not None:
             declared = _normalize_declared(declared)
         else:
@@ -246,20 +241,29 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         if declared is not None:
             try:
                 data = _canonicalize_to_5d(source, declared)
-            except ValueError:
-                if strict:
-                    raise
-                logger.warning(
-                    "metadata dims %r do not match array shape %r; inferring",
-                    declared, source.shape,
+            except ValueError as e:
+                # never raise: warn and chain-guess by rank (YX/TYX/TZYX/TCZYX)
+                fallback = DEFAULT_DIMS.get(source.ndim)
+                log.get().warning(
+                    "dims %r unusable for shape %r (%s); inferring %s",
+                    tuple(declared), source.shape, e,
+                    "".join(fallback) if fallback else "?",
                 )
-                declared = DEFAULT_DIMS.get(source.ndim)
+                declared = fallback
                 data = _canonicalize_to_5d(source, declared) if declared else source
 
         self.data = data
         self._declared_dims = tuple(declared) if declared else None
         self._raw_shape = data.shape
         self.invalidate_dimension_specs()
+
+        # tell the user what was set, right when it happens
+        suffix = "  (pass dims= to override)" if inferred and source.ndim >= 3 else ""
+        log.get().info(
+            "dims %s -> %s  shape %s%s",
+            "".join(self._declared_dims) if self._declared_dims else "?",
+            "".join(DIMS), self._shape5d(), suffix,
+        )
 
     def __getitem__(self, item):
         # 5D TCZYX indexing translated onto the underlying array's stored
@@ -301,17 +305,13 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         chars from TCZYX). The array is re-canonicalized to 5D TCZYX, so
         reading ``.dims`` back returns the canonical order while ``.shape``
         places each source axis on T/C/Z accordingly. Reactive: downstream
-        metadata (dimension_specs, OME axes) recomputes.
+        metadata (dimension_specs, OME axes) recomputes. An unusable value
+        warns and chain-guesses by rank (never raises).
         """
         declared = _normalize_declared(value)
         if declared == self.dims:
             return  # canonical 5D echo (e.g. metadata round-trip); nothing to remap
-        if len(declared) != self._source.ndim:
-            raise ValueError(
-                f"dims {declared} length {len(declared)} does not match "
-                f"source ndim {self._source.ndim}"
-            )
-        self._apply_dim_order(declared, strict=True)
+        self._apply_dim_order(declared)
         self._dims_inferred = False
 
     @property
@@ -343,6 +343,7 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         """
         md = dict(self._metadata) if self._metadata is not None else {}
         md["dims"] = self.dims
+        md["dimension_names"] = [d.lower() for d in self.dims]  # NGFF alias
         md["num_timepoints"] = md.get("num_timepoints", self.shape[0])
         md.setdefault("nframes", md["num_timepoints"])  # suite2p alias
         md.setdefault("num_frames", md["num_timepoints"])  # legacy alias
@@ -355,9 +356,9 @@ class NumpyArray(ReductionMixin, DimensionSpecMixin, Shape5DMixin):
         if not isinstance(value, dict):
             raise TypeError(f"metadata must be a dict, got {type(value)}")
         value = dict(value)
-        # `dims` is owned by the dim-order machinery, not stored loose in the
-        # metadata dict, so the two never diverge.
-        declared = value.pop("dims", None)
+        # `dims` / `dimension_names` are owned by the dim-order machinery, not
+        # stored loose in the dict, so the labels and layout never diverge.
+        declared = value.pop("dims", None) or value.pop("dimension_names", None)
         self._metadata = value
         if declared is not None:
             self.dims = declared
