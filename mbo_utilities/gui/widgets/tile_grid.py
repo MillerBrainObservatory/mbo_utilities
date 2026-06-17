@@ -88,6 +88,20 @@ def _bin_index(centers: list[float], v: float | None) -> int:
     return int(np.argmin([abs(v - c) for c in centers]))
 
 
+def _index_centers(entries: list, idx_pos: int, stage_pos: int, n: int) -> list[float]:
+    """Representative stage coordinate for each integer tile index.
+
+    Averages the stage coordinate of every tile sharing an index; falls
+    back to the index itself when no stage coordinate is available (keeps
+    the z-block um readout working when digit indices drive placement).
+    """
+    centers = []
+    for i in range(n):
+        vals = [e[stage_pos] for e in entries if e[idx_pos] == i and e[stage_pos] is not None]
+        centers.append(sum(vals) / len(vals) if vals else float(i))
+    return centers
+
+
 def _unwrap(arr):
     """Peel display proxies (`_SqueezeSingletonDims`, `_ScrubTimingProxy`)
     so reads hit the real array with unmodified 5D indexing.
@@ -220,6 +234,7 @@ class TileGridViewer(Widget):
         self._sig: str | None = None
         self._grid: dict | None = None
         self._channel_names: list[str] = []
+        self._tile_labels: dict[int, str] = {}
 
         # source MIPs keyed by (ti, c, axis); oriented display thumbs and
         # GPU textures keyed by (ti, c, *plan_key) so changing orientation
@@ -263,25 +278,50 @@ class TileGridViewer(Widget):
 
         tiles = arr.tile_metadata or {}
         entries = []
+        # cell display label: the specimen_name grid token when present, else SPM##
+        self._tile_labels = {
+            int(ti): (
+                str(t.get("specimen_name"))
+                if t.get("specimen_name")
+                else f"SPM{int(t.get('specimen', ti)):02d}"
+            )
+            for ti, t in tiles.items()
+        }
         for ti, t in tiles.items():
             entries.append((
                 int(ti), int(t.get("specimen", ti)),
                 t.get("stage_x"), t.get("stage_y"), t.get("stage_z"),
+                t.get("tile_x"), t.get("tile_y"), t.get("tile_z"),
             ))
         if not entries:
             self._grid = None
             return False
 
-        cols = _cluster_axis([e[2] for e in entries])
-        rows = _cluster_axis([e[3] for e in entries])
-        zblocks = _cluster_axis([e[4] for e in entries])
-
         placed: dict[int, dict[tuple[int, int], tuple[int, int]]] = {}
-        for ti, spc, x, y, z in entries:
-            zi = _bin_index(zblocks, z)
-            ri = _bin_index(rows, y)
-            ci = _bin_index(cols, x)
-            placed.setdefault(zi, {})[(ri, ci)] = (ti, spc)
+        # digit-encoded grid (specimen_name trailing XYZ) is authoritative
+        # when present on every tile; else cluster stage coordinates.
+        use_digits = all(
+            e[5] is not None and e[6] is not None and e[7] is not None
+            for e in entries
+        )
+        if use_digits:
+            ncols = max(e[5] for e in entries) + 1
+            nrows = max(e[6] for e in entries) + 1
+            nz = max(e[7] for e in entries) + 1
+            cols = _index_centers(entries, 5, 2, ncols)
+            rows = _index_centers(entries, 6, 3, nrows)
+            zblocks = _index_centers(entries, 7, 4, nz)
+            for ti, spc, x, y, z, tx, ty, tz in entries:
+                placed.setdefault(int(tz), {})[(int(ty), int(tx))] = (ti, spc)
+        else:
+            cols = _cluster_axis([e[2] for e in entries])
+            rows = _cluster_axis([e[3] for e in entries])
+            zblocks = _cluster_axis([e[4] for e in entries])
+            for ti, spc, x, y, z, *_rest in entries:
+                zi = _bin_index(zblocks, z)
+                ri = _bin_index(rows, y)
+                ci = _bin_index(cols, x)
+                placed.setdefault(zi, {})[(ri, ci)] = (ti, spc)
 
         self._grid = {
             "cols": cols, "rows": rows, "zblocks": zblocks, "placed": placed,
@@ -649,20 +689,21 @@ class TileGridViewer(Widget):
                         draw_list.add_rect_filled(pos, cmax, dark)
                     if clicked:
                         self._jump_to_tile(ti)
+                    label = self._tile_labels.get(ti, f"SPM{spc:02d}")
                     if imgui.is_item_hovered():
-                        imgui.set_tooltip(f"SPM{spc:02d}  (tile {ti})")
+                        imgui.set_tooltip(f"{label}  (tile {ti})")
                     is_current = ti == cur_tile
                     draw_list.add_rect(
                         pos, cmax, yellow if is_current else grey,
                         thickness=3.0 if is_current else 1.0,
                     )
-                    self._draw_cell_label(draw_list, pos, spc)
+                    self._draw_cell_label(draw_list, pos, label)
         finally:
             imgui.pop_style_var(1)
             imgui.end_child()
 
-    def _draw_cell_label(self, draw_list, pos, spc: int) -> None:
-        txt = f"SPM{spc:02d}"
+    def _draw_cell_label(self, draw_list, pos, label: str) -> None:
+        txt = str(label)
         tw = imgui.calc_text_size(txt)
         bg = imgui.color_convert_float4_to_u32(imgui.ImVec4(0, 0, 0, 0.55))
         draw_list.add_rect_filled(

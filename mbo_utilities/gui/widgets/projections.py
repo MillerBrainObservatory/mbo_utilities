@@ -346,7 +346,11 @@ class ProjectionsViewer(Widget):
         cur_pos = tps.index(self._timepoint)
         if self._is_tiled:
             slider_label = "Tile##projections"
-            value_fmt = f"%d / {len(tps) - 1}  (SPM{tps[0]:02d}-{tps[-1]:02d})"
+            lo, hi = tps[0], tps[-1]
+            if isinstance(lo, int):
+                value_fmt = f"%d / {len(tps) - 1}  (SPM{lo:02d}-SPM{hi:02d})"
+            else:
+                value_fmt = f"%d / {len(tps) - 1}  ({lo}-{hi})"
         else:
             slider_label = "T##projections"
             value_fmt = f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})"

@@ -86,6 +86,12 @@ def _is_raw(arr: Any) -> bool:
     return str(getattr(arr, "kind", "") or "").lower() == "raw"
 
 
+def _tp_label(slot) -> str:
+    """Display label for a tiled projection slot: a specimen_name grid token
+    (string) as-is, else SPM## for a legacy integer slot."""
+    return f"SPM{slot:02d}" if isinstance(slot, int) else str(slot)
+
+
 def _build_projection_index(
     arr: Any, projections: dict | None,
 ) -> dict[int, dict[int, Path]]:
@@ -113,7 +119,7 @@ def _build_projection_index(
             key = raw_int if raw_mode else cv.get(raw_int, raw_int)
         else:
             key = raw_int
-        per_view_by_label.setdefault(key, {}).setdefault(label, {})[int(t)] = Path(path)
+        per_view_by_label.setdefault(key, {}).setdefault(label, {})[t] = Path(path)
 
     out: dict[int, dict[int, Path]] = {}
     for key, by_label in per_view_by_label.items():
@@ -428,7 +434,7 @@ def _get_filtered(
     if work is None:
         return None
     proj, factor = work
-    key = (int(view), int(tp), round(float(sigma), 3), int(kernel), factor)
+    key = (int(view), tp, round(float(sigma), 3), int(kernel), factor)
     cache = parent._iso_seg_filtered_cache
     if key in cache:
         try:
@@ -641,12 +647,12 @@ def _draw_display_controls(parent: Any) -> None:
         return
 
     try:
-        cur_idx = tps.index(int(parent._iso_seg_current_tp))
+        cur_idx = tps.index(parent._iso_seg_current_tp)
     except ValueError:
         cur_idx = 0
     label = "Tile:" if tiled else "Timepoint:"
     value_fmt = (
-        f"SPM{tps[cur_idx]:02d}  ({cur_idx + 1}/{len(tps)})"
+        f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
         if tiled
         else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
     )
@@ -769,7 +775,7 @@ def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float, raw_mode: bo
         label_text = f"VW{view:02d}"
     imgui.text_colored(imgui.ImVec4(*color), label_text)
 
-    tp = int(parent._iso_seg_current_tp)
+    tp = parent._iso_seg_current_tp
     sigma = float(iso._correct_gauss_sigma)
     kernel = int(iso._correct_gauss_kernel)
     threshold = float(iso._correct_segment_threshold)
