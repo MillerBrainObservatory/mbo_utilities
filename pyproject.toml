@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.2.6"
+version = "3.2.7"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -50,7 +50,7 @@ dependencies = [
 	"suite2p>=1.0.0.1",
 	"torch",
 	"torchvision",
-	"lbm_suite2p_python>=3.2.0",
+	"lbm_suite2p_python>=3.2.1",
 ]
 
 [project.scripts]
@@ -85,7 +85,7 @@ rastermap = [
     "rastermap",
 ]
 isoview = [
-    "isoview>=0.4.0",
+    "isoview>=0.4.1",
 ]
 hpc = [
     "submitit>=1.5.0",
