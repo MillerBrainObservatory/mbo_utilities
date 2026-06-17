@@ -133,13 +133,6 @@ class DimensionTag:
         stop_0 = self.stop if self.stop is not None else self.start
         return slice(start_0, stop_0, self.step if self.step != 1 else None)
 
-    @property
-    def size(self) -> int:
-        """number of elements in this range."""
-        if self.stop is None:
-            return 1
-        return len(range(self.start, self.stop + 1, self.step))
-
     @classmethod
     def from_dim_size(
         cls,
@@ -194,41 +187,6 @@ class DimensionTag:
 
         # non-uniform selection - use start-stop with step showing non-uniform
         return cls(definition, start=indices[0], stop=indices[-1], step=1)
-
-    @classmethod
-    def from_string(cls, s: str) -> "DimensionTag":
-        """parse from filename component.
-
-        examples:
-            "zplane01"      -> DimensionTag(start=1, stop=None)
-            "zplane01-14"   -> DimensionTag(start=1, stop=14)
-            "zplane01-14-2" -> DimensionTag(start=1, stop=14, step=2)
-        """
-        import re
-
-        # find matching tag definition
-        definition = None
-        for dim_char, tag_def in TAG_REGISTRY.items():
-            if s.startswith(tag_def.label):
-                definition = tag_def
-                s = s[len(tag_def.label) :]
-                break
-
-        if definition is None:
-            raise ValueError(f"unknown tag prefix in '{s}'")
-
-        # parse numbers
-        parts = s.split("-")
-        if len(parts) == 1:
-            return cls(definition, start=int(parts[0]), stop=None, step=1)
-        elif len(parts) == 2:
-            return cls(definition, start=int(parts[0]), stop=int(parts[1]), step=1)
-        elif len(parts) == 3:
-            return cls(
-                definition, start=int(parts[0]), stop=int(parts[1]), step=int(parts[2])
-            )
-        else:
-            raise ValueError(f"invalid tag format: '{s}'")
 
 
 class OutputFilename:
