@@ -539,6 +539,32 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                             imgui.tree_pop()
                 shown_keys.add("cameras")
 
+            # Views section (per-view XML metadata: VW00 / VW90)
+            views = metadata.get("views")
+            if views and isinstance(views, dict) and all(
+                isinstance(v, dict) for v in views.values()
+            ):
+                views_match = not _metadata_search_filter
+                if _metadata_search_filter:
+                    views_match = _matches_filter_recursive("views", views, _metadata_search_filter)
+
+                if views_match:
+                    imgui.spacing()
+                    imgui.text_colored(_TREE_NODE_COLOR, "Views")
+                    imgui.separator()
+                    for view_key, view_meta in sorted(views.items()):
+                        if _metadata_search_filter and not _matches_filter_recursive(str(view_key), view_meta, _metadata_search_filter):
+                            continue
+                        if _colored_tree_node(f"{view_key}##view_{view_key}"):
+                            for k, v in sorted(view_meta.items()):
+                                if _metadata_search_filter and not _matches_filter_recursive(k, v, _metadata_search_filter):
+                                    continue
+                                imgui.text_colored(_NAME_COLORS[0], k)
+                                imgui.same_line(value_col)
+                                imgui.text_colored(_VALUE_COLOR, fmt_multivalue(v))
+                            imgui.tree_pop()
+                shown_keys.add("views")
+
             # Tiles section (tiled acquisitions only)
             tiles = metadata.get("tiles")
             if tiles and isinstance(tiles, dict):
