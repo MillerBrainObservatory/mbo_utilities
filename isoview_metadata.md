@@ -1,6 +1,7 @@
 # isoview metadata resolution (fuse / bigstitcher)
 
 ## Current behavior (verified 2026-05)
+
 `multi_fuse` and `generate_bigstitcher_xml` resolve acquisition metadata
 (pixel_spacing_z, objective_mag, camera_view_map) via
 `read_all_xml_metadata(input_dir, specimen)` in `isoview/io.py`, which:
@@ -13,6 +14,7 @@ So it is **XML-sidecar-first, zarr-attributes-second** — it does *not*
 read metadata from the zarr data it is actually fusing first.
 
 ## Why "data-first" doesn't work for corrected trees today
+
 - The corrected `.ome.zarr` volumes carry **no `ome.isoview` block**
   (only standard OME-NGFF `version`/`multiscales`/`omero`).
 - The CORRECT step (`pipeline.py:_save_volume_file`) embeds an
@@ -24,6 +26,7 @@ read metadata from the zarr data it is actually fusing first.
   the XML branch always wins regardless.
 
 ## To make it data-first (isoview-side, two changes)
+
 1. CORRECT step: embed full `xml_metadata` (pixel_spacing_z,
    objective_mag, camera_view_map, wavelengths) into corrected zarrs'
    `ome.isoview`, like the FUSE step does.
@@ -37,6 +40,7 @@ self-describing; existing corrected trees still need their XML sidecars
 (or a one-time backfill).
 
 ## Files
+
 - `isoview/io.py` — `read_all_xml_metadata`, `read_isoview_zarr_attrs`
 - `isoview/pipeline.py:_save_volume_file` — CORRECT-step write (~L450-505)
 - `isoview/fusion.py` — FUSE-step write with `isoview_meta` (~L1140-1175)
