@@ -190,7 +190,15 @@ Standardized metadata handling with alias resolution across formats (ScanImage, 
 For the full design of the canonical / alias-aware / reactive metadata layer
 — how `array.dx` resolves any source's keys, the single place to add an
 alias, and how to wire it into a lazy array — see
-[Canonical Metadata Layer](dev/canonical_metadata.md).
+[Canonical Metadata Layer](canonical_metadata.md).
+
+```{toctree}
+---
+maxdepth: 1
+hidden:
+---
+Canonical Metadata Layer <canonical_metadata>
+```
 
 #### Parameter Registry
 
