@@ -22,10 +22,23 @@ mbo /path/to/data            # open specific file
 mbo /path/to/data --metadata # show only metadata
 ```
 
-<p align="center">
-  <img src="/_images/gui/readme/01_step_file_dialog.png" height="360" alt="File Selection" />
-  <img src="/_images/gui/readme/02_step_data_view.png" height="360" alt="Data Viewer" />
-</p>
+::::{grid} 1 1 2 2
+:gutter: 3
+
+:::{grid-item}
+```{image} /_images/gui/readme/01_step_file_dialog.png
+:alt: File selection dialog
+:width: 100%
+```
+:::
+
+:::{grid-item}
+```{image} /_images/gui/readme/02_step_data_view.png
+:alt: Data viewer
+:width: 100%
+```
+:::
+::::
 
 ## Convert
 

@@ -187,6 +187,11 @@ Each dialog type maintains its own last-used directory:
 
 Standardized metadata handling with alias resolution across formats (ScanImage, Suite2p, OME, TIFF tags).
 
+For the full design of the canonical / alias-aware / reactive metadata layer
+— how `array.dx` resolves any source's keys, the single place to add an
+alias, and how to wire it into a lazy array — see
+[Canonical Metadata Layer](dev/canonical_metadata.md).
+
 #### Parameter Registry
 
 Parameters are defined in `METADATA_PARAMS` with canonical names and aliases:
