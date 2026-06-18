@@ -463,11 +463,29 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
             except (ValueError, KeyError):
                 pass
 
+        # per-tile stride in um/tile step, e.g. "400_300_200"
+        if "tile_stride_xyz_um" in a:
+            meta["tile_stride_xyz_um"] = a["tile_stride_xyz_um"]
+            try:
+                sx, sy, sz = (
+                    float(v) for v in re.split(r"[_,]", a["tile_stride_xyz_um"])
+                )
+                meta["tile_stride_x"], meta["tile_stride_y"], meta["tile_stride_z"] = (
+                    sx, sy, sz,
+                )
+            except (ValueError, TypeError):
+                pass
+
     # tiled specimen_name "<prefix><X><Y><Z>" -> tile grid index per axis
     if "specimen_name" in meta:
         grid = _parse_tile_grid_position(str(meta["specimen_name"]))
         if grid is not None:
             meta["tile_name"], meta["tile_x"], meta["tile_y"], meta["tile_z"] = grid
+            # physical offset from the <prefix>000 tile = grid index * stride (um)
+            if {"tile_stride_x", "tile_stride_y", "tile_stride_z"} <= meta.keys():
+                meta["tile_offset_x"] = grid[1] * meta["tile_stride_x"]
+                meta["tile_offset_y"] = grid[2] * meta["tile_stride_y"]
+                meta["tile_offset_z"] = grid[3] * meta["tile_stride_z"]
 
     # detection_objective magnification: "SpecialOptics 16x/0.70" -> 16.0
     if "detection_objective" in meta:

@@ -1256,11 +1256,10 @@ def _setup_consolidation(
     pull physical scales from metadata. Returns ``(root, mags, dx, dy,
     dz, dt_s, out_path)`` used by both per-kind consolidators."""
     _nt, _nc, nz, ny, nx = iso.shape
-    md = iso.metadata
-    dx = float(md.get("dx", 1.0))
-    dy = float(md.get("dy", 1.0))
-    dz = float(md.get("dz", 1.0))
-    fs = float(md.get("fs", 1.0))
+    dx = float(iso.dx or 1.0)
+    dy = float(iso.dy or 1.0)
+    dz = float(iso.dz or 1.0)
+    fs = float(iso.fs or 1.0)
     dt_s = 1.0 / fs if fs > 0 else 1.0
 
     if pyramid:
