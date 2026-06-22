@@ -1592,55 +1592,6 @@ def _write_volumetric_zarr(
         "multiscales": multiscales,
     }
 
-    # 5D output gets an omero.channels block keyed off the source channel_names
-    # so napari-ome-zarr / OMERO readers can render each C entry as its own
-    # channel (label + window). The 4D path intentionally skips this — the
-    # existing _build_omero_metadata treats Z as channels, which is wrong for
-    # NGFF and would regress current 4D consumers.
-    if output_5d:
-        channel_names = metadata.get("channel_names") if metadata else None
-        if not channel_names or len(channel_names) < n_channels:
-            channel_names = [f"Channel {i + 1}" for i in range(n_channels)]
-        else:
-            channel_names = list(channel_names[:n_channels])
-
-        if np.issubdtype(data.dtype, np.integer):
-            info = np.iinfo(data.dtype)
-            data_min, data_max = float(info.min), float(info.max)
-        else:
-            data_min, data_max = 0.0, 1.0
-
-        default_colors = [
-            "00FF00", "FF0000", "0000FF", "FFFF00",
-            "FF00FF", "00FFFF", "FFFFFF",
-        ]
-        channels_block = [
-            {
-                "active": True,
-                "coefficient": 1.0,
-                "color": default_colors[i % len(default_colors)],
-                "family": "linear",
-                "inverted": False,
-                "label": str(channel_names[i]),
-                "window": {
-                    "end": data_max,
-                    "max": data_max,
-                    "min": data_min,
-                    "start": data_min,
-                },
-            }
-            for i in range(n_channels)
-        ]
-        ome_content["omero"] = {
-            "channels": channels_block,
-            "rdefs": {
-                "defaultT": 0,
-                "defaultZ": n_planes // 2,
-                "model": "color" if n_channels > 1 else "greyscale",
-            },
-            "version": "0.5",
-        }
-
     # set OME metadata on the group
     root.attrs["ome"] = ome_content
 

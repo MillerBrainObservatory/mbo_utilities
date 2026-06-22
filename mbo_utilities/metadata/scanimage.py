@@ -69,11 +69,6 @@ def is_piezo_stack(metadata: dict) -> bool:
     return detect_stack_type(metadata) in ("piezo", "pollen")
 
 
-def is_pollen_stack(metadata: dict) -> bool:
-    """Check if metadata indicates a pollen calibration stack (LBM + piezo)."""
-    return detect_stack_type(metadata) == "pollen"
-
-
 def get_saved_channel_ports(metadata: dict) -> dict[str, list[int]]:
     """
     Map AI port -> sorted list of saved channel indices on that port.
@@ -375,67 +370,6 @@ def get_frames_per_volume(metadata: dict) -> int | None:
     return stack_mgr.get("numFramesPerVolume")
 
 
-def compute_num_timepoints(total_frames: int, metadata: dict) -> int:
-    """
-    Compute number of timepoints from total frames and metadata.
-
-    Parameters
-    ----------
-    total_frames : int
-        Total frames counted from TIFF file(s).
-    metadata : dict
-        Metadata dict containing 'si' key.
-
-    Returns
-    -------
-    int
-        Number of timepoints (volumes).
-
-    Notes
-    -----
-    For LBM: each TIFF frame is one timepoint (z-planes interleaved as channels)
-    For piezo/pollen: total_frames // (numSlices * framesPerSlice), adjusted for averaging
-
-    Decision tree:
-    - LBM → num_timepoints = total_frames
-    - piezo/pollen with averaging → frames_per_volume = numSlices (1 saved frame per slice)
-    - piezo/pollen no averaging → frames_per_volume = numSlices * framesPerSlice
-    - single plane → num_timepoints = total_frames
-    """
-    stack_type = detect_stack_type(metadata)
-
-    if stack_type == "lbm":
-        # LBM: each frame in TIFF is one timepoint
-        return total_frames
-
-    if stack_type == "single_plane":
-        return total_frames
-
-    # piezo or pollen stack - both use piezo z-scanning
-    si = metadata.get("si", {})
-    stack_mgr = si.get("hStackManager", {})
-    scan2d = si.get("hScan2D", {})
-
-    num_slices = stack_mgr.get("numSlices", 1)
-    frames_per_slice = stack_mgr.get("framesPerSlice", 1)
-    log_avg_factor = scan2d.get("logAverageFactor", 1)
-
-    if log_avg_factor > 1:
-        # frames were averaged: 1 saved frame per slice
-        frames_per_volume = num_slices
-    elif frames_per_slice > 1:
-        # multiple frames per slice, no averaging
-        frames_per_volume = num_slices * frames_per_slice
-    else:
-        # single frame per slice
-        frames_per_volume = num_slices
-
-    if frames_per_volume <= 0:
-        return total_frames
-
-    return total_frames // frames_per_volume
-
-
 def get_roi_info(metadata: dict) -> dict:
     """
     Get ROI and FOV information from ScanImage metadata.
@@ -524,44 +458,6 @@ def get_frame_rate(metadata: dict) -> float | None:
         return round(1.0 / float(period), 2)
 
     return None
-
-
-def get_stack_info(metadata: dict) -> dict:
-    """
-    Get comprehensive stack information from metadata.
-
-    Parameters
-    ----------
-    metadata : dict
-        Metadata dict containing 'si' key.
-
-    Returns
-    -------
-    dict
-        Dictionary with stack parameters:
-        - stack_type: "lbm", "piezo", or "single_plane"
-        - num_zplanes: number of z-planes
-        - num_color_channels: number of color channels
-        - frames_per_slice: frames per z-slice
-        - log_average_factor: averaging factor
-        - dz: z-step size (None if unknown)
-        - fs: frame rate in Hz (None if unknown)
-        - roi info (num_rois, roi_width, roi_height, fov_x, fov_y)
-    """
-    info = {
-        "stack_type": detect_stack_type(metadata),
-        "num_zplanes": get_num_zplanes(metadata),
-        "num_color_channels": get_num_color_channels(metadata),
-        "frames_per_slice": get_frames_per_slice(metadata),
-        "log_average_factor": get_log_average_factor(metadata),
-        "dz": get_z_step_size(metadata),
-        "fs": get_frame_rate(metadata),
-    }
-
-    # add ROI info
-    info.update(get_roi_info(metadata))
-
-    return info
 
 
 def extract_roi_slices(metadata: dict) -> list[dict]:
