@@ -313,6 +313,39 @@ def _imwrite_base(
 
     ext_clean = ext.lower().lstrip(".")
 
+    # roi=0 ("split all") or roi=[...] ("these ROIs") means one output per
+    # ROI. The format writers below each operate on a single volume, so fan
+    # out here: recurse once per ROI into a roiNN/ subdir, then restore the
+    # original selection. roi=N (single int) falls through to a normal write.
+    _roi_sel = getattr(arr, "roi", None)
+    _split = isinstance(_roi_sel, (list, tuple)) or (
+        _roi_sel == 0 and getattr(arr, "num_rois", 1) > 1
+    )
+    if _split:
+        roi_indices = (
+            list(_roi_sel)
+            if isinstance(_roi_sel, (list, tuple))
+            else list(range(1, arr.num_rois + 1))
+        )
+        for r in roi_indices:
+            arr.roi = r
+            _imwrite_base(
+                arr,
+                outpath / f"roi{r:02d}",
+                planes=planes,
+                frames=frames,
+                channels=channels,
+                ext=ext,
+                overwrite=overwrite,
+                target_chunk_mb=target_chunk_mb,
+                progress_callback=progress_callback,
+                debug=debug,
+                show_progress=show_progress,
+                **kwargs,
+            )
+        arr.roi = _roi_sel
+        return outpath
+
     # get metadata
     md = dict(arr.metadata) if arr.metadata else {}
 
