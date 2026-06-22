@@ -145,7 +145,7 @@ def __getattr__(name):
 
     # File/folder selection (widgets -> imgui, wgpu)
     if name in ("select_folder", "select_files"):
-        from .gui.simple_selector import select_folder, select_files
+        from .gui.widgets.simple_selector import select_folder, select_files
         return select_folder if name == "select_folder" else select_files
 
     # Pipeline registry (triggers array module imports to register pipelines)
