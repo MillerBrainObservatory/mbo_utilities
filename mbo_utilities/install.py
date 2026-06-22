@@ -215,10 +215,10 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
     try:
         import torch
         version = torch.__version__
+        pytorch_cuda = getattr(torch.version, "cuda", None)
 
-        # check cuda availability
+        # gpu present and usable now
         if torch.cuda.is_available():
-            pytorch_cuda = torch.version.cuda
             device_name = torch.cuda.get_device_name(0)
             return FeatureStatus(
                 name="PyTorch",
@@ -227,13 +227,21 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
                 message=f"CUDA {pytorch_cuda}, {device_name}",
                 gpu_ok=True
             ), pytorch_cuda
-        # pytorch installed but no cuda
-        pytorch_cuda = getattr(torch.version, "cuda", None)
+        # cuda build installed but no gpu on this host (e.g. hpc login node)
+        if pytorch_cuda:
+            return FeatureStatus(
+                name="PyTorch",
+                status=Status.OK,
+                version=version,
+                message=f"CUDA {pytorch_cuda} build, no GPU on host",
+                gpu_ok=True
+            ), pytorch_cuda
+        # cpu-only build
         return FeatureStatus(
             name="PyTorch",
             status=Status.WARN,
             version=version,
-            message="CPU only (no CUDA)",
+            message="CPU-only build (no CUDA)",
             gpu_ok=False
         ), pytorch_cuda
     except ImportError:
@@ -350,6 +358,23 @@ def _check_suite2p() -> FeatureStatus:
         version=ver,
         message="ready"
     )
+
+
+def _check_pkg_version(import_name: str, dist_name: str, display: str) -> FeatureStatus:
+    """Report a package's version without importing it.
+
+    Uses find_spec/metadata so packages with noisy imports (e.g. suite2p's
+    pynwb warning) are never loaded.
+    """
+    import importlib.util
+    if importlib.util.find_spec(import_name) is None:
+        return FeatureStatus(name=display, status=Status.MISSING, message="not installed")
+    try:
+        from importlib.metadata import version
+        ver = version(dist_name)
+    except Exception:
+        ver = "installed"
+    return FeatureStatus(name=display, status=Status.OK, version=ver, message="ready")
 
 
 def _check_rastermap() -> FeatureStatus:
@@ -493,6 +518,8 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
     elif suite2p_status.status == Status.OK:
         suite2p_status.gpu_ok = pytorch_status.gpu_ok
     status.features.append(suite2p_status)
+    status.features.append(_check_pkg_version("suite2p", "suite2p", "Suite2p"))
+    status.features.append(_check_pkg_version("cellpose", "cellpose", "Cellpose"))
 
     _update(0.85, "Checking Rastermap...")
     status.features.append(_check_rastermap())
