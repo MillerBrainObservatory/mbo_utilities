@@ -15,6 +15,7 @@ from imgui_bundle import imgui, hello_imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.reader import MBO_AVAILABLE_FTYPES, imread
 from mbo_utilities.writer import imwrite
+from mbo_utilities.metadata import get_param
 from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_timepoint_selection, TimeSelection
 from mbo_utilities.preferences import get_last_dir, set_last_dir
@@ -528,20 +529,15 @@ _VIDEO_TEMPORAL_MODES = ["mean", "max", "std"]
 
 
 def _preview_fps(parent: Any) -> float | None:
-    """Look up sampling frequency from the loaded array, trying several sources."""
+    """Sampling frequency from the loaded array (arr.fs), else parent metadata."""
     try:
         data0 = parent.image_widget.data[0]
     except Exception:
         data0 = None
-    candidates = []
-    if data0 is not None:
-        candidates.append(getattr(data0, "fs", None))
-        md = getattr(data0, "metadata", None)
-        if isinstance(md, dict):
-            candidates.append(md.get("fs"))
+    candidates = [getattr(data0, "fs", None)]
     md = getattr(parent, "metadata", None)
     if isinstance(md, dict):
-        candidates.append(md.get("fs"))
+        candidates.append(get_param(md, "fs"))
     for v in candidates:
         try:
             f = float(v)

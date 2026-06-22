@@ -27,8 +27,6 @@ from mbo_utilities.metadata import (
     get_frames_per_slice,
     get_log_average_factor,
     get_z_step_size,
-    compute_num_timepoints,
-    get_stack_info,
 )
 
 
@@ -159,6 +157,54 @@ class TestGetParam:
         """dy can be extracted from pixel_resolution tuple."""
         meta = {"pixel_resolution": (0.5, 0.6)}
         assert get_param(meta, "dy") == 0.6
+
+
+class TestTransformAliases:
+    """Reciprocal transform aliases (finterval<->fs, XResolution<->dx)."""
+
+    def test_fs_from_finterval(self):
+        """ImageJ finterval (seconds) resolves to fs (Hz)."""
+        assert get_param({"finterval": 0.1}, "fs") == 10.0
+
+    def test_finterval_from_fs(self):
+        """fs resolves back to finterval."""
+        assert get_param({"fs": 10.0}, "finterval") == 0.1
+
+    def test_direct_value_wins_over_transform(self):
+        """A directly-stored fs beats deriving it from finterval."""
+        assert get_param({"fs": 30.0, "finterval": 0.1}, "fs") == 30.0
+
+    def test_rename_alias_still_wins_over_transform(self):
+        """frame_rate (rename alias) resolves before the finterval transform."""
+        assert get_param({"frame_rate": 7.5, "finterval": 0.1}, "fs") == 7.5
+
+    def test_dx_from_xresolution(self):
+        """TIFF XResolution (px/µm) resolves to dx (µm/px) via reciprocal."""
+        assert get_param({"XResolution": 2.0}, "dx") == 0.5
+
+    def test_no_recursion_when_neither_present(self):
+        """fs<->finterval are mutually derivable but must not infinite-loop."""
+        assert get_param({}, "fs", default=None) is None
+        assert get_param({}, "finterval", default=None) is None
+
+    def test_zero_finterval_does_not_crash(self):
+        """A zero interval can't be inverted; falls through to default."""
+        assert get_param({"finterval": 0.0}, "fs", default=None) is None
+
+    def test_normalize_emits_finterval_from_fs(self):
+        """normalize_metadata fans fs out to its finterval transform alias."""
+        meta = {"fs": 10.0}
+        normalize_metadata(meta)
+        assert meta["finterval"] == 0.1
+
+    def test_array_fs_resolves_finterval(self):
+        """arr.fs picks up an ImageJ finterval through the registry."""
+        import numpy as np
+        from mbo_utilities.arrays import NumpyArray
+
+        arr = NumpyArray(np.zeros((4, 1, 1, 8, 8), dtype=np.int16),
+                         metadata={"finterval": 0.25})
+        assert arr.fs == 4.0
 
 
 class TestVoxelSize:
@@ -427,102 +473,6 @@ class TestPiezoStackParams:
             }
         }
         assert get_z_step_size(meta) == 2.5
-
-
-class TestComputeNumTimepoints:
-    """Test num_timepoints calculation."""
-
-    def test_lbm_timepoints(self):
-        """LBM: each frame is one timepoint."""
-        meta = {
-            "si": {
-                "hChannels": {"channelSave": list(range(1, 15))}
-            }
-        }
-        assert compute_num_timepoints(100, meta) == 100
-
-    def test_piezo_no_averaging(self):
-        """Piezo without averaging."""
-        meta = {
-            "si": {
-                "hStackManager": {
-                    "enable": True,
-                    "numSlices": 10,
-                    "framesPerSlice": 5
-                },
-                "hScan2D": {"logAverageFactor": 1},
-                "hChannels": {"channelSave": 1}
-            }
-        }
-        # 50 frames per volume (10 slices * 5 frames/slice)
-        assert compute_num_timepoints(100, meta) == 2
-
-    def test_piezo_with_averaging(self):
-        """Piezo with frame averaging."""
-        meta = {
-            "si": {
-                "hStackManager": {
-                    "enable": True,
-                    "numSlices": 10,
-                    "framesPerSlice": 5
-                },
-                "hScan2D": {"logAverageFactor": 5},
-                "hChannels": {"channelSave": 1}
-            }
-        }
-        # with averaging: 1 saved frame per slice = 10 frames per volume
-        assert compute_num_timepoints(100, meta) == 10
-
-    def test_single_plane(self):
-        """Single plane: each frame is one timepoint."""
-        meta = {
-            "si": {
-                "hChannels": {"channelSave": 1},
-                "hStackManager": {"enable": False}
-            }
-        }
-        assert compute_num_timepoints(100, meta) == 100
-
-
-class TestGetStackInfo:
-    """Test comprehensive stack info extraction."""
-
-    def test_lbm_stack_info(self):
-        """Full info for LBM stack."""
-        meta = {
-            "si": {
-                "hChannels": {"channelSave": list(range(1, 15))},
-                "hScan2D": {
-                    "virtualChannelSettings__1": {"source": "AI0"},
-                    "logAverageFactor": 1
-                },
-                "hStackManager": {"framesPerSlice": 1}
-            }
-        }
-        info = get_stack_info(meta)
-        assert info["stack_type"] == "lbm"
-        assert info["num_zplanes"] == 14
-        assert info["num_color_channels"] == 1
-
-    def test_piezo_stack_info(self):
-        """Full info for piezo stack."""
-        meta = {
-            "si": {
-                "hChannels": {"channelSave": 1},
-                "hStackManager": {
-                    "enable": True,
-                    "numSlices": 17,
-                    "framesPerSlice": 10,
-                    "stackZStepSize": 2.5
-                },
-                "hScan2D": {"logAverageFactor": 1}
-            }
-        }
-        info = get_stack_info(meta)
-        assert info["stack_type"] == "piezo"
-        assert info["num_zplanes"] == 17
-        assert info["frames_per_slice"] == 10
-        assert info["dz"] == 2.5
 
 
 class TestRoiInfo:

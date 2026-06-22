@@ -139,6 +139,46 @@ class LazyArray:
         return self.dimension_specs.batch_dims
 
     @property
+    def num_timepoints(self) -> int:
+        """Number of timepoints (T), name-keyed via dimension_specs."""
+        return self.dimension_specs.num_timepoints
+
+    @property
+    def num_zplanes(self) -> int:
+        """Number of z-planes (Z), name-keyed via dimension_specs."""
+        return self.dimension_specs.num_zplanes
+
+    @property
+    def num_planes(self) -> int:
+        """Z-plane count; alias of num_zplanes (picks up subclass overrides)."""
+        return self.num_zplanes
+
+    @property
+    def dx(self) -> float:
+        """Pixel size in X from metadata (1.0 if unknown)."""
+        return self.dimension_specs.dx
+
+    @property
+    def dy(self) -> float:
+        """Pixel size in Y from metadata (1.0 if unknown)."""
+        return self.dimension_specs.dy
+
+    @property
+    def dz(self) -> float | None:
+        """Z-step size from metadata (None if no Z dim)."""
+        return self.dimension_specs.dz
+
+    @property
+    def fs(self) -> float | None:
+        """Frame rate in Hz from metadata (None if unknown)."""
+        return self.dimension_specs.fs
+
+    @property
+    def finterval(self) -> float | None:
+        """Frame interval in seconds (None if unknown)."""
+        return self.dimension_specs.finterval
+
+    @property
     def slider_dims(self) -> tuple[str, ...] | None:
         from mbo_utilities.arrays.features._dim_labels import get_slider_dims
 

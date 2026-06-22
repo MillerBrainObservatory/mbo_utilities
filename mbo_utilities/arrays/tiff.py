@@ -709,11 +709,6 @@ class TiffArray(TiffReaderMixin, ReductionMixin, Shape5DMixin):
         """True if this array represents multi-plane data."""
         return self._is_volumetric
 
-    @property
-    def num_planes(self) -> int:
-        """Number of Z-planes."""
-        return self._nz
-
     def _shape5d(self) -> tuple[int, int, int, int, int]:
         return (self._nframes, self._nc, self._nz, self._ly, self._lx)
 
@@ -1252,8 +1247,6 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, PhaseCorr
                         border=self.border,
                         use_fft=self.use_fft,
                     )
-                    # cache the computed shift so subsequent reads use same value
-                    self.phase_correction._computed_shift = offset
 
                 buf[idxs] = corrected
                 self._last_offset = offset

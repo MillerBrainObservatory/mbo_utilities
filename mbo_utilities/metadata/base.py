@@ -37,6 +37,13 @@ class MetadataParameter:
         Human-readable description of the parameter.
     label : str, optional
         Display label for GUI (e.g., "Frame Rate" for "fs").
+    transforms : dict, optional
+        Transform aliases: keys that hold a *converted* form of this value
+        (e.g. ImageJ ``finterval`` = 1/``fs``). Each value is a
+        ``(to_canonical, from_canonical)`` pair of callables — `get_param`
+        applies ``to_canonical`` on read, writers apply ``from_canonical``
+        to emit the alias. Distinct from `aliases`, which hold the value
+        verbatim.
     """
 
     canonical: str
@@ -46,6 +53,7 @@ class MetadataParameter:
     default: Any = None
     description: str = ""
     label: str = ""
+    transforms: dict[str, tuple] = field(default_factory=dict)
 
 
 class VoxelSize(NamedTuple):
@@ -127,6 +135,14 @@ class VoxelSize(NamedTuple):
         return result
 
 
+def _reciprocal(value: Any) -> float:
+    """Convert between a rate and its interval (fs <-> finterval, px/µm <-> µm/px)."""
+    v = float(value)
+    if v == 0:
+        raise ZeroDivisionError("cannot invert a zero-valued metadata field")
+    return 1.0 / v
+
+
 # metadata params registry
 # dimensions: TZYX (4D), TYX (3D), or YX (2D)
 METADATA_PARAMS: dict[str, MetadataParameter] = {
@@ -138,7 +154,6 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "PhysicalSizeX",
             "pixelResolutionX",
             "pixel_size_x",
-            "XResolution",
             "pixel_resolution_um",
         ),
         dtype=float,
@@ -146,6 +161,8 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default=1.0,
         description="Pixel size in X dimension (µm/pixel)",
         label="Pixel Size X",
+        # TIFF/ImageJ XResolution is pixels-per-µm, the inverse of dx
+        transforms={"XResolution": (_reciprocal, _reciprocal)},
     ),
     "dy": MetadataParameter(
         canonical="dy",
@@ -154,13 +171,13 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "PhysicalSizeY",
             "pixelResolutionY",
             "pixel_size_y",
-            "YResolution",
         ),
         dtype=float,
         unit="µm",
         default=1.0,
         description="Pixel size in Y dimension (µm/pixel)",
         label="Pixel Size Y",
+        transforms={"YResolution": (_reciprocal, _reciprocal)},
     ),
     "dz": MetadataParameter(
         canonical="dz",
@@ -168,9 +185,12 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "Dz",
             "PhysicalSizeZ",
             "z_step",
+            "z_step_um",
             "spacing",
             "pixelResolutionZ",
             "ZResolution",
+            "axial_step",
+            "axial_step_um",
         ),
         dtype=float,
         unit="µm",
@@ -183,6 +203,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         canonical="fs",
         aliases=(
             "frame_rate",
+            "framerate",
             "fr",
             "sampling_frequency",
             "frameRate",
@@ -194,6 +215,8 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default=None,
         description="Frame rate / sampling frequency (Hz)",
         label="Frame Rate",
+        # ImageJ/Fiji store the per-frame interval (seconds); fs = 1/finterval
+        transforms={"finterval": (_reciprocal, _reciprocal)},
     ),
     # volumes per second (for volumetric imaging like IsoView)
     "vps": MetadataParameter(
@@ -219,6 +242,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
         default=None,
         description="Frame interval in seconds (1/fs). Used by ImageJ/Fiji.",
         label="Frame Interval",
+        transforms={"fs": (_reciprocal, _reciprocal)},
     ),
     # image dimensions (pixels)
     "Lx": MetadataParameter(

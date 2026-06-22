@@ -197,7 +197,7 @@ class ZarrArray(ReductionMixin, Shape5DMixin):
 
         Notes
         -----
-        Deprecated: use `stats` property instead which returns a StatsFeature.
+        Deprecated: use the `stats` property instead.
         """
         md = self.metadata
         if "zstats" in md:
@@ -521,7 +521,7 @@ def merge_zarr_zplanes(
         - use_fft : bool
         - register_z : bool
 
-        **OMERO rendering:**
+        **Channel metadata:**
         - channel_names : list of str
         - num_planes : int, number of channels/planes
 
