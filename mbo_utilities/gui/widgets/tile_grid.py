@@ -145,11 +145,14 @@ class TileGridViewer(Widget):
         # content flips (axis "X"=horizontal, "Y"=vertical) + rotation (90deg
         # CCW steps, 0-3), keyed by (camera index, tile index) so each camera
         # keeps its own orientation. Set per tile from its right-click menu;
-        # VW90 cameras are seeded with default H-flips (see _seed_default_flips).
+        # cameras are seeded with default orientation (see _seed_camera_defaults).
         self._tile_flips: dict[tuple, set] = {}
         self._tile_rot: dict[tuple, int] = {}
         self._flip_seeded: set = set()         # cameras whose defaults were applied
         self._tile_xyz: dict[int, tuple] = {}  # ti -> (tile_x, tile_y, tile_z)
+        # "Rotated" acquisitions mount every camera 90deg on its side, so each
+        # tile's content needs a default 90deg rotation to tile upright.
+        self._is_rotated: bool = False
         # tile whose rotate/flip menu is open (drawn top-level after the grid
         # child so the popup isn't clipped by the child's scroll rect).
         self._orient_menu_ti: "int | None" = None
@@ -214,6 +217,9 @@ class TileGridViewer(Widget):
         self._tile_xyz = {}
         self._pick = None
         self._channel_names = list(getattr(arr, "channel_names", []) or [])
+        self._is_rotated = str(
+            (getattr(arr, "metadata", {}) or {}).get("camera_orientation", "")
+        ).strip().lower() == "rotated"
         try:
             self._nplanes = max(1, int(arr.shape[2]))  # Z planes per tile
         except Exception:
@@ -481,6 +487,8 @@ class TileGridViewer(Widget):
             imgui.text_colored(_WHITE, f"{g['ntiles']} tiles")
             imgui.text_colored(_WHITE, f"grid: {ncols} x {nrows}")
             imgui.text_colored(_WHITE, f"z-blocks: {nz}")
+            if self._is_rotated:
+                imgui.text_colored(_WHITE, "rotated: 90deg seeded")
         finally:
             imgui.unindent(8)
 
@@ -623,13 +631,25 @@ class TileGridViewer(Widget):
         tiles to make the beads tile (verified); VW00 gets no default flip."""
         return self._camera_number(c) in (2, 3)
 
-    def _seed_default_flips(self, c: int) -> None:
-        """Apply a camera's default per-tile H-flips once. Seeds into
+    def _camera_default_rot(self, c: int) -> int:
+        """Rotated datasets mount every camera 90deg on its side, so every
+        tile's content needs a 90deg (CCW) rotation to tile upright. Verified
+        on VW00 by bead overlap cross-correlation; VW90 follows the same mount.
+        0 for Normal datasets."""
+        return 1 if self._is_rotated else 0
+
+    def _seed_camera_defaults(self, c: int) -> None:
+        """Apply a camera's default per-tile orientation once: a 90deg rotation
+        for Rotated datasets, plus the VW90 H-flips. Seeds into ``_tile_rot`` /
         ``_tile_flips`` so the user can still toggle them; re-applied after
         "Reset flips" (which clears the seeded marks)."""
         if c in self._flip_seeded:
             return
         self._flip_seeded.add(c)
+        rot = self._camera_default_rot(c)
+        if rot:
+            for ti in self._tile_xyz:
+                self._tile_rot[(c, ti)] = rot
         if not self._camera_default_hflip(c):
             return
         for ti, xyz in self._tile_xyz.items():
@@ -695,7 +715,7 @@ class TileGridViewer(Widget):
         ncols = max(1, len(g["cols"]))
         nrows = max(1, len(g["rows"]))
         c = self._c_index
-        self._seed_default_flips(c)  # apply per-camera default flips once
+        self._seed_camera_defaults(c)  # apply per-camera default orientation once
 
         _s, _sz, pix_xy, pix_z = self._mip_params(arr)
 
