@@ -123,7 +123,14 @@ def _auto_range(arr: np.ndarray) -> tuple[float, float]:
 
 
 def _to_rgba(arr: np.ndarray, cmap_name: str, lo: float, hi: float) -> np.ndarray:
-    a = np.asarray(arr, dtype=np.float32)
+    a = np.asarray(arr)
+    # pre-composed RGB(A) (e.g. a two-color overlay): upload as-is, no colormap
+    if a.ndim == 3 and a.shape[-1] in (3, 4):
+        if a.shape[-1] == 3:
+            alpha = np.full(a.shape[:2] + (1,), 255, dtype=np.uint8)
+            a = np.concatenate([a.astype(np.uint8), alpha], axis=-1)
+        return np.ascontiguousarray(a.astype(np.uint8))
+    a = a.astype(np.float32)
     span = max(hi - lo, 1e-12)
     n = np.clip((a - lo) / span, 0.0, 1.0)
     rgba = (Colormap(cmap_name)(n) * 255).astype(np.uint8)
@@ -148,7 +155,7 @@ class _GpuImage:
         self.cmap = cmap
         self.lo = lo
         self.hi = hi
-        self.h, self.w = arr.shape
+        self.h, self.w = arr.shape[:2]
         self._texture = None
         self._view = None
         self.ref = None
