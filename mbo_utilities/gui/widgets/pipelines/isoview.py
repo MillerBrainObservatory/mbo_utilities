@@ -91,6 +91,22 @@ def _input_w() -> float:
     return hello_imgui.em_size(8)
 
 
+# Compressor choices per output format. zarr uses chunked-codec names
+# io.write_volume maps to numcodecs; tif uses TIFF codec names. Fiji/
+# Bio-Formats can't read zstd-compressed TIFFs, so deflate leads the tif
+# list and is the default applied when the format switches to tif.
+_ZARR_CODECS = ["zstd", "gzip", "blosc-zstd", "blosc-lz4", "none"]
+_TIFF_CODECS = ["deflate", "zstd", "lzw", "lzma", "none"]
+
+
+def _codecs_for_format(fmt: str) -> list[str]:
+    return _TIFF_CODECS if fmt == "tif" else _ZARR_CODECS
+
+
+def _default_codec_for_format(fmt: str) -> str:
+    return "deflate" if fmt == "tif" else "zstd"
+
+
 # Worst-case label across all isoview sub-section boxes — used to size
 # columns so the right-aligned (?) tooltip marker never clips the right
 # edge. Update if a longer label is added.
@@ -170,6 +186,16 @@ _STITCHER_ORIENT_PROFILES: dict[str, dict] = {
     "none": {"rotations": [], "flips": []},
     "default": {"rotations": [("-", "X", 90), ("-", "Z", 90)], "flips": []},
     "rotated": {"rotations": [("-", "X", 90)], "flips": []},
+}
+
+# Default per-camera reorientation onto CM00 for a Normal acquisition, as
+# editable rotation/flip UI state (matches isoview _CAMERA_TO_CM00_NORMAL:
+# CM01 = flip X, CM02 = +90 about Y, CM03 = +90 about Y then flip Z). CM00 is
+# the reference (no transform). Pre-selected when raw/.corrected (per-camera).
+_CM_ALIGN_DEFAULT: dict[int, dict] = {
+    1: {"rotations": [], "flips": ["X"]},
+    2: {"rotations": [{"sign": "+", "axis": "Y", "deg": 90}], "flips": []},
+    3: {"rotations": [{"sign": "+", "axis": "Y", "deg": 90}], "flips": ["Z"]},
 }
 
 
@@ -312,6 +338,7 @@ def _available_modes(arr: Any) -> list[str]:
     if arr.kind == "raw":
         if has_pkg:
             modes.append(_MODE_CORRECT)
+            modes.append(_MODE_STITCHER)
     elif arr.kind == "corrected":
         if has_pkg:
             modes.append(_MODE_FUSE)
@@ -381,13 +408,36 @@ class IsoviewPipelineWidget(PipelineWidget):
         # each SPM's XML) as a per-tile Translation. Off by default — tiles
         # land at the world origin and you'd run BigStitcher's "Move Tiles
         # To Regular Grid" / registration instead.
-        self._stitcher_bake_tile_positions: bool = False
+        self._stitcher_bake_tile_positions: bool = True
 
-        # VW00 reorientation seed for the BigStitcher export (applied to
-        # VW00 only). Empty = no transform; seeded from a profile or edited
-        # by hand. Forwarded to generate_bigstitcher_xml(orientation=...).
-        self._stitcher_rotations: list[dict] = []
-        self._stitcher_flips: list[str] = []
+        # Reverse each tile's content in Z (camera scans -Z, so stored planes
+        # run opposite to the baked Z stride). On: adjacent z-blocks join
+        # contiguously (first plane of the lower block meets the last of the
+        # upper). Forwarded to generate_bigstitcher_xml(reverse_z=...).
+        self._stitcher_reverse_z: bool = True
+
+        # Per-camera export from .corrected (comma-separated CM indices, e.g.
+        # "0,2"). Empty = export fused VW00/VW90 pairs. Forwarded to
+        # generate_bigstitcher_xml(cameras=...).
+        self._stitcher_cameras: str = ""
+
+        # BDV zarr store version: 2 (gzip, classic chunks) or 3 (sharded +
+        # zstd, for the new BigStitcher ZarrV3 reader). Forwarded to
+        # generate_bigstitcher_xml(zarr_version=...).
+        self._stitcher_zarr_version: int = 2
+
+        # Per-target reorientation seeds for the BigStitcher export. Targets:
+        # "VW00"/"VW90" (view-level) and "CM00".."CM03" (per-camera overrides,
+        # for the .corrected per-camera export). Each value is
+        # {"rotations": [{sign,axis,deg}...], "flips": [axis...]}, composed to
+        # op-lists and forwarded as orientation / orientation_vw90 /
+        # camera_orientations.
+        self._stitcher_orient: dict[str, dict] = {}
+        self._stitcher_orient_target: str = "VW00"
+        # Global orientation profile (acquisition mounting), seeded from the
+        # XML camera_orientation and cascaded to every target. Per-target
+        # rotations/flips below override it.
+        self._stitcher_orient_profile: str = "default"
 
         # Per-step output suffix shared by correct/fuse/stitcher dirs.
         # Empty string yields the canonical names (.corrected, .fused,
@@ -424,6 +474,14 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._fuse_view_params: dict[int, dict] = {}
         self._fuse_view_ids: list[int] = []
         self._fuse_active_view: int | None = None
+
+        # Fuse background subtraction — dataset-wide (scalar ProcessingConfig
+        # fields, not per-view). "pooled" = one floor from both cameras
+        # (MATLAB dataType=0); "per_camera" = each camera's own floor
+        # (MATLAB dataType=1).
+        self._fuse_subtract_background: bool = True
+        self._fuse_background_mode: str = "pooled"
+        self._fuse_background_percentile: float = 5.0
 
         # Microscope override (all modes). -1 = auto from XML.
         self._mic_overrides_enabled: bool = False
@@ -553,6 +611,11 @@ class IsoviewPipelineWidget(PipelineWidget):
         else:
             self._output_dir = ""
 
+        # Seed the global BigStitcher orientation profile from the acquisition
+        # mounting (XML camera_orientation): Normal -> default, Rotated ->
+        # rotated. Cascades to every target; per-target edits override.
+        self._apply_orient_profile_all(self._metadata_orient_profile(arr))
+
         # auto-select the most natural mode for this kind
         modes = _available_modes(arr)
         if self._selected_mode not in modes:
@@ -617,7 +680,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         the variant is the Output-options field (empty -> bare ``.stitcher``).
         Matches isoview's ``derive_output_name(raw, ".stitcher", variant)``.
         Works without the raw root."""
-        tree = self._iso_input_tree(arr)
+        # raw datasets export straight from the acquisition root, which has
+        # no .corrected/.fused ancestor for _iso_input_tree to match.
+        if getattr(arr, "kind", None) == "raw":
+            tree = Path(arr.scan_root)
+        else:
+            tree = self._iso_input_tree(arr)
         if tree is None:
             return None
         stem = self._iso_raw_stem(tree)
@@ -847,6 +915,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         ])
         imgui.spacing()
         self._draw_popup_columns([
+            ("Background", self._draw_fuse_background_box),
             ("Registration search", self._draw_fuse_search_box, True),
             ("Acquisition (override XML)",
              self._draw_microscope_overrides_box, True),
@@ -931,72 +1000,177 @@ class IsoviewPipelineWidget(PipelineWidget):
             imgui.pop_style_color(3)
         return clicked
 
-    def _load_orient_profile(self, name: str) -> None:
-        """Seed the editable rotations + flips from a profile."""
+    def _orient_target_state(self, target: "str | None" = None) -> dict:
+        """Editable rotations/flips for one orientation target (lazy-init)."""
+        target = target or self._stitcher_orient_target
+        return self._stitcher_orient.setdefault(
+            target, {"rotations": [], "flips": []}
+        )
+
+    def _parse_stitcher_cameras(self) -> list:
+        """Camera indices from the Cameras field (e.g. '0,2' -> [0, 2])."""
+        return [
+            int(c) for c in self._stitcher_cameras.replace(",", " ").split()
+            if c.strip().isdigit()
+        ]
+
+    def _is_per_camera_export(self) -> bool:
+        """True when the export is per-camera (raw, or corrected with a Cameras
+        filter) rather than fused VW00/VW90 pairs."""
+        kind = getattr(self._get_array(), "kind", None)
+        if kind == "raw":
+            return True
+        if kind == "corrected":
+            return bool(self._parse_stitcher_cameras())
+        return False
+
+    def _orient_targets(self) -> list:
+        """Orientation targets. Per-camera (raw/.corrected): the cameras
+        themselves (CM00..CM03, or the Cameras filter). Fused: the views."""
+        if self._is_per_camera_export():
+            cams = self._parse_stitcher_cameras()
+            if not cams:
+                cams = [0, 1, 2, 3]  # raw exports all cameras by default
+            return [f"CM{c:02d}" for c in sorted(set(cams))]
+        return ["VW00", "VW90"]
+
+    def _metadata_orient_profile(self, arr: Any) -> str:
+        """Default orientation profile from the XML camera_orientation:
+        Normal -> 'default', Rotated -> 'rotated'. When the field is absent,
+        per-camera falls back to the Normal CM->CM00 alignment (prior
+        behaviour) and fused to 'none'."""
+        meta = getattr(arr, "metadata", None) or {}
+        co = str(meta.get("camera_orientation") or "").strip().lower()
+        if not co:
+            for v in (getattr(arr, "view_metadata", None) or {}).values():
+                c = str((v or {}).get("camera_orientation") or "").strip().lower()
+                if c:
+                    co = c
+                    break
+        if co == "normal":
+            return "default"
+        if co == "rotated":
+            return "rotated"
+        return "default" if self._is_per_camera_export() else "none"
+
+    def _apply_orient_profile_all(self, name: str) -> None:
+        """Seed every orientation target from the global profile.
+
+        Per-camera export: Normal applies the verified CM->CM00 alignment to
+        each camera (CM00 = reference); None/Rotated clear them (Rotated has
+        no built-in matrices — orient it in BigStitcher). Fused export: the
+        profile seeds VW00 (the profiles are VW00-defined); VW90 keeps its
+        own seed.
+        """
+        self._stitcher_orient_profile = name
+        if self._is_per_camera_export():
+            for cam in range(4):
+                seed = _CM_ALIGN_DEFAULT.get(cam) if name == "default" else None
+                st = self._orient_target_state(f"CM{cam:02d}")
+                st["rotations"] = (
+                    [dict(r) for r in seed["rotations"]] if seed else []
+                )
+                st["flips"] = list(seed["flips"]) if seed else []
+        else:
+            self._load_orient_profile(name, "VW00")
+
+    def _toggle_button_row(self, id_prefix, items, is_active, on_click) -> None:
+        """Selectable toggle buttons that wrap to the box width (no clipping).
+
+        ``items`` is a sequence of ``(key, label)``. Buttons flow left to
+        right and wrap to the next line when the next one would overrun the
+        box's content region, so a row never clips its last entry.
+        """
+        style = imgui.get_style()
+        right = imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
+        for i, (key, label) in enumerate(items):
+            w = imgui.calc_text_size(label).x + 2 * style.frame_padding.x
+            if i > 0:
+                nxt = imgui.get_item_rect_max().x + style.item_spacing.x + w
+                if nxt <= right:
+                    imgui.same_line()
+            if self._orient_toggle(f"{label}##{id_prefix}_{key}", is_active(key)):
+                on_click(key)
+
+    def _toggle_flip(self, st: dict, axis: str) -> None:
+        if axis in st["flips"]:
+            st["flips"].remove(axis)
+        else:
+            st["flips"].append(axis)
+
+    def _load_orient_profile(self, name: str, target: "str | None" = None) -> None:
+        """Seed the target's editable rotations + flips from a profile."""
         prof = _STITCHER_ORIENT_PROFILES.get(name, {"rotations": [], "flips": []})
-        self._stitcher_rotations = [
+        st = self._orient_target_state(target)
+        st["rotations"] = [
             {"sign": s, "axis": a, "deg": int(d)} for (s, a, d) in prof["rotations"]
         ]
-        self._stitcher_flips = list(prof["flips"])
+        st["flips"] = list(prof["flips"])
 
-    def _orient_profile_match(self) -> "str | None":
-        """Name of the profile matching the current edits, or None."""
-        cur_rot = [
-            (r["sign"], r["axis"], int(r["deg"])) for r in self._stitcher_rotations
-        ]
-        cur_flip = list(self._stitcher_flips)
-        for name, prof in _STITCHER_ORIENT_PROFILES.items():
-            if cur_rot == [tuple(x) for x in prof["rotations"]] and (
-                cur_flip == list(prof["flips"])
-            ):
-                return name
-        return None
-
-    def _compose_orientation_ops(self) -> list:
-        """VW00 orientation op list for generate_bigstitcher_xml.
+    def _compose_orientation_ops(self, target: "str | None" = None) -> list:
+        """Orientation op list for one target.
 
         Rotations (row order, innermost first) then flips. Rotation ->
         ["rot", axis, signed degrees]; flip -> ["flip", axis].
         """
+        st = self._orient_target_state(target)
         ops: list = []
-        for rot in self._stitcher_rotations:
+        for rot in st["rotations"]:
             deg = int(rot["deg"])
             if rot["sign"] == "-":
                 deg = -deg
             ops.append(["rot", rot["axis"], deg])
-        for axis in self._stitcher_flips:
+        for axis in st["flips"]:
             ops.append(["flip", axis])
         return ops
 
     def _draw_stitcher_orientation_box(self) -> None:
-        """VW00 reorientation for the export (applied to VW00 only).
+        """Reorientation for the export.
 
-        A profile seeds the editable rotations + flips below; tweak them
-        for one-offs. None = no transform (default).
+        Pick a global Profile (acquisition mounting) that cascades to every
+        target, then optionally select a target and fine-tune its rotations
+        + flips. Baked as an affine; BigStitcher interpolates it.
         """
-        _hint("Applied to VW00")
+        per_camera = self._is_per_camera_export()
+        targets = self._orient_targets()
+        if self._stitcher_orient_target not in targets:
+            self._stitcher_orient_target = targets[0] if targets else "VW00"
+
+        # PROFILE — global, above Target: it cascades to every target (seeded
+        # from the XML camera_orientation). Per-target edits below override it.
+        imgui.text("Profile")
+        self._toggle_button_row(
+            "orient_profile",
+            (("none", "None"), ("default", "Normal"), ("rotated", "Rotated")),
+            lambda name: self._stitcher_orient_profile == name,
+            lambda name: self._apply_orient_profile_all(name),
+        )
+        if per_camera:
+            _hint("Normal aligns CM01-03 onto CM00; None/Rotated clear them "
+                  "(orient in BigStitcher). Applies to every camera.")
+        else:
+            _hint("Seeds VW00; set VW90's ~90 below. Applies to the views.")
         imgui.spacing()
 
-        # Profile: load a preset into the editable controls below.
-        match = self._orient_profile_match()
-        imgui.align_text_to_frame_padding()
-        imgui.text("Profile")
-        imgui.same_line(hello_imgui.em_size(7))
-        for k, (name, label) in enumerate(
-            (("none", "None"), ("default", "Normal"), ("rotated", "Rotated"))
-        ):
-            if k > 0:
-                imgui.same_line()
-            if self._orient_toggle(f"{label}##orient_profile_{name}", match == name):
-                self._load_orient_profile(name)
+        # TARGET — which view/camera the rotations + flips below edit.
+        imgui.text("Target")
+        self._toggle_button_row(
+            "orient_target",
+            tuple((t, t) for t in targets),
+            lambda t: self._stitcher_orient_target == t,
+            lambda t: setattr(self, "_stitcher_orient_target", t),
+        )
         imgui.spacing()
+
+        cur = self._stitcher_orient_target
+        st = self._orient_target_state(cur)
 
         # Rotations — editable list seeded by the profile.
         imgui.text("Rotations")
         axes = ["X", "Y", "Z"]
         degs = ["90", "180", "270"]
         remove_idx = -1
-        for i, rot in enumerate(self._stitcher_rotations):
+        for i, rot in enumerate(st["rotations"]):
             imgui.push_id(i)
             if imgui.button(
                 f"{rot['sign']}##sign", imgui.ImVec2(hello_imgui.em_size(2.2), 0)
@@ -1022,55 +1196,84 @@ class IsoviewPipelineWidget(PipelineWidget):
                 remove_idx = i
             imgui.pop_id()
         if remove_idx >= 0:
-            del self._stitcher_rotations[remove_idx]
+            del st["rotations"][remove_idx]
         if imgui.small_button("+ add##orient_add_rot"):
-            self._stitcher_rotations.append({"sign": "-", "axis": "X", "deg": 90})
+            st["rotations"].append({"sign": "-", "axis": "X", "deg": 90})
         imgui.same_line()
         if imgui.small_button("clear##orient_clear_rot"):
-            self._stitcher_rotations = []
+            st["rotations"] = []
         imgui.spacing()
 
         # Flip — Horizontal/Vertical/Depth toggle = flip X/Y/Z.
-        imgui.align_text_to_frame_padding()
         imgui.text("Flip")
-        imgui.same_line(hello_imgui.em_size(7))
-        for k, (label, axis) in enumerate(
-            (("Horizontal (X)", "X"), ("Vertical (Y)", "Y"), ("Depth (Z)", "Z"))
-        ):
-            if k > 0:
-                imgui.same_line()
-            if self._orient_toggle(
-                f"{label}##orient_flip_{axis}", axis in self._stitcher_flips
-            ):
-                if axis in self._stitcher_flips:
-                    self._stitcher_flips.remove(axis)
-                else:
-                    self._stitcher_flips.append(axis)
+        self._toggle_button_row(
+            "orient_flip",
+            (("X", "Horizontal (X)"), ("Y", "Vertical (Y)"), ("Z", "Depth (Z)")),
+            lambda axis: axis in st["flips"],
+            lambda axis: self._toggle_flip(st, axis),
+        )
         imgui.spacing()
 
-        # Live summary of the composed VW00 transform.
-        ops = self._compose_orientation_ops()
-        if ops:
+        # Live summary of every target that has a transform.
+        any_set = False
+        for t in targets:
+            ops = self._compose_orientation_ops(t)
+            if not ops:
+                continue
+            any_set = True
             parts = []
             for op in ops:
-                if op[0] == "rot":
-                    parts.append(f"{op[2]:+d} {op[1]}")
-                else:
-                    parts.append(f"flip {op[1]}")
-            imgui.text_disabled("VW00: " + ", ".join(parts))
-        else:
-            imgui.text_disabled("VW00: no transform")
+                parts.append(
+                    f"{op[2]:+d} {op[1]}" if op[0] == "rot" else f"flip {op[1]}"
+                )
+            imgui.text_disabled(f"{t}: " + ", ".join(parts))
+        if not any_set:
+            imgui.text_disabled("no transforms")
 
     def _draw_stitcher_transforms_box(self) -> None:
         with tooltip_marks_right():
             _, self._stitcher_bake_tile_positions = imgui.checkbox(
-                "Bake tile stage positions",
+                "Bake tile positions",
                 self._stitcher_bake_tile_positions,
             )
             set_tooltip(
-                "Lay tiles out on the acquisition grid using stage "
-                "positions (stage_x/y/z from each SPM XML). Off: tiles "
-                "land at the origin."
+                "Lay tiles on the grid from the zarr metadata "
+                "(stride offset, else stage). Off: tiles land at the origin."
+            )
+
+            _, self._stitcher_reverse_z = imgui.checkbox(
+                "Reverse Z", self._stitcher_reverse_z,
+            )
+            set_tooltip(
+                "Join adjacent z-blocks contiguously (camera scans -Z)."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, self._stitcher_cameras = imgui.input_text(
+                "Cameras", self._stitcher_cameras,
+            )
+            set_tooltip(
+                "Per-camera export from .corrected, e.g. 0,2. "
+                "Empty: fused VW00/VW90."
+            )
+
+            zarr_versions = ["v2", "v3"]
+            zv_idx = 0 if self._stitcher_zarr_version == 2 else 1
+            imgui.set_next_item_width(_input_w())
+            changed, zv_idx = imgui.combo("Zarr version", zv_idx, zarr_versions)
+            if changed:
+                self._stitcher_zarr_version = 2 if zv_idx == 0 else 3
+            set_tooltip(
+                "v2: classic chunks + gzip. v3: sharded + zstd, for the "
+                "new BigStitcher ZarrV3 reader."
+            )
+
+            imgui.set_next_item_width(_input_w())
+            _, new_workers = imgui.input_int("Workers", self._workers, 1, 2)
+            self._workers = max(1, min(_MAX_WORKERS, new_workers))
+            set_tooltip(
+                "Parallel volume writers (threads). RAM-bound: each holds "
+                "one full camera volume + its pyramid."
             )
 
     def _draw_consolidate_io_box(self) -> None:
@@ -1122,6 +1325,40 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "gains taper past ~5."
             )
 
+    def _draw_codec_controls(self) -> None:
+        """Compressor + level for the active output format (zarr or tif).
+
+        klb carries its own codec, so nothing is shown for it. Called from
+        inside a ``tooltip_marks_right()`` block.
+        """
+        if self._output_format not in ("zarr", "tif"):
+            return
+        compressors = _codecs_for_format(self._output_format)
+        if self._compression not in compressors:
+            self._compression = compressors[0]
+        cidx = compressors.index(self._compression)
+        imgui.set_next_item_width(_input_w())
+        c_changed, c_new = imgui.combo("Compressor", cidx, compressors)
+        if c_changed:
+            self._compression = compressors[c_new]
+        if self._output_format == "tif":
+            set_tooltip(
+                "TIFF codec. deflate default; Fiji can't read zstd TIFFs."
+            )
+        else:
+            set_tooltip(
+                "Inner-chunk codec. zstd = best size/speed; "
+                "none = fastest writes, biggest files."
+            )
+
+        imgui.set_next_item_width(_input_w())
+        _, self._compression_level = imgui.input_int(
+            "Level", self._compression_level, 1, 1,
+        )
+        set_tooltip(
+            "0–9. Higher = smaller files, slower writes; gains taper past ~5."
+        )
+
     def _draw_correct_io_box(self) -> None:
         """Correct-mode I/O options for the Parameters popup. The
         ``output_suffix`` lives in the Run-tab Output section now;
@@ -1137,34 +1374,15 @@ class IsoviewPipelineWidget(PipelineWidget):
             changed, new_idx = imgui.combo("Format", idx, formats)
             if changed:
                 self._output_format = formats[new_idx]
+                self._compression = _default_codec_for_format(
+                    self._output_format
+                )
             set_tooltip(
                 "Container per (timepoint, camera). zarr = chunked + "
                 "pyramids; tif/klb for legacy tools."
             )
 
-            if self._output_format == "zarr":
-                compressors = ["zstd", "gzip", "blosc-zstd", "blosc-lz4", "none"]
-                try:
-                    cidx = compressors.index(self._compression)
-                except ValueError:
-                    cidx = 0
-                imgui.set_next_item_width(_input_w())
-                c_changed, c_new = imgui.combo("Compressor", cidx, compressors)
-                if c_changed:
-                    self._compression = compressors[c_new]
-                set_tooltip(
-                "Inner-chunk codec. zstd = best size/speed; "
-                "none = fastest writes, biggest files."
-            )
-
-                imgui.set_next_item_width(_input_w())
-                _, self._compression_level = imgui.input_int(
-                    "Level", self._compression_level, 1, 1,
-                )
-                set_tooltip(
-                    "0–9. Higher = smaller files, slower writes; "
-                    "gains taper past ~5."
-                )
+            self._draw_codec_controls()
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -1334,34 +1552,15 @@ class IsoviewPipelineWidget(PipelineWidget):
             changed, new_idx = imgui.combo("Format", idx, formats)
             if changed:
                 self._output_format = formats[new_idx]
+                self._compression = _default_codec_for_format(
+                    self._output_format
+                )
             set_tooltip(
                 "Container per (timepoint, camera). zarr = chunked + "
                 "pyramids; tif/klb for legacy tools."
             )
 
-            if self._output_format == "zarr":
-                compressors = ["zstd", "gzip", "blosc-zstd", "blosc-lz4", "none"]
-                try:
-                    cidx = compressors.index(self._compression)
-                except ValueError:
-                    cidx = 0
-                imgui.set_next_item_width(_input_w())
-                c_changed, c_new = imgui.combo("Compressor", cidx, compressors)
-                if c_changed:
-                    self._compression = compressors[c_new]
-                set_tooltip(
-                "Inner-chunk codec. zstd = best size/speed; "
-                "none = fastest writes, biggest files."
-            )
-
-                imgui.set_next_item_width(_input_w())
-                _, self._compression_level = imgui.input_int(
-                    "Level", self._compression_level, 1, 1,
-                )
-                set_tooltip(
-                "0–9. Higher = smaller files, slower writes; "
-                "gains taper past ~5."
-            )
+            self._draw_codec_controls()
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -1449,6 +1648,44 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "  1 = reference camera (cam0)\n"
                 "  2 = transformed camera (cam1)"
             )
+
+    def _draw_fuse_background_box(self) -> None:
+        self._draw_view_scope_badge("shared")
+        with tooltip_marks_right():
+            _, self._fuse_subtract_background = imgui.checkbox(
+                "Subtract background", self._fuse_subtract_background,
+            )
+            set_tooltip(
+                "Subtract an estimated background floor from both cameras "
+                "before blending.\nOff: keep raw intensities."
+            )
+
+            if self._fuse_subtract_background:
+                modes = ["pooled", "per_camera"]
+                try:
+                    idx = modes.index(self._fuse_background_mode)
+                except ValueError:
+                    idx = 0
+                imgui.set_next_item_width(_input_w())
+                changed, new_idx = imgui.combo("Mode", idx, modes)
+                if changed:
+                    self._fuse_background_mode = modes[new_idx]
+                set_tooltip(
+                    "  pooled      one floor from both cameras\n"
+                    "  per_camera  each camera subtracts its own floor — "
+                    "removes the seam when the two cameras sit on "
+                    "different baselines."
+                )
+
+                imgui.set_next_item_width(_input_w())
+                _, self._fuse_background_percentile = imgui.input_float(
+                    "Background pct", self._fuse_background_percentile,
+                    0.5, 5.0, "%.2f",
+                )
+                set_tooltip(
+                    "Percentile for the background floor (0–100).\n"
+                    "Raise if a dark haze remains; too high clips dim signal."
+                )
 
     def _draw_fuse_transforms_box(self) -> None:
         self._draw_view_scope_badge("per_view")
@@ -1608,6 +1845,24 @@ class IsoviewPipelineWidget(PipelineWidget):
             output_path=out_path,
         )
 
+    def _tile_spm_key(self, arr: Any, ti: Any) -> "str | int":
+        """The fused ``spm_key`` for tile index ``ti``.
+
+        Mirrors isoview's tiled naming: the ``specimen_name`` grid token
+        (e.g. ``"TL000"``) when it parses as a grid position, else the
+        integer specimen id (isoview formats that as ``SPM##``).
+        """
+        from mbo_utilities.arrays.isoview.array import _parse_tile_grid_position
+        tm = (getattr(arr, "tile_metadata", None) or {}).get(ti) or {}
+        name = tm.get("specimen_name")
+        if name and _parse_tile_grid_position(str(name)) is not None:
+            return str(name)
+        spc = tm.get("specimen", ti)
+        try:
+            return int(spc)
+        except (TypeError, ValueError):
+            return ti
+
     def _submit_stitcher(self, arr: Any) -> None:
         """Spawn ``generate_bigstitcher_xml`` against the loaded tree.
 
@@ -1623,11 +1878,14 @@ class IsoviewPipelineWidget(PipelineWidget):
         from mbo_utilities.arrays.isoview.array import _sibling_raw_root
 
         scan_root = Path(arr.scan_root)
+        input_dir: Path | None = None
+        # raw datasets export straight from the raw acquisition root.
+        if getattr(arr, "kind", None) == "raw":
+            input_dir = scan_root
         # Walk up from scan_root looking for a .corrected* or .fused* dir.
         # arr.scan_root for kind="fused" points at the method dir (e.g.
         # geometric) under <root>.fused/; for "corrected" it's the SPM##.
-        input_dir: Path | None = None
-        for ancestor in (scan_root, *scan_root.parents):
+        for ancestor in () if input_dir is not None else (scan_root, *scan_root.parents):
             n = ancestor.name
             for suf in (".corrected", ".fused"):
                 idx = n.find(suf)
@@ -1669,16 +1927,56 @@ class IsoviewPipelineWidget(PipelineWidget):
         # scan bare ".fused" instead of e.g. ".fused_v2" and find nothing.
         # stitcher_suffix names the output dir independently (so it can be
         # ".stitcher_default" while reading from ".fused").
+        cameras = self._parse_stitcher_cameras()
+        # raw datasets export per-camera with all cameras oriented onto CM00;
+        # corrected/fused keep reading the fused tree (unchanged).
+        source = "raw" if getattr(arr, "kind", None) == "raw" else "fused"
+        per_camera = self._is_per_camera_export()
+        cam_orient = None
+        orient_to_cm00 = True
+        if per_camera:
+            # GUI owns every exported camera's orientation (CM01-03 pre-aligned
+            # to CM00, CM00 = none); send all so what's shown is what's applied.
+            export_cams = cameras if cameras else [0, 1, 2, 3]
+            cam_orient = {
+                str(c): self._compose_orientation_ops(f"CM{c:02d}")
+                for c in export_cams
+            }
+            orient_to_cm00 = False
+        # Data-slicing → tile filter. For tiled trees the slicing T-axis is
+        # the tile (SPM) axis, so map the selected positions to the fused
+        # spm_key (specimen_name grid token, e.g. "TL000", else "SPM##") and
+        # pass them as included_tiles so the export skips the rest. A
+        # full-range selection returns None → export all tiles. Non-tiled
+        # trees have no tile/timepoint filter in isoview's export.
+        included_tiles = None
+        if bool(getattr(arr, "is_tiled", False)):
+            sel = self._selected_timepoints()
+            if sel is not None:
+                tps = list(getattr(arr, "_timepoints", []) or [])
+                included_tiles = [
+                    self._tile_spm_key(arr, tps[i])
+                    for i in sel if 0 <= i < len(tps)
+                ] or None
         args = {
             "input_path": str(input_dir),
             "method": method,
             "output_suffix": self._iso_tree_suffix(input_dir),
             "stitcher_suffix": self._stitcher_suffix,
             "bake_tile_positions": self._stitcher_bake_tile_positions,
-            "orientation": self._compose_orientation_ops(),
+            "orientation": self._compose_orientation_ops("VW00"),
+            "orientation_vw90": self._compose_orientation_ops("VW90"),
+            "camera_orientations": cam_orient,
             "overwrite": self._overwrite,
             "specimens": [int(specimen)],
             "timepoints": list(getattr(arr, "_timepoints", []) or []),
+            "included_tiles": included_tiles,
+            "cameras": cameras or None,
+            "source": source,
+            "orient_to_cm00": orient_to_cm00,
+            "reverse_z": self._stitcher_reverse_z,
+            "zarr_version": self._stitcher_zarr_version,
+            "workers": self._workers,
         }
         args.update(self._microscope_kwargs())
         self._spawn(
@@ -1887,6 +2185,10 @@ class IsoviewPipelineWidget(PipelineWidget):
             "pyramid": self._pyramid,
             "pyramid_max_layers": self._pyramid_max_layers,
             "output_suffix": (self._fuse_output_suffix or "").strip() or None,
+            # Background subtraction (dataset-wide, scalar config fields).
+            "subtract_background": bool(self._fuse_subtract_background),
+            "background_mode": self._fuse_background_mode,
+            "background_percentile": float(self._fuse_background_percentile),
             # Scalar defaults seeded from the active view — these name the
             # output sub-folder and serve as fall-throughs for any view
             # not present in the per-view dicts.
@@ -2331,6 +2633,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         """
         if getattr(arr, "kind", None) != "raw":
             return
+        # Segmentation drives correct_stack only; BigStitcher XML ignores it.
+        if self._selected_mode == _MODE_STITCHER:
+            return
         from mbo_utilities.gui.widgets import isoview_segment as seg_window
 
         imgui.text_colored(_SUBSECTION_COLOR, "Segmentation threshold")
@@ -2371,6 +2676,9 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_iso_deadpixel_readout(self, arr: Any) -> None:
         """Dead-pixel Run-tab block — raw only."""
         if getattr(arr, "kind", None) != "raw":
+            return
+        # Dead-pixel correction drives correct_stack only; XML ignores it.
+        if self._selected_mode == _MODE_STITCHER:
             return
         from mbo_utilities.gui.widgets import isoview_deadpixel as dp_window
 
@@ -2678,10 +2986,16 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.separator()
         imgui.spacing()
 
-        # DATA SLICING — restrict the run to a subset of timepoints.
-        self._draw_iso_data_slicing(max_frames)
-        imgui.separator()
-        imgui.spacing()
+        # DATA SLICING — restrict the run to a subset of timepoints (tiles
+        # for tiled trees). BigStitcher XML can only filter tiles, so hide
+        # the section there for non-tiled trees rather than show a no-op.
+        if not (
+            self._selected_mode == _MODE_STITCHER
+            and not bool(getattr(arr, "is_tiled", False))
+        ):
+            self._draw_iso_data_slicing(max_frames)
+            imgui.separator()
+            imgui.spacing()
 
         # CROP BOUNDS — corrected (fuse) only. Edit opens the floating
         # crop window. Mirrors the seg/dead-pixel readouts below.

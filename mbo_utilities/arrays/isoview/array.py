@@ -464,12 +464,13 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
                 pass
 
         # per-tile stride in um/tile step, e.g. "400_300_200"
-        if "tile_stride_xyz_um" in a:
-            meta["tile_stride_xyz_um"] = a["tile_stride_xyz_um"]
+        # microscope writes "tile_strides_xyz_um" (plural); older hand-injected
+        # files used the singular. Accept both.
+        _stride = a.get("tile_strides_xyz_um") or a.get("tile_stride_xyz_um")
+        if _stride:
+            meta["tile_stride_xyz_um"] = _stride
             try:
-                sx, sy, sz = (
-                    float(v) for v in re.split(r"[_,]", a["tile_stride_xyz_um"])
-                )
+                sx, sy, sz = (float(v) for v in re.split(r"[_,]", _stride))
                 meta["tile_stride_x"], meta["tile_stride_y"], meta["tile_stride_z"] = (
                     sx, sy, sz,
                 )
