@@ -486,8 +486,12 @@ class _ScrubTimingProxy:
         return getattr(self._wrapped, name)
 
 
-def _create_image_widget(data_array, widget: bool = True):
-    """Create fastplotlib ImageWidget with optional PreviewDataWidget."""
+def _create_image_widget(data_array, widget: bool = True, figure_kwargs_override=None):
+    """Create fastplotlib ImageWidget with optional PreviewDataWidget.
+
+    `figure_kwargs_override` replaces the auto-selected canvas/size dict (used by
+    scripts/capture_docs.py to build an offscreen viewer for headless capture).
+    """
     import copy
     import numpy as np
     import fastplotlib as fpl
@@ -515,7 +519,9 @@ def _create_image_widget(data_array, widget: bool = True):
     except Exception:
         pass
 
-    if RenderCanvas is not None:
+    if figure_kwargs_override is not None:
+        figure_kwargs = figure_kwargs_override
+    elif RenderCanvas is not None:
         # present_method="screen" renders the wgpu surface directly. The
         # "bitmap" method blits via QPainter inside paintEvent, which
         # re-enters during Qt's resize loop ("Recursive repaint detected",
@@ -1164,22 +1170,23 @@ def run_gui(
 
     Examples
     --------
-    From Python/Jupyter:
-    >>> from mbo_utilities.gui import run_gui
-    >>> # Option 1: Just show the GUI
-    >>> run_gui("path/to/data.tif")
-    >>> # Option 2: Get reference to manipulate it
-    >>> iw = run_gui("path/to/data.tif", roi=1, widget=False)
-    >>> iw.cmap = "viridis"  # Change colormap
-    >>> # Option 3: Just get file path from dialog
-    >>> path = run_gui(select_only=True)
-    >>> print(f"Selected: {path}")
+    From Python or Jupyter:
 
-    From command line:
-    $ mbo path/to/data.tif
-    $ mbo path/to/data.tif --roi 1 --no-widget
-    $ mbo path/to/data.tif --metadata-only
-    $ mbo --select-only  # Just open file dialog
+    >>> from mbo_utilities.gui import run_gui
+    >>> # just show the GUI
+    >>> run_gui("path/to/data.tif")
+    >>> # get a reference to manipulate it
+    >>> iw = run_gui("path/to/data.tif", roi=1, widget=False)
+    >>> iw.cmap = "viridis"
+    >>> # only return the path picked in the dialog
+    >>> path = run_gui(select_only=True)
+
+    From the command line::
+
+        mbo path/to/data.tif
+        mbo path/to/data.tif --roi 1 --no-widget
+        mbo path/to/data.tif --metadata-only
+        mbo --select-only
     """
     # resolve compute-GPU policy -> CUDA_VISIBLE_DEVICES before any torch/cupy
     # import or worker spawn; detached workers inherit this environment. Env

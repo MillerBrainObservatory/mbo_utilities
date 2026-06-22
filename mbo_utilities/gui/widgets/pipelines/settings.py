@@ -3565,7 +3565,11 @@ def _draw_section_suite2p_content(self):
     )
     imgui.spacing()
     imgui.spacing()
-    if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
+    # one-shot programmatic open, used by scripts/capture_docs.py
+    _force_settings = getattr(self, "_force_pipe_settings", False)
+    if _force_settings:
+        self._force_pipe_settings = False
+    if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)) or _force_settings:
         _popup_states["pipeline_settings"] = True
         self._pipe_settings_just_opened = True
         # NOTE: before_open() is called in the popup body below, not
@@ -4176,7 +4180,11 @@ def _draw_section_suite2p_content(self):
                 # and draw_boxed_label helper so the legend tracks palette
                 # tweaks automatically.
                 imgui.same_line()
-                if imgui.button("Legend##pipe_legend", imgui.ImVec2(_btn_w, 0)):
+                # one-shot programmatic open, used by scripts/capture_docs.py
+                _force_legend = getattr(self, "_force_pipe_legend", False)
+                if _force_legend:
+                    self._force_pipe_legend = False
+                if imgui.button("Legend##pipe_legend", imgui.ImVec2(_btn_w, 0)) or _force_legend:
                     imgui.open_popup("Legend##pipe_legend_popup")
                 if imgui.begin_popup("Legend##pipe_legend_popup"):
                     imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p parameter")

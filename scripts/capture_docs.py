@@ -1,605 +1,337 @@
+"""Capture documentation screenshots of the real Miller Brain Studio GUI.
+
+Every panel is captured from the actual running GUI, never a reconstruction.
+
+- Data-viewer panels (data view, save-as dialog, save options, metadata editor,
+  suite2p Run tab) render into an *offscreen* fastplotlib canvas; the composited
+  frame (scene + imgui overlay + popups) is read back pixel-perfect with no
+  display, focus, or screen-grab needed.
+- The two standalone imgui windows (file dialog, metadata inspector) use
+  hello_imgui's framebuffer screenshot and require a desktop session.
+
+Usage:
+  uv run scripts/capture_docs.py [DATA_PATH]
+
+DATA_PATH defaults to E:/demo/mk355/raw. Data-driven captures are skipped if it
+is missing; the file dialog still captures.
 """
-Script to capture and style screenshots for documentation.
-Usage: uv run scripts/capture_docs.py
-"""
+import sys
 import time
-import os
 from pathlib import Path
-from PIL import Image, ImageFilter, ImageOps
+
 import numpy as np
+from PIL import Image, ImageFilter
 
-from mbo_utilities.gui.run_gui import run_gui
-from mbo_utilities.gui._setup import get_default_ini_path
-from imgui_bundle import hello_imgui
-
-# Constants
 OUTPUT_DIR = Path("docs/_images/gui/readme")
-# Don't resize - keep original dimensions, just add shadow
+DEFAULT_DATA = Path(r"E:/demo/mk355/raw")
+
 PADDING = 30
 SHADOW_BLUR = 12
 SHADOW_OFFSET = (0, 8)
 SHADOW_OPACITY = 0.25
 
-def ensure_dirs():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def style_image(img: Image.Image, output_path: Path):
-    """Apply transparent padding and shadow to image and save."""
-    print(f"Styling and saving -> {output_path}")
-
-    # Convert to RGBA if needed
+    """Add transparent padding and a soft drop shadow, then save as PNG."""
     if img.mode != "RGBA":
         img = img.convert("RGBA")
 
-    # Keep original size - no resizing
-
-    # Add Shadow
     shadow_margin = SHADOW_BLUR * 2
-    bg_width = img.width + (PADDING * 2)
-    bg_height = img.height + (PADDING * 2)
-
-    final_img = Image.new("RGBA", (bg_width, bg_height), (0, 0, 0, 0))
+    final_img = Image.new("RGBA", (img.width + PADDING * 2, img.height + PADDING * 2), (0, 0, 0, 0))
     shadow = Image.new("RGBA", (img.width + shadow_margin, img.height + shadow_margin), (0, 0, 0, 0))
-    shadow_color = (0, 0, 0, int(255 * SHADOW_OPACITY))
-    shadow_draw = Image.new("RGBA", (img.width, img.height), shadow_color)
-    shadow.paste(shadow_draw, (shadow_margin//2, shadow_margin//2))
+    shadow_draw = Image.new("RGBA", (img.width, img.height), (0, 0, 0, int(255 * SHADOW_OPACITY)))
+    shadow.paste(shadow_draw, (shadow_margin // 2, shadow_margin // 2))
     shadow = shadow.filter(ImageFilter.GaussianBlur(SHADOW_BLUR))
 
-    shadow_x = PADDING + SHADOW_OFFSET[0] - (shadow_margin//2)
-    shadow_y = PADDING + SHADOW_OFFSET[1] - (shadow_margin//2)
-    final_img.paste(shadow, (shadow_x, shadow_y), shadow)
-
-    # 3. Paste Original Image
+    final_img.paste(
+        shadow,
+        (PADDING + SHADOW_OFFSET[0] - shadow_margin // 2, PADDING + SHADOW_OFFSET[1] - shadow_margin // 2),
+        shadow,
+    )
     final_img.paste(img, (PADDING, PADDING))
-
-    # Save
     final_img.save(output_path, "PNG")
+    print(f"  -> {output_path}")
+
+
+def _resolve_data_path(argv) -> Path | None:
+    if len(argv) > 1:
+        p = Path(argv[1])
+        if p.exists():
+            return p
+        print(f"given DATA_PATH not found: {p}")
+    if DEFAULT_DATA.exists():
+        return DEFAULT_DATA
+    return None
+
+
+# Offscreen viewer captures -------------------------------------------------
+# An offscreen canvas composites scene + imgui overlay + popups into a frame we
+# read back directly, so these need no display and are byte-for-byte the GUI.
+
+def _build_viewer(data_in: Path, size: tuple[int, int]):
+    from mbo_utilities.reader import imread
+    from mbo_utilities.arrays import normalize_roi
+    from mbo_utilities.gui.run_gui import _create_image_widget
+
+    arr = imread(data_in, roi=normalize_roi(None))
+    iw = _create_image_widget(
+        arr,
+        widget=True,
+        figure_kwargs_override={"canvas": "offscreen", "size": size},
+    )
+    gui = next((g for g in iw.figure.guis.values() if g is not None), None)
+    return iw, gui
+
+
+def _draw(iw, n: int):
+    """Pump n frames; return the last composited readback."""
+    frame = None
+    for _ in range(n):
+        frame = iw.figure.canvas.draw()
+    return frame
+
+
+def _save(frame, name: str):
+    arr = np.asarray(frame)[..., :3].copy()
+    style_image(Image.fromarray(arr), OUTPUT_DIR / name)
+
+
+def _shut(iw):
+    try:
+        iw.figure.canvas.close()
+    except Exception:
+        pass
+
+
+def capture_data_view(data_in: Path):
+    iw, _ = _build_viewer(data_in, (900, 600))
+    _save(_draw(iw, 10), "02_step_data_view.png")
+    _shut(iw)
+
+
+def capture_metadata_editor(data_in: Path):
+    iw, gui = _build_viewer(data_in, (900, 650))
+    _draw(iw, 5)
+    gui._show_metadata_popup = True
+    _save(_draw(iw, 8), "04_configurable_metadata.png")
+    _shut(iw)
+
+
+def _capture_save_options(data_in: Path, name: str, ext_idx: int | None = None,
+                          size: tuple[int, int] = (1000, 760)):
+    """Open Save As -> Options and snapshot it. ext_idx selects the output
+    format (0 .tiff, 1 .zarr, 2 .bin, 3 .h5, 4 .mp4), which changes the
+    format-specific options shown."""
+    iw, gui = _build_viewer(data_in, size)
+    _draw(iw, 5)
+    if ext_idx is not None:
+        gui._ext_idx = ext_idx
+    gui._saveas_popup_open = True
+    _draw(iw, 5)
+    gui._saveas_options_open = True
+    _save(_draw(iw, 8), name)
+    _shut(iw)
+
+
+def capture_save_options(data_in: Path):
+    _capture_save_options(data_in, "05_save_options.png")
+
+
+def capture_save_options_zarr(data_in: Path):
+    _capture_save_options(data_in, "08_save_options_zarr.png", ext_idx=1, size=(1000, 820))
+
+
+def capture_save_options_mp4(data_in: Path):
+    _capture_save_options(data_in, "09_save_options_mp4.png", ext_idx=4, size=(1000, 880))
+
+
+def capture_suite2p_settings(data_in: Path):
+    iw, gui = _build_viewer(data_in, (640, 820))
+    _draw(iw, 5)
+    gui._force_run_tab = True
+    _save(_draw(iw, 8), "06_suite2p_settings.png")
+    _shut(iw)
+
+
+def _capture_popup(data_in: Path, flag: str, name: str, size: tuple[int, int]):
+    """Set a one-shot popup flag on the side widget, then snapshot it."""
+    iw, gui = _build_viewer(data_in, size)
+    _draw(iw, 5)
+    setattr(gui, flag, True)
+    _save(_draw(iw, 8), name)
+    _shut(iw)
+
+
+def capture_keybinds(data_in: Path):
+    _capture_popup(data_in, "_show_keybinds_popup", "10_keybinds.png", (900, 700))
+
+
+def capture_process_console(data_in: Path):
+    _capture_popup(data_in, "_show_process_console", "11_process_console.png", (1000, 650))
+
+
+def capture_options(data_in: Path):
+    _capture_popup(data_in, "_show_options_popup", "12_options.png", (900, 700))
+
+
+def _set_s2p_demo_params(gui):
+    """Set a few Suite2p params to non-default values so the 'modified from
+    default' orange tint is visible in the captured settings panel."""
+    s = getattr(gui, "s2p", None)
+    if s is not None:
+        s.tau = 0.7
+        s.diameter_x = 6.0
+        s.diameter_y = 6.0
+
+
+def capture_suite2p_parameters(data_in: Path):
+    iw, gui = _build_viewer(data_in, (1180, 880))
+    # the offscreen imgui backend never registers the lazily-added bold font
+    # the settings popup uses; fall back to the default font for the capture.
+    gui._bold_font = None
+    _set_s2p_demo_params(gui)
+    _draw(iw, 5)
+    gui._force_run_tab = True
+    _draw(iw, 6)
+    gui._force_pipe_settings = True
+    _save(_draw(iw, 10), "07_suite2p_parameters.png")
+    _shut(iw)
+
+
+def capture_suite2p_legend(data_in: Path):
+    iw, gui = _build_viewer(data_in, (1180, 880))
+    gui._bold_font = None
+    _set_s2p_demo_params(gui)
+    _draw(iw, 5)
+    gui._force_run_tab = True
+    _draw(iw, 6)
+    gui._force_pipe_settings = True
+    _draw(iw, 6)
+    gui._force_pipe_legend = True
+    frame = _draw(iw, 8)
+    # the Legend popup renders at the top-left of the settings modal; crop to
+    # it so the small popup is legible as a standalone figure.
+    arr = np.asarray(frame)[8:300, 2:412, :3].copy()
+    style_image(Image.fromarray(arr), OUTPUT_DIR / "13_suite2p_legend.png")
+    _shut(iw)
+
+
+def capture_save_as_dialog(data_in: Path):
+    iw, gui = _build_viewer(data_in, (1000, 720))
+    _draw(iw, 5)
+    gui._saveas_popup_open = True
+    _save(_draw(iw, 8), "04_save_as_dialog.png")
+    _shut(iw)
+
+
+# Standalone imgui-window captures ------------------------------------------
+# These run a real hello_imgui app and screenshot its framebuffer; they need a
+# desktop session.
 
 def capture_file_dialog():
-    """Capture the file selection dialog."""
-    print("Capturing File Dialog (01)...")
+    from mbo_utilities.gui.run_gui import run_gui
+    from imgui_bundle import hello_imgui
 
-    start_time = time.time()
-    def post_draw():
+    start = time.time()
+
+    def pre_frame():
         if hello_imgui.get_runner_params().app_shall_exit:
             return
-
-        # Wait 12 seconds to ensure installation checks complete and UI stabilizes
-        if time.time() - start_time > 12.0:
-            # Request exit - screenshot is taken at exit
+        if time.time() - start > 12.0:
             hello_imgui.get_runner_params().app_shall_exit = True
 
     params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "MBO Utilities – Data Selection"
+    params.app_window_params.window_title = "Miller Brain Studio - Data Selection"
     params.app_window_params.window_geometry.size = (340, 620)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False
-
-    # Critical flags for capture
     params.fps_idling.enable_idling = False
-
-    params.callbacks.pre_new_frame = post_draw
+    params.callbacks.pre_new_frame = pre_frame
 
     run_gui(select_only=True, runner_params=params)
 
-    # Retrieve screenshot
-    screenshot = hello_imgui.final_app_window_screenshot()
-
-    if screenshot is not None and screenshot.size > 0:
-        img = Image.fromarray(screenshot)
-        style_image(img, OUTPUT_DIR / "01_step_file_dialog.png")
+    shot = hello_imgui.final_app_window_screenshot()
+    if shot is not None and shot.size > 0:
+        style_image(Image.fromarray(shot), OUTPUT_DIR / "01_step_file_dialog.png")
     else:
-        print("Failed to capture screenshot (empty buffer)")
+        print("  file dialog: empty screenshot buffer")
 
 
-def capture_data_view(data_path: Path):
-    """Capture the data view with loaded data."""
-    print(f"Capturing Data View (02) for {data_path}...")
-
+def capture_metadata_viewer(data_in: Path):
     from mbo_utilities.reader import imread
-    from mbo_utilities.gui.run_gui import _create_image_widget
-    from mbo_utilities.arrays import normalize_roi
-    import fastplotlib as fpl
-
-    # Load data
-    try:
-        data_array = imread(data_path, roi=normalize_roi(None))
-    except Exception as e:
-        print(f"Failed to load data from {data_path}: {e}")
-        return
-
-    # Create widget
-    iw = _create_image_widget(data_array, widget=True)
-
-    start_time = time.time()
-    state = {"captured": False}
-
-    def snapshot_callback():
-        # Resize window to appropriate size for screenshot
-        if not hasattr(snapshot_callback, "resized"):
-            try:
-                canvas = iw.figure.canvas
-                if "QRenderCanvas" in str(type(canvas)):
-                    win = canvas.window()
-                    # Landscape mode - reasonable size for data viewer
-                    win.resize(900, 600)
-                snapshot_callback.resized = True
-            except:
-                pass
-
-        if state["captured"]:
-            iw.close()
-            try:
-                fpl.loop.close()
-            except:
-                pass
-            return
-
-        # Wait for 5 seconds to load/render
-        if time.time() - start_time > 5.0:
-            print("Taking snapshot via screen grab...")
-            try:
-                canvas = iw.figure.canvas
-
-                # Check for PyQt6/Qt canvas
-                if "QRenderCanvas" in str(type(canvas)):
-                    from PyQt6.QtWidgets import QApplication
-                    from PyQt6.QtGui import QGuiApplication
-
-                    window = canvas.window()
-                    window.raise_()
-                    window.activateWindow()
-                    QApplication.instance().processEvents()
-
-                    screen = window.screen()
-                    if screen is None:
-                        screen = QGuiApplication.primaryScreen()
-
-                    pixmap = screen.grabWindow(window.winId())
-                    qimg = pixmap.toImage()
-
-                    # Convert QImage to PIL Image (Windows-compatible)
-                    qimg = qimg.convertToFormat(qimg.Format.Format_RGBA8888)
-                    width, height = qimg.width(), qimg.height()
-                    byte_count = qimg.sizeInBytes()
-                    ptr = qimg.bits()
-                    # On Windows, use constBits or convert via numpy
-                    arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4)).copy()
-                    pil_img = Image.fromarray(arr, "RGBA")
-                    style_image(pil_img, OUTPUT_DIR / "02_step_data_view.png")
-                    state["captured"] = True
-
-                    QApplication.instance().quit()
-                    return
-
-                # Fallback for non-Qt
-                snapshot = iw.figure.renderer.snapshot()
-                if snapshot is not None and snapshot.size > 0:
-                    img = Image.fromarray(snapshot)
-                    style_image(img, OUTPUT_DIR / "02_step_data_view.png")
-                    state["captured"] = True
-                else:
-                    print("Snapshot was empty/None")
-                    state["captured"] = True
-
-                iw.close()
-                try:
-                    fpl.loop.close()
-                except:
-                    pass
-
-            except Exception as e:
-                print(f"Snapshot failed: {e}")
-                state["captured"] = True  # Exit anyway
-                try:
-                    from PyQt6.QtWidgets import QApplication
-                    QApplication.instance().quit()
-                except Exception:
-                    pass
-
-    iw.figure.add_animations(snapshot_callback)
-    fpl.loop.run()
-
-
-def capture_metadata_viewer(data_path: Path):
-    """Capture the metadata viewer window."""
-    print(f"Capturing Metadata Viewer (03) for {data_path}...")
-
-    from mbo_utilities.reader import imread
-    from mbo_utilities.gui._widgets import draw_metadata_inspector
+    from mbo_utilities.gui._metadata import draw_metadata_inspector
     from mbo_utilities.gui._setup import get_default_ini_path
-    from imgui_bundle import immapp
+    from imgui_bundle import hello_imgui, immapp
 
-    # Load data to get metadata
-    try:
-        data_array = imread(data_path)
-        metadata = data_array.metadata
-        if not metadata:
-            print("No metadata found, skipping metadata viewer capture")
-            return
-    except Exception as e:
-        print(f"Failed to load data from {data_path}: {e}")
+    arr = imread(data_in)
+    metadata = arr.metadata
+    if not metadata:
+        print("  metadata viewer: no metadata, skipping")
         return
 
-    start_time = time.time()
+    start = time.time()
 
-    def gui_callback():
-        draw_metadata_inspector(metadata)
-
-    def post_draw():
+    def pre_frame():
         if hello_imgui.get_runner_params().app_shall_exit:
             return
-        # Wait 3 seconds for UI to stabilize
-        if time.time() - start_time > 3.0:
+        if time.time() - start > 3.0:
             hello_imgui.get_runner_params().app_shall_exit = True
 
     params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "MBO Metadata Viewer"
+    params.app_window_params.window_title = "Miller Brain Studio - Metadata"
     params.app_window_params.window_geometry.size = (500, 700)
     params.app_window_params.window_geometry.size_auto = False
     params.app_window_params.resizable = False
     params.ini_filename = get_default_ini_path("metadata_viewer")
     params.fps_idling.enable_idling = False
-    params.callbacks.show_gui = gui_callback
-    params.callbacks.pre_new_frame = post_draw
+    params.callbacks.show_gui = lambda: draw_metadata_inspector(metadata, arr)
+    params.callbacks.pre_new_frame = pre_frame
 
     addons = immapp.AddOnsParams()
     addons.with_markdown = True
-
     immapp.run(params, addons)
 
-    # Retrieve screenshot
-    screenshot = hello_imgui.final_app_window_screenshot()
-
-    if screenshot is not None and screenshot.size > 0:
-        img = Image.fromarray(screenshot)
-        style_image(img, OUTPUT_DIR / "03_metadata_viewer.png")
+    shot = hello_imgui.final_app_window_screenshot()
+    if shot is not None and shot.size > 0:
+        style_image(Image.fromarray(shot), OUTPUT_DIR / "03_metadata_viewer.png")
     else:
-        print("Failed to capture metadata viewer screenshot (empty buffer)")
-
-
-def capture_configurable_metadata(data_path: Path):
-    """Capture a standalone window showing configurable metadata with explanation."""
-    print(f"Capturing Configurable Metadata (04) for {data_path}...")
-
-    from mbo_utilities.reader import imread
-    from mbo_utilities.gui.feature_registry import get_feature
-    from imgui_bundle import imgui, immapp
-
-    # Load data to get required metadata fields
-    try:
-        data_array = imread(data_path)
-    except Exception as e:
-        print(f"Failed to load data from {data_path}: {e}")
-        return
-
-    # Get required metadata fields if available
-    required_fields = []
-    if hasattr(data_array, 'get_required_metadata'):
-        required_fields = data_array.get_required_metadata()
-
-    # Demo custom metadata entries
-    custom_metadata = {
-        "experiment_id": "exp_001",
-        "subject": "mouse_42",
-    }
-
-    feature = get_feature("configurable_metadata")
-    start_time = time.time()
-
-    def gui_callback():
-        imgui.set_next_window_pos(imgui.ImVec2(20, 20), imgui.Cond_.once)
-        imgui.set_next_window_size(imgui.ImVec2(460, 0), imgui.Cond_.once)
-
-        if imgui.begin("Configurable Metadata", None, imgui.WindowFlags_.always_auto_resize):
-            feature.draw_func(
-                required_fields=required_fields,
-                custom_metadata=custom_metadata,
-                show_header=True,
-                show_footer=True,
-            )
-        imgui.end()
-
-    def post_draw():
-        if hello_imgui.get_runner_params().app_shall_exit:
-            return
-        if time.time() - start_time > 2.5:
-            hello_imgui.get_runner_params().app_shall_exit = True
-
-    params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "MBO - Configurable Metadata"
-    params.app_window_params.window_geometry.size = (500, 520)
-    params.app_window_params.window_geometry.size_auto = False
-    params.app_window_params.resizable = False
-    params.ini_filename = get_default_ini_path("configurable_metadata")
-    params.fps_idling.enable_idling = False
-    params.callbacks.show_gui = gui_callback
-    params.callbacks.pre_new_frame = post_draw
-
-    addons = immapp.AddOnsParams()
-    addons.with_markdown = True
-
-    immapp.run(params, addons)
-
-    # Retrieve screenshot
-    screenshot = hello_imgui.final_app_window_screenshot()
-
-    if screenshot is not None and screenshot.size > 0:
-        img = Image.fromarray(screenshot)
-        style_image(img, OUTPUT_DIR / "04_configurable_metadata.png")
-    else:
-        print("Failed to capture configurable metadata screenshot (empty buffer)")
-
-
-def capture_save_options(data_path: Path):
-    """Capture a standalone window showing save-as options with explanations."""
-    print(f"Capturing Save Options (05) for {data_path}...")
-
-    from mbo_utilities.gui.feature_registry import get_feature
-    from imgui_bundle import imgui, immapp
-
-    feature = get_feature("save_options")
-    start_time = time.time()
-    state = {}  # Will use defaults from draw function
-
-    def gui_callback():
-        nonlocal state
-        imgui.set_next_window_pos(imgui.ImVec2(20, 20), imgui.Cond_.once)
-        imgui.set_next_window_size(imgui.ImVec2(480, 0), imgui.Cond_.once)
-
-        if imgui.begin("Save Options", None, imgui.WindowFlags_.always_auto_resize):
-            state = feature.draw_func(state=state, show_header=True, show_footer=True)
-        imgui.end()
-
-    def post_draw():
-        if hello_imgui.get_runner_params().app_shall_exit:
-            return
-        if time.time() - start_time > 2.5:
-            hello_imgui.get_runner_params().app_shall_exit = True
-
-    params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "MBO - Save Options"
-    params.app_window_params.window_geometry.size = (520, 520)
-    params.app_window_params.window_geometry.size_auto = False
-    params.app_window_params.resizable = False
-    params.ini_filename = get_default_ini_path("save_options")
-    params.fps_idling.enable_idling = False
-    params.callbacks.show_gui = gui_callback
-    params.callbacks.pre_new_frame = post_draw
-
-    addons = immapp.AddOnsParams()
-    addons.with_markdown = True
-
-    immapp.run(params, addons)
-
-    screenshot = hello_imgui.final_app_window_screenshot()
-
-    if screenshot is not None and screenshot.size > 0:
-        img = Image.fromarray(screenshot)
-        style_image(img, OUTPUT_DIR / "05_save_options.png")
-    else:
-        print("Failed to capture save options screenshot (empty buffer)")
-
-
-def capture_suite2p_settings():
-    """Capture a standalone window showing suite2p pipeline settings with explanations."""
-    print("Capturing Suite2p Settings (06)...")
-
-    from imgui_bundle import imgui, immapp
-    from mbo_utilities.gui.feature_registry import get_feature
-    from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
-
-    feature = get_feature("suite2p_settings")
-    start_time = time.time()
-    settings = Suite2pSettings()
-
-    def gui_callback():
-        nonlocal settings
-        imgui.set_next_window_pos(imgui.ImVec2(20, 20), imgui.Cond_.once)
-        imgui.set_next_window_size(imgui.ImVec2(500, 0), imgui.Cond_.once)
-
-        if imgui.begin("Suite2p Settings", None, imgui.WindowFlags_.always_auto_resize):
-            settings = feature.draw_func(settings=settings, show_header=True, show_footer=True)
-        imgui.end()
-
-    def post_draw():
-        if hello_imgui.get_runner_params().app_shall_exit:
-            return
-        if time.time() - start_time > 2.5:
-            hello_imgui.get_runner_params().app_shall_exit = True
-
-    params = hello_imgui.RunnerParams()
-    params.app_window_params.window_title = "MBO - Suite2p Settings"
-    params.app_window_params.window_geometry.size = (540, 620)
-    params.app_window_params.window_geometry.size_auto = False
-    params.app_window_params.resizable = False
-    params.ini_filename = get_default_ini_path("suite2p_settings")
-    params.fps_idling.enable_idling = False
-    params.callbacks.show_gui = gui_callback
-    params.callbacks.pre_new_frame = post_draw
-
-    addons = immapp.AddOnsParams()
-    addons.with_markdown = True
-
-    immapp.run(params, addons)
-
-    screenshot = hello_imgui.final_app_window_screenshot()
-
-    if screenshot is not None and screenshot.size > 0:
-        img = Image.fromarray(screenshot)
-        style_image(img, OUTPUT_DIR / "06_suite2p_settings.png")
-    else:
-        print("Failed to capture suite2p settings screenshot (empty buffer)")
-
-
-def capture_save_as_dialog(data_path: Path):
-    """Capture the save_as popup dialog from the data viewer."""
-    print(f"Capturing Save As Dialog (07) for {data_path}...")
-
-    from mbo_utilities.reader import imread
-    from mbo_utilities.gui.run_gui import _create_image_widget
-    from mbo_utilities.arrays import normalize_roi
-    import fastplotlib as fpl
-
-    # Load data
-    try:
-        data_array = imread(data_path, roi=normalize_roi(None))
-    except Exception as e:
-        print(f"Failed to load data from {data_path}: {e}")
-        return
-
-    # Create widget
-    iw = _create_image_widget(data_array, widget=True)
-
-    start_time = time.time()
-    state = {"popup_opened": False, "captured": False, "open_attempts": 0}
-
-    def snapshot_callback():
-        # Resize window first
-        if not hasattr(snapshot_callback, "resized"):
-            try:
-                canvas = iw.figure.canvas
-                if "QRenderCanvas" in str(type(canvas)):
-                    win = canvas.window()
-                    win.resize(900, 650)
-                snapshot_callback.resized = True
-            except:
-                pass
-
-        if state["captured"]:
-            iw.close()
-            try:
-                fpl.loop.close()
-            except:
-                pass
-            return
-
-        # After 2 seconds, start trying to open the save_as popup
-        # Keep trying every frame until it sticks (imgui popup needs multiple frames)
-        elapsed = time.time() - start_time
-        if elapsed > 2.0 and elapsed < 4.0:
-            try:
-                # Access the PreviewDataWidget via figure.guis (it's a dict keyed by edge location)
-                guis_dict = iw.figure.guis if hasattr(iw.figure, 'guis') else iw.figure._guis
-                for edge, gui in guis_dict.items():
-                    if gui is not None and hasattr(gui, '_saveas_popup_open'):
-                        # Set the flag every frame to ensure popup opens
-                        gui._saveas_popup_open = True
-                        if state["open_attempts"] == 0:
-                            print(f"Found gui at '{edge}': {type(gui).__name__}, setting _saveas_popup_open")
-                        state["open_attempts"] += 1
-                        state["popup_opened"] = True
-                        break
-                if not state["popup_opened"] and state["open_attempts"] == 0:
-                    print(f"No gui with _saveas_popup_open found. guis: {guis_dict}")
-            except Exception as e:
-                if state["open_attempts"] == 0:
-                    print(f"Failed to open save popup: {e}")
-
-        # After 4.5 seconds, take screenshot (give popup time to render)
-        if time.time() - start_time > 4.5 and not state["captured"]:
-            print("Taking snapshot with save_as dialog...")
-            try:
-                canvas = iw.figure.canvas
-
-                if "QRenderCanvas" in str(type(canvas)):
-                    from PyQt6.QtWidgets import QApplication
-                    from PyQt6.QtGui import QGuiApplication
-
-                    window = canvas.window()
-                    window.raise_()
-                    window.activateWindow()
-                    QApplication.instance().processEvents()
-
-                    screen = window.screen()
-                    if screen is None:
-                        screen = QGuiApplication.primaryScreen()
-
-                    pixmap = screen.grabWindow(window.winId())
-                    qimg = pixmap.toImage()
-
-                    qimg = qimg.convertToFormat(qimg.Format.Format_RGBA8888)
-                    width, height = qimg.width(), qimg.height()
-                    ptr = qimg.bits()
-                    arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4)).copy()
-                    pil_img = Image.fromarray(arr, "RGBA")
-                    style_image(pil_img, OUTPUT_DIR / "07_save_as_dialog.png")
-                    state["captured"] = True
-
-                    QApplication.instance().quit()
-                    return
-
-            except Exception as e:
-                print(f"Snapshot failed: {e}")
-                state["captured"] = True
-                try:
-                    from PyQt6.QtWidgets import QApplication
-                    QApplication.instance().quit()
-                except Exception:
-                    pass
-
-    iw.figure.add_animations(snapshot_callback)
-    fpl.loop.run()
+        print("  metadata viewer: empty screenshot buffer")
 
 
 if __name__ == "__main__":
-    ensure_dirs()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    data_in = _resolve_data_path(sys.argv)
 
-    data_path = Path(r"C:\Users\flynn\mbo\data\raw")
-
-    # Capture 1: File Dialog
+    # standalone imgui windows (need a desktop session)
+    print("file dialog (01)...")
     try:
         capture_file_dialog()
     except Exception as e:
-        print(f"File dialog capture failed: {e}")
+        print(f"  file dialog capture failed: {e}")
 
-    # Capture 2: Data View (if path exists)
-    if data_path.exists():
+    if data_in is None:
+        print(f"No data at {DEFAULT_DATA}; skipping data-driven captures.")
+        sys.exit(0)
+
+    print(f"data: {data_in}")
+    captures = [
+        ("data view (02)", capture_data_view),
+        ("metadata viewer (03)", capture_metadata_viewer),
+        ("metadata editor (04)", capture_metadata_editor),
+        ("save as dialog (04b)", capture_save_as_dialog),
+        ("save options (05)", capture_save_options),
+        ("suite2p settings (06)", capture_suite2p_settings),
+        ("suite2p parameters (07)", capture_suite2p_parameters),
+        ("save options zarr (08)", capture_save_options_zarr),
+        ("save options mp4 (09)", capture_save_options_mp4),
+        ("keybinds (10)", capture_keybinds),
+        ("process console (11)", capture_process_console),
+        ("options (12)", capture_options),
+        ("suite2p legend (13)", capture_suite2p_legend),
+    ]
+    for label, fn in captures:
+        print(f"{label}...")
         try:
-            capture_data_view(data_path)
+            fn(data_in)
         except Exception as e:
-            print(f"Data view capture failed: {e}")
-    else:
-        print(f"Skipping data view capture: {data_path} not found")
-
-    # Capture 3: Metadata Viewer
-    if data_path.exists():
-        try:
-            capture_metadata_viewer(data_path)
-        except Exception as e:
-            print(f"Metadata viewer capture failed: {e}")
-    else:
-        print(f"Skipping metadata viewer capture: {data_path} not found")
-
-    # Capture 4: Configurable Metadata
-    if data_path.exists():
-        try:
-            capture_configurable_metadata(data_path)
-        except Exception as e:
-            print(f"Configurable metadata capture failed: {e}")
-    else:
-        print(f"Skipping configurable metadata capture: {data_path} not found")
-
-    # Capture 5: Save Options
-    if data_path.exists():
-        try:
-            capture_save_options(data_path)
-        except Exception as e:
-            print(f"Save options capture failed: {e}")
-    else:
-        print(f"Skipping save options capture: {data_path} not found")
-
-    # Capture 6: Suite2p Settings
-    try:
-        capture_suite2p_settings()
-    except Exception as e:
-        print(f"Suite2p settings capture failed: {e}")
-
-    # Capture 7: Save As Dialog (full popup)
-    if data_path.exists():
-        try:
-            capture_save_as_dialog(data_path)
-        except Exception as e:
-            print(f"Save as dialog capture failed: {e}")
-    else:
-        print(f"Skipping save as dialog capture: {data_path} not found")
+            print(f"  {label} capture failed: {e}")

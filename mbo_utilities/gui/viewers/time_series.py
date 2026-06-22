@@ -63,7 +63,12 @@ class TimeSeriesViewer(BaseViewer):
                 self._has_pipeline = any_pipeline_available()
             if not self._has_pipeline:
                 imgui.begin_disabled()
-            if imgui.begin_tab_item("Run")[0]:
+            # one-shot programmatic focus, used by scripts/capture_docs.py
+            run_flags = imgui.TabItemFlags_.none
+            if getattr(self.parent, "_force_run_tab", False):
+                run_flags = imgui.TabItemFlags_.set_selected
+                self.parent._force_run_tab = False
+            if imgui.begin_tab_item("Run", None, run_flags)[0]:
                 imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
                 imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
                 try:
