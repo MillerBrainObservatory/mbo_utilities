@@ -30,6 +30,7 @@ from imgui_bundle import hello_imgui, icons_fontawesome_6 as fa, imgui
 from mbo_utilities.gui._imgui_helpers import (
     PopupAutoSize,
     draw_boxed_label,
+    selected_button_style,
     set_tooltip,
     text_wrapped_cell,
     tooltip_marks_right,
@@ -60,11 +61,12 @@ _BTN_W = 90
 # logical-CPU count so a fat-finger 32 can't slip in.
 _MAX_WORKERS = 16
 
-# Rough per-worker RAM as a multiple of one raw camera volume. Correction holds
-# the stack + a corrected copy + segmentation buffers (~3x); fusion holds two
-# camera volumes + two masks + the fused output (~6x, also used by the fuse
-# worker-count RAM cap below).
-_CORRECT_RAM_PER_WORKER_X = 3.0
+# Rough per-worker RAM as a multiple of one raw camera volume. Correction
+# promotes uint16->float32 and holds the stack + a corrected copy + segmentation
+# buffers, peaking ~5x one raw volume; fusion holds two camera volumes + two
+# masks + the fused output (~6x, also used by the fuse worker-count RAM cap
+# below).
+_CORRECT_RAM_PER_WORKER_X = 5.0
 _FUSE_RAM_PER_WORKER_X = 6.0
 
 
@@ -196,6 +198,16 @@ _CM_ALIGN_DEFAULT: dict[int, dict] = {
     1: {"rotations": [], "flips": ["X"]},
     2: {"rotations": [{"sign": "+", "axis": "Y", "deg": 90}], "flips": []},
     3: {"rotations": [{"sign": "+", "axis": "Y", "deg": 90}], "flips": ["Z"]},
+}
+
+# Per-camera CM->CM00 for a Rotated acquisition (every camera mounted 90deg on
+# its side). All three verified in the align widget: CM01 = flip Y, CM02 =
+# rot X -90, CM03 = rot X +90 then flip Y (the latter equals rot X -90 + flip Z
+# as a transform — same matrix, different op decomposition).
+_CM_ALIGN_DEFAULT_ROTATED: dict[int, dict] = {
+    1: {"rotations": [], "flips": ["Y"]},
+    2: {"rotations": [{"sign": "-", "axis": "X", "deg": 90}], "flips": []},
+    3: {"rotations": [{"sign": "+", "axis": "X", "deg": 90}], "flips": ["Y"]},
 }
 
 
@@ -415,6 +427,16 @@ class IsoviewPipelineWidget(PipelineWidget):
         # contiguously (first plane of the lower block meets the last of the
         # upper). Forwarded to generate_bigstitcher_xml(reverse_z=...).
         self._stitcher_reverse_z: bool = True
+
+        # Rotated only: rotate content upright to match the tile grid. Tilts the
+        # dataset vs world axes (BDV view-rotation swings it); off keeps cameras
+        # in CM00's native frame, orient the whole dataset in BigStitcher.
+        self._stitcher_upright: bool = True
+
+        # Link the existing .corrected zarrs in the dataset.xml instead of
+        # writing a converted copy (no conversion step). Forwarded to
+        # generate_bigstitcher_xml(link_existing=...).
+        self._stitcher_link_existing: bool = False
 
         # Per-camera export from .corrected (comma-separated CM indices, e.g.
         # "0,2"). Empty = export fused VW00/VW90 pairs. Forwarded to
@@ -988,17 +1010,8 @@ class IsoviewPipelineWidget(PipelineWidget):
 
     def _orient_toggle(self, label: str, active: bool, width: float = 0.0) -> bool:
         """Highlighted selection button; returns True when clicked."""
-        if active:
-            imgui.push_style_color(
-                imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
-            imgui.push_style_color(
-                imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
-            imgui.push_style_color(
-                imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
-        clicked = imgui.button(label, imgui.ImVec2(width, 0))
-        if active:
-            imgui.pop_style_color(3)
-        return clicked
+        with selected_button_style(active):
+            return imgui.button(label, imgui.ImVec2(width, 0))
 
     def _orient_target_state(self, target: "str | None" = None) -> dict:
         """Editable rotations/flips for one orientation target (lazy-init)."""
@@ -1015,23 +1028,25 @@ class IsoviewPipelineWidget(PipelineWidget):
         ]
 
     def _is_per_camera_export(self) -> bool:
-        """True when the export is per-camera (raw, or corrected with a Cameras
-        filter) rather than fused VW00/VW90 pairs."""
+        """True when the export is per-camera (raw, corrected with a Cameras
+        filter, or corrected linked in place) rather than fused VW00/VW90."""
         kind = getattr(self._get_array(), "kind", None)
         if kind == "raw":
             return True
         if kind == "corrected":
-            return bool(self._parse_stitcher_cameras())
+            return bool(self._parse_stitcher_cameras()) or self._stitcher_link_existing
         return False
 
     def _orient_targets(self) -> list:
-        """Orientation targets. Per-camera (raw/.corrected): the cameras
-        themselves (CM00..CM03, or the Cameras filter). Fused: the views."""
+        """Orientation targets. Per-camera (raw/.corrected): the views
+        themselves (VW00/VW90/VW180/VW270, or the Cameras filter). Fused: the
+        fused views."""
         if self._is_per_camera_export():
+            from mbo_utilities.arrays.isoview.array import camera_view_label
             cams = self._parse_stitcher_cameras()
             if not cams:
                 cams = [0, 1, 2, 3]  # raw exports all cameras by default
-            return [f"CM{c:02d}" for c in sorted(set(cams))]
+            return [camera_view_label(c) for c in sorted(set(cams))]
         return ["VW00", "VW90"]
 
     def _metadata_orient_profile(self, arr: Any) -> str:
@@ -1042,7 +1057,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         meta = getattr(arr, "metadata", None) or {}
         co = str(meta.get("camera_orientation") or "").strip().lower()
         if not co:
-            for v in (getattr(arr, "view_metadata", None) or {}).values():
+            for v in (getattr(arr, "camera_metadata", None) or {}).values():
                 c = str((v or {}).get("camera_orientation") or "").strip().lower()
                 if c:
                     co = c
@@ -1056,17 +1071,21 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _apply_orient_profile_all(self, name: str) -> None:
         """Seed every orientation target from the global profile.
 
-        Per-camera export: Normal applies the verified CM->CM00 alignment to
-        each camera (CM00 = reference); None/Rotated clear them (Rotated has
-        no built-in matrices — orient it in BigStitcher). Fused export: the
-        profile seeds VW00 (the profiles are VW00-defined); VW90 keeps its
-        own seed.
+        Per-camera export: Normal and Rotated each apply their verified
+        CM->CM00 alignment to every camera (CM00 = reference); None clears
+        them. Fused export: the profile seeds VW00 (the profiles are
+        VW00-defined); VW90 keeps its own seed.
         """
         self._stitcher_orient_profile = name
         if self._is_per_camera_export():
+            from mbo_utilities.arrays.isoview.array import camera_view_label
+            table = {
+                "default": _CM_ALIGN_DEFAULT,
+                "rotated": _CM_ALIGN_DEFAULT_ROTATED,
+            }.get(name)
             for cam in range(4):
-                seed = _CM_ALIGN_DEFAULT.get(cam) if name == "default" else None
-                st = self._orient_target_state(f"CM{cam:02d}")
+                seed = table.get(cam) if table else None
+                st = self._orient_target_state(camera_view_label(cam))
                 st["rotations"] = (
                     [dict(r) for r in seed["rotations"]] if seed else []
                 )
@@ -1146,8 +1165,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             lambda name: self._apply_orient_profile_all(name),
         )
         if per_camera:
-            _hint("Normal aligns CM01-03 onto CM00; None/Rotated clear them "
-                  "(orient in BigStitcher). Applies to every camera.")
+            _hint("Normal/Rotated align VW90/180/270 onto VW00; None clears "
+                  "them. Applies to every view.")
         else:
             _hint("Seeds VW00; set VW90's ~90 below. Applies to the views.")
         imgui.spacing()
@@ -1246,6 +1265,23 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
             set_tooltip(
                 "Join adjacent z-blocks contiguously (camera scans -Z)."
+            )
+
+            _, self._stitcher_upright = imgui.checkbox(
+                "Upright (rotated)", self._stitcher_upright,
+            )
+            set_tooltip(
+                "Rotated only: rotate content upright to match the tile grid. "
+                "Off keeps cameras in CM00's native frame (no tilt under view "
+                "rotation; orient in BigStitcher)."
+            )
+
+            _, self._stitcher_link_existing = imgui.checkbox(
+                "Link existing (.corrected)", self._stitcher_link_existing,
+            )
+            set_tooltip(
+                "Reference the .corrected zarrs in place, no conversion. "
+                "Much faster; .corrected only."
             )
 
             imgui.set_next_item_width(_input_w())
@@ -1931,15 +1967,22 @@ class IsoviewPipelineWidget(PipelineWidget):
         # raw datasets export per-camera with all cameras oriented onto CM00;
         # corrected/fused keep reading the fused tree (unchanged).
         source = "raw" if getattr(arr, "kind", None) == "raw" else "fused"
+        # link mode references the .corrected per-camera zarrs in place, so it
+        # uses the corrected per-camera discovery (not the fused tree).
+        if self._stitcher_link_existing and getattr(arr, "kind", None) == "corrected":
+            source = "corrected"
         per_camera = self._is_per_camera_export()
         cam_orient = None
         orient_to_cm00 = True
         if per_camera:
-            # GUI owns every exported camera's orientation (CM01-03 pre-aligned
-            # to CM00, CM00 = none); send all so what's shown is what's applied.
+            # GUI owns every exported camera's orientation (VW90/180/270
+            # pre-aligned to VW00, VW00 = none). Orientation state is keyed by
+            # VW label; the export's camera_orientations dict stays keyed by the
+            # camera index (the .stack file identity).
+            from mbo_utilities.arrays.isoview.array import camera_view_label
             export_cams = cameras if cameras else [0, 1, 2, 3]
             cam_orient = {
-                str(c): self._compose_orientation_ops(f"CM{c:02d}")
+                str(c): self._compose_orientation_ops(camera_view_label(c))
                 for c in export_cams
             }
             orient_to_cm00 = False
@@ -1975,6 +2018,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             "source": source,
             "orient_to_cm00": orient_to_cm00,
             "reverse_z": self._stitcher_reverse_z,
+            "upright": self._stitcher_upright,
+            "link_existing": self._stitcher_link_existing,
             "zarr_version": self._stitcher_zarr_version,
             "workers": self._workers,
         }
@@ -2041,7 +2086,9 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_worker_ram_estimate(self, per_worker_x: float) -> None:
         """Estimated-RAM line under the Workers control. Per-worker footprint is
         ~``per_worker_x`` x one raw camera volume; total = that x worker count.
-        Colored amber when it nears, red when it exceeds, machine RAM."""
+        Colored amber when it nears, red when it exceeds, *available* RAM —
+        compared against free memory (not total) so baseline usage counts, same
+        basis as ``_ram_capped_fuse_workers``."""
         vol_gb = getattr(self, "_iso_vol_gb", 0.0)
         if vol_gb <= 0:
             return
@@ -2049,20 +2096,20 @@ class IsoviewPipelineWidget(PipelineWidget):
         total = per_worker * max(1, self._workers)
         try:
             import psutil
-            total_ram = psutil.virtual_memory().total / (1024 ** 3)
+            avail_gb = psutil.virtual_memory().available / (1024 ** 3)
         except Exception:
-            total_ram = None
+            avail_gb = None
         label = f"~{total:.0f} GB RAM  ({per_worker:.1f} GB/worker x {self._workers})"
-        if total_ram is not None and total > total_ram:
+        if avail_gb is not None and total > avail_gb:
             imgui.text_colored(imgui.ImVec4(0.92, 0.32, 0.32, 1.0), label)
-        elif total_ram is not None and total > 0.8 * total_ram:
+        elif avail_gb is not None and total > 0.8 * avail_gb:
             imgui.text_colored(imgui.ImVec4(0.95, 0.75, 0.32, 1.0), label)
         else:
             imgui.text_disabled(label)
         set_tooltip(
             f"Rough estimate: each worker holds ~{per_worker_x:.0f}x one raw "
             f"camera volume ({vol_gb:.1f} GB)."
-            + (f" Machine RAM: {total_ram:.0f} GB." if total_ram is not None else "")
+            + (f" Free RAM: {avail_gb:.0f} GB." if avail_gb is not None else "")
         )
 
     def _ram_capped_fuse_workers(self, arr: Any, requested: int) -> int:
@@ -2838,10 +2885,13 @@ class IsoviewPipelineWidget(PipelineWidget):
             self._iso_selected_cameras = set(cams)
         imgui.spacing()
         imgui.text_colored(_SUBSECTION_COLOR, "Cameras")
-        set_tooltip("Process only the checked cameras.", align="right")
+        set_tooltip("Process only the checked views.", align="right")
+        from mbo_utilities.arrays.isoview.array import camera_view_label
         for i, c in enumerate(cams):
             checked = c in self._iso_selected_cameras
-            changed, new = imgui.checkbox(f"CM{c:02d}##iso_cam_{c}", checked)
+            changed, new = imgui.checkbox(
+                f"{camera_view_label(c)}##iso_cam_{c}", checked
+            )
             if changed:
                 if new:
                     self._iso_selected_cameras.add(c)
