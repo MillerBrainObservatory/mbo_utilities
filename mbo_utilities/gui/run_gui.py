@@ -779,6 +779,25 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
     except Exception as e:
         logger.debug(f"axial alignment skipped: {e}")
 
+    # offer scan-phase correction on any time-dimension array that lacks a
+    # native phase_correction feature (zarr, h5, npy, mp4, plain tiff). the
+    # wrap is transparent (disabled), so the GUI toggle flips it on/off without
+    # re-reading from disk, exactly like ScanImageArray's built-in control.
+    try:
+        if not hasattr(data_array, "phase_correction"):
+            from mbo_utilities.arrays import with_phasecorr
+
+            _s5 = (
+                data_array._shape5d()
+                if hasattr(data_array, "_shape5d")
+                else None
+            )
+            if _s5 and int(_s5[0]) > 1:
+                data_array = with_phasecorr(data_array)
+                logger.debug("scan-phase correction available (disabled)")
+    except Exception as e:
+        logger.debug(f"phasecorr wrap skipped: {e}")
+
     import fastplotlib as fpl
     t1 = _time.perf_counter()
     iw = _create_image_widget(data_array, widget=widget)
