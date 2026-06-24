@@ -1093,6 +1093,11 @@ class IsoviewPipelineWidget(PipelineWidget):
                 st["flips"] = list(seed["flips"]) if seed else []
         else:
             self._load_orient_profile(name, "VW00")
+            # VW90 has no fused profile (set manually). Clear it so a prior
+            # per-camera seed (e.g. rot X-90 on camera 2) can't leak into the
+            # fused export's orientation_vw90 and tilt it out of plane.
+            vw90 = self._orient_target_state("VW90")
+            vw90["rotations"], vw90["flips"] = [], []
 
     def _toggle_button_row(self, id_prefix, items, is_active, on_click) -> None:
         """Selectable toggle buttons that wrap to the box width (no clipping).
@@ -1291,9 +1296,14 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             imgui.set_next_item_width(_input_w())
-            _, self._stitcher_cameras = imgui.input_text(
+            prev_pc = self._is_per_camera_export()
+            ch_cam, self._stitcher_cameras = imgui.input_text(
                 "Cameras", self._stitcher_cameras,
             )
+            if ch_cam and self._is_per_camera_export() != prev_pc:
+                # entering/leaving per-camera switches the orientation targets;
+                # re-seed so the fused VW00 profile can't leak onto cam0.
+                self._apply_orient_profile_all(self._stitcher_orient_profile)
             set_tooltip(
                 "Per-camera export from .corrected, e.g. 0,2. "
                 "Empty: fused VW00/VW90."
