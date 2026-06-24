@@ -43,6 +43,7 @@ dependencies = [
 	"rendercanvas>=2.4.2,<2.5",
 	"imgui-bundle==1.92.5",
 	"wgpu>=0.28.1,<0.29",
+	"submitit>=1.5.0",
 ]
 
 [project.scripts]
@@ -106,9 +107,6 @@ notebooks = [
 isoview = [
     "isoview>=0.5.0",
 ]
-hpc = [
-    "submitit>=1.5.0",
-]
 docs = [
     "sphinx>=6.1.3",
     "docutils>=0.19",
@@ -129,11 +127,11 @@ docs = [
     "myst_nb",
     "pygfx>=0.14.0",
 ]
-all = ["mbo_utilities[suite2p,napari,notebooks,isoview,hpc]"]
+all = ["mbo_utilities[suite2p,napari,notebooks,isoview]"]
 
 [tool.uv]
 # repo dev env keeps the full stack so `uv run mbo` is unchanged.
-default-groups = ["dev", "isoview", "hpc", "suite2p", "napari", "notebooks"]
+default-groups = ["dev", "isoview", "suite2p", "napari", "notebooks"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -238,9 +236,6 @@ notebooks = [
     "ipywidgets>=8.0.0,<9",
     "jupyter_rfb>=0.5.1",
     "seaborn>=0.13.2",
-]
-hpc = [
-    "submitit>=1.5.0",
 ]
 dev = [
     "graphviz>=0.21",
