@@ -1,15 +1,16 @@
 """
 Schema lookup for upstream `suite2p.parameters.SETTINGS`.
 
-Single source of truth for parameter metadata (default, type, min/max,
-description, gui_name). The mbo dataclass `Suite2pSettings` flattens the
-upstream nested dict and renames a handful of fields for ergonomics; this
-module maps each mbo field name back to its upstream schema entry so we
-can:
-  - reset a value to the upstream default
+Source of truth for parameter metadata (type, min/max, description,
+gui_name). The mbo dataclass `Suite2pSettings` flattens the upstream nested
+dict and renames a handful of fields for ergonomics; this module maps each
+mbo field name back to its upstream schema entry so we can:
   - format a tooltip from the upstream description
-  - tell whether the current value matches the upstream default
   - color-code modified fields in the GUI
+
+Default *values* come from the mbo `Suite2pSettings` / `Suite2pDB` dataclass
+defaults (the values the GUI initializes to), not the upstream schema, so
+"default", "modified", and Reset all track those. See `get_default`.
 
 If suite2p adds or renames a parameter, this module is the only place
 that needs to change. When the parameter exists upstream but is renamed
@@ -387,11 +388,60 @@ def get_param_info(mbo_field: str) -> dict | None:
     return _resolve(root, path)
 
 
-def get_default(mbo_field: str) -> Any:
-    """Return upstream default for a mbo field, translating renamed/typed mbo fields.
+_MBO_DEFAULTS: dict[str, Any] | None = None
 
-    Returns None for mbo-only fields with no upstream equivalent.
+
+def _mbo_defaults() -> dict[str, Any]:
+    """Map every Suite2pSettings / Suite2pDB field to its dataclass default.
+
+    These are the values the GUI initializes to, so they define what
+    "default" (and therefore "modified") means in the run tab. Changing a
+    dataclass default propagates here automatically. Built once and cached;
+    imported lazily to avoid a settings.py <-> _s2p_schema.py import cycle.
     """
+    global _MBO_DEFAULTS
+    if _MBO_DEFAULTS is None:
+        import dataclasses as _dc
+        from mbo_utilities.gui.widgets.pipelines.settings import (
+            Suite2pDB,
+            Suite2pSettings,
+        )
+        out: dict[str, Any] = {}
+        for cls in (Suite2pSettings, Suite2pDB):
+            for f in _dc.fields(cls):
+                if f.default is not _dc.MISSING:
+                    out[f.name] = f.default
+        _MBO_DEFAULTS = out
+    return _MBO_DEFAULTS
+
+
+def _mbo_default(mbo_field: str) -> tuple[bool, Any]:
+    """(True, default) if the field has a dataclass default, else (False, None).
+
+    mbo-only fields are excluded so their existing schema-fallback behavior
+    is preserved.
+    """
+    if mbo_field in MBO_ONLY_FIELDS:
+        return False, None
+    defaults = _mbo_defaults()
+    if mbo_field in defaults:
+        return True, defaults[mbo_field]
+    return False, None
+
+
+def get_default(mbo_field: str) -> Any:
+    """Return the default for a mbo field.
+
+    The mbo Suite2pSettings / Suite2pDB dataclass default is the value the
+    GUI starts from, so it is "default" for the modified-params box, the
+    orange modified-tint, and the Reset button. Editing a dataclass default
+    therefore propagates to all three automatically. Fields with no dataclass
+    default fall back to the upstream suite2p schema; returns None for
+    mbo-only fields with no upstream equivalent.
+    """
+    found, val = _mbo_default(mbo_field)
+    if found:
+        return val
     entry = _entry_for(mbo_field)
     if entry is None:
         return None
@@ -415,7 +465,10 @@ def get_default(mbo_field: str) -> Any:
 
 
 def is_default(mbo_field: str, value: Any) -> bool:
-    """Whether the given value matches upstream's default. False for mbo-only fields.
+    """Whether the given value matches the default. False for mbo-only fields.
+
+    "Default" is the mbo dataclass default (see ``get_default``); only fields
+    with no dataclass default fall back to the upstream schema.
 
     Uses a float-tolerant comparison: imgui.input_float uses C++ `float`
     (32-bit) internally, so a Python double like 1.15 gets silently
@@ -425,14 +478,17 @@ def is_default(mbo_field: str, value: Any) -> bool:
     precision (~7 decimal digits) to keep the modified-color signal honest.
     """
     if mbo_field in MBO_ONLY_FIELDS:
-        return False  # no upstream default to compare against
-    # Schema loads in a background daemon (subprocess on cold cache,
-    # disk read on warm). While it's pending, report "matches default"
-    # so the Run tab isn't a sea of orange for the few seconds it takes
-    # on cold launch. Subsequent draws color-code accurately.
-    if _SETTINGS is None:
-        return True
-    default = get_default(mbo_field)
+        return False  # no default to compare against
+    found, default = _mbo_default(mbo_field)
+    if not found:
+        # field has no mbo dataclass default — compare against the upstream
+        # schema, which loads in a background daemon (subprocess on cold
+        # cache, disk read on warm). While it's pending, report "matches
+        # default" so the Run tab isn't a sea of orange for the few seconds
+        # it takes on cold launch. Subsequent draws color-code accurately.
+        if _SETTINGS is None:
+            return True
+        default = get_default(mbo_field)
     # normalize at the boundary — numpy types leak through ops.npy
     # round-trips and break `value in (...)` / `value == default` with
     # `truth value of an array with more than one element is ambiguous`.
@@ -495,7 +551,9 @@ def format_tooltip(mbo_field: str, extra: str = "") -> str:
     desc = info.get("description")
     if desc:
         parts.append(desc.strip())
-    default = info.get("default")
+    # mbo dataclass default — the value the GUI starts from (matches the
+    # modified-box / tint / Reset baseline), not necessarily suite2p's.
+    default = get_default(mbo_field)
     parts.append(f"Default: {default!r}")
     parts.append(f"Type:    {_format_type(info.get('type'))}")
     mn, mx = info.get("min"), info.get("max")
