@@ -435,29 +435,31 @@ function Show-OptionalDependencies {
         Write-Host $GpuInfo.GpuName -ForegroundColor White
         if ($GpuInfo.DriverCudaVersion) {
             Write-Host "  Driver CUDA:  " -NoNewline -ForegroundColor Green
-            Write-Host "$($GpuInfo.DriverCudaVersion) (GPU torch + CuPy will be installed)" -ForegroundColor White
+            Write-Host "$($GpuInfo.DriverCudaVersion) (CUDA torch/CuPy used with the Processing extra)" -ForegroundColor White
         }
         else {
             Write-Host "  Driver CUDA:  " -NoNewline -ForegroundColor Yellow
-            Write-Host "unknown (default CUDA torch + CuPy build will be used)" -ForegroundColor Yellow
+            Write-Host "unknown (default CUDA build used with the Processing extra)" -ForegroundColor Yellow
         }
     }
     else {
-        Write-Host "  No NVIDIA GPU detected (CPU torch will be installed)" -ForegroundColor Yellow
+        Write-Host "  No NVIDIA GPU detected" -ForegroundColor Yellow
     }
     Write-Host ""
 
-    Write-Host "  Suite2p and the GUI are always installed." -ForegroundColor DarkGray
+    Write-Host "  The viewer, I/O, and metadata tools are always installed." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [1] Rastermap - Dimensionality reduction" -ForegroundColor Cyan
-    Write-Host "  [2] All       - Rastermap + isoview" -ForegroundColor Cyan
-    Write-Host "  [3] None      - Base installation only" -ForegroundColor Cyan
+    Write-Host "  [1] Processing - suite2p/cellpose pipeline + z-registration (pytorch)" -ForegroundColor Cyan
+    Write-Host "  [2] Rastermap  - activity sorting" -ForegroundColor Cyan
+    Write-Host "  [3] Napari     - alternate viewer" -ForegroundColor Cyan
+    Write-Host "  [4] All        - everything (Recommended)" -ForegroundColor Cyan
+    Write-Host "  [5] None       - base viewer only" -ForegroundColor Cyan
     Write-Host ""
 
     do {
-        $choice = Read-Host "Select option (1-3, or comma-separated like 1,2)"
-        $valid = $choice -match '^[1-3](,[1-3])*$'
-        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-3 or comma-separated." }
+        $choice = Read-Host "Select option (1-5, or comma-separated like 1,2)"
+        $valid = $choice -match '^[1-5](,[1-5])*$'
+        if (-not $valid) { Write-Warn "Invalid selection. Enter 1-5 or comma-separated." }
     } while (-not $valid)
 
     $extras = @()
@@ -465,9 +467,11 @@ function Show-OptionalDependencies {
 
     :parseLoop foreach ($c in $choices) {
         switch ($c) {
-            "1" { $extras += "rastermap" }
-            "2" { $extras = @("all"); break parseLoop }
-            "3" { $extras = @(); break parseLoop }
+            "1" { $extras += "processing" }
+            "2" { $extras += "rastermap" }
+            "3" { $extras += "napari" }
+            "4" { $extras = @("all"); break parseLoop }
+            "5" { $extras = @(); break parseLoop }
         }
     }
 
@@ -1242,16 +1246,17 @@ function Main {
     # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4.5: pick GPU packages. torch (core dep via suite2p) and cupy
-    # (optional accelerator for axial registration) both get the CUDA build
-    # whenever an NVIDIA GPU is present — the wheels bundle their own CUDA
-    # runtime, so only a driver is needed, independent of the chosen extras.
-    $cupyPackages = Get-CupyPackages -GpuInfo $gpuInfo
+    # step 4.5: GPU packages only matter when the processing extra is selected
+    # (it pulls torch for suite2p and uses cupy for axial registration). a
+    # base/viewer install stays slim — no torch, no cupy. wheels bundle their
+    # own CUDA runtime, so only an NVIDIA driver is required.
+    $wantsProcessing = ($extras -contains "processing") -or ($extras -contains "all")
+    $cupyPackages = if ($wantsProcessing) { Get-CupyPackages -GpuInfo $gpuInfo } else { @() }
     if ($cupyPackages.Count -gt 0) {
         Write-Info "GPU CuPy will be installed: $($cupyPackages[0])"
     }
 
-    $pytorchIndexUrl = Get-PytorchIndexUrl -GpuInfo $gpuInfo
+    $pytorchIndexUrl = if ($wantsProcessing) { Get-PytorchIndexUrl -GpuInfo $gpuInfo } else { $null }
     if ($pytorchIndexUrl) {
         Write-Info "GPU torch will be installed from $pytorchIndexUrl"
     }

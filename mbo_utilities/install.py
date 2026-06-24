@@ -248,7 +248,7 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
         return FeatureStatus(
             name="PyTorch",
             status=Status.MISSING,
-            message="not installed"
+            message="pip install 'mbo_utilities[processing]'"
         ), None
 
 
@@ -345,7 +345,7 @@ def _check_suite2p() -> FeatureStatus:
         return FeatureStatus(
             name="LBM-Suite2p-Python",
             status=Status.MISSING,
-            message="not installed"
+            message="pip install 'mbo_utilities[processing]'"
         )
     try:
         from importlib.metadata import version
@@ -360,7 +360,9 @@ def _check_suite2p() -> FeatureStatus:
     )
 
 
-def _check_pkg_version(import_name: str, dist_name: str, display: str) -> FeatureStatus:
+def _check_pkg_version(
+    import_name: str, dist_name: str, display: str, hint: str = ""
+) -> FeatureStatus:
     """Report a package's version without importing it.
 
     Uses find_spec/metadata so packages with noisy imports (e.g. suite2p's
@@ -368,7 +370,8 @@ def _check_pkg_version(import_name: str, dist_name: str, display: str) -> Featur
     """
     import importlib.util
     if importlib.util.find_spec(import_name) is None:
-        return FeatureStatus(name=display, status=Status.MISSING, message="not installed")
+        msg = hint if hint else "not installed"
+        return FeatureStatus(name=display, status=Status.MISSING, message=msg)
     try:
         from importlib.metadata import version
         ver = version(dist_name)
@@ -392,7 +395,7 @@ def _check_rastermap() -> FeatureStatus:
         return FeatureStatus(
             name="Rastermap",
             status=Status.MISSING,
-            message="not installed"
+            message="pip install 'mbo_utilities[rastermap]'"
         )
 
 
@@ -411,7 +414,7 @@ def _check_napari() -> FeatureStatus:
         return FeatureStatus(
             name="Napari",
             status=Status.MISSING,
-            message="not installed (pip install napari[all])"
+            message="pip install 'mbo_utilities[napari]'"
         )
 
 
@@ -518,8 +521,9 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
     elif suite2p_status.status == Status.OK:
         suite2p_status.gpu_ok = pytorch_status.gpu_ok
     status.features.append(suite2p_status)
-    status.features.append(_check_pkg_version("suite2p", "suite2p", "Suite2p"))
-    status.features.append(_check_pkg_version("cellpose", "cellpose", "Cellpose"))
+    _proc_hint = "pip install 'mbo_utilities[processing]'"
+    status.features.append(_check_pkg_version("suite2p", "suite2p", "Suite2p", _proc_hint))
+    status.features.append(_check_pkg_version("cellpose", "cellpose", "Cellpose", _proc_hint))
 
     _update(0.85, "Checking Rastermap...")
     status.features.append(_check_rastermap())
@@ -559,6 +563,7 @@ def print_status_cli(status: InstallStatus):
 
     # features table
     click.echo("\nFeatures:")
+    click.echo(click.style("  [ -] = optional, not installed", fg="bright_black"))
     for f in status.features:
         # format version string (skip 'v' prefix if version is 'installed')
         if f.version and f.version != "installed":
@@ -583,7 +588,7 @@ def print_status_cli(status: InstallStatus):
         else:  # MISSING
             icon = click.style("[ -]", fg="bright_black")
             msg = click.style(f"{f.name}", fg="bright_black")
-            extra = " (not installed)"
+            extra = f" - {f.message}" if f.message else " (not installed)"
 
         click.echo(f"  {icon} {msg}{extra}")
 
