@@ -104,7 +104,7 @@ notebooks = [
     "seaborn>=0.13.2",
 ]
 isoview = [
-    "isoview>=0.4.1",
+    "isoview>=0.5.0",
 ]
 hpc = [
     "submitit>=1.5.0",

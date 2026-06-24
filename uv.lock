@@ -1397,7 +1397,7 @@ wheels = [
 
 [[package]]
 name = "isoview"
-version = "0.4.1"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mbo-utilities" },
@@ -1406,9 +1406,9 @@ dependencies = [
     { name = "tifffile" },
     { name = "xmltodict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/07/d5d4f7124bb43c6c0f480c6152c31a58fa5e915ed3de4df5e2c3d6edb75b/isoview-0.4.1.tar.gz", hash = "sha256:355044223d0a6e95add00dacbc6fea3a5122296bad66d9afdc3ecf1defd19df6", size = 2748609, upload-time = "2026-06-16T21:01:41.183Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/68/22b09f0d7995e7f53d8da7d9f3bef38562322a4e11c633049a188d987105/isoview-0.5.0.tar.gz", hash = "sha256:57a37f593a5b04bd8e0b7b35e084bd6b85a3cda9d8d220982b19eab862a8fedd", size = 2763249, upload-time = "2026-06-24T16:16:49.371Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/84/040cc302c2c3c67a94d31bf7ae8663b186785d9e314a5bd3df2498676edb/isoview-0.4.1-py3-none-any.whl", hash = "sha256:bab7def4ab2ce619bbc0f2628253b8a132d4eb721657699c4cd4577117b20e4a", size = 108171, upload-time = "2026-06-16T21:01:40.159Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/27/bbfd1d2159a4bbdcaf0fa3da4d97450647e86c4f0b09760fee4dc1ee416e/isoview-0.5.0-py3-none-any.whl", hash = "sha256:533fc4ffba62b537f77c614779c716551a5811c2adecf369e1bb6e4b23e7aecc", size = 122913, upload-time = "2026-06-24T16:16:48.083Z" },
 ]
 
 [[package]]
@@ -2230,7 +2230,7 @@ requires-dist = [
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipykernel", marker = "extra == 'notebooks'" },
     { name = "ipywidgets", marker = "extra == 'notebooks'", specifier = ">=8.0.0,<9" },
-    { name = "isoview", marker = "extra == 'isoview'", specifier = ">=0.4.1" },
+    { name = "isoview", marker = "extra == 'isoview'", specifier = ">=0.5.0" },
     { name = "jupyter-rfb", marker = "extra == 'notebooks'", specifier = ">=0.5.1" },
     { name = "jupyterlab", marker = "extra == 'notebooks'", specifier = ">=4.2.6" },
     { name = "jupytext", marker = "extra == 'docs'" },
