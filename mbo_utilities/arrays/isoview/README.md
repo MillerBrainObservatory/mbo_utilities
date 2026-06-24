@@ -67,8 +67,8 @@ Construction steps (in order):
 | `channel_names`       | Human-readable labels per channel.                                              |
 | `num_timepoints`      | `T` size.                                                                       |
 | `num_planes`          | `Z` size.                                                                       |
-| `num_views`           | `C` size (alias).                                                               |
-| `num_color_channels`  | `C` size (alias).                                                               |
+| `num_views`           | `C` size (cameras: 4 raw/corrected, 2 views after fuse). C-axis consumers use this. |
+| `num_color_channels`  | Distinct optical wavelengths across the XML sidecars (usually 1; NOT the C size).   |
 | `filenames`           | All on-disk volume paths backing the array.                                     |
 | `metadata`            | Dict combining shape, dtype, scale (dx/dy/dz/fs), XML sidecar fields, etc.      |
 | `source_path` (mixin) | Canonical path used by `imread` to reconstruct the array.                       |

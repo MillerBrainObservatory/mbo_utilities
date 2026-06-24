@@ -7,11 +7,13 @@ stage positions in ``metadata["tiles"]``) for a quick glimpse across the
 whole acquisition.
 
 Thumbnails are read straight from the raw data: the full depth strided
-down in Y/X to ~128 px and max-projected. That decimated read is a few
-ms/tile off a memmap (vs minutes to build full-resolution projections), so
-the grid fills in over a few frames. Tiles load incrementally (a budget per
-frame) so the UI never blocks, and clicking a cell drives the main viewer's
-Tile slider.
+down in Y/X to ~128 px and max-projected. Those reads run on a background
+thread (see ``_prefetch_loop``), prioritised in display order and started as
+soon as the side-panel section appears — so the current view's tiles are
+already decompressed by the time the grid is opened. The draw loop only
+consumes finished thumbs (cache miss -> placeholder), so opening never blocks
+and the grid stays responsive while the rest fill in. Clicking a cell drives
+the main viewer's Tile slider.
 
 An orientation control adds 90°-multiple rotations + X/Y/Z flips (the same
 ops the BigStitcher export bakes onto VW00), applied as a live preview only
@@ -26,13 +28,20 @@ Activates for any array that is tiled and carries per-tile metadata
 
 from __future__ import annotations
 
+import os
 import re
+import threading
 from collections import OrderedDict
 from typing import Any
 
 import numpy as np
 from imgui_bundle import imgui
 
+from mbo_utilities.gui._imgui_helpers import (
+    button_width,
+    draw_toolbar_row,
+    selected_button_style,
+)
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui.widgets.summary_image import (
     _DEFAULT_COLORMAP,
@@ -48,15 +57,23 @@ _WHITE = (1.0, 1.0, 1.0, 1.0)
 # Longest thumbnail edge (px). The Y/X stride is chosen to land near this.
 _THUMB_MAX = 128
 
-# Uncached tiles read per frame, so opening a big z-block never blocks the
-# UI — tiles pop in over a few frames.
-_LOAD_PER_FRAME = 12
+# Tile reads run on a background thread (see _prefetch_loop) so opening the
+# grid never blocks; the draw loop only consumes already-decompressed thumbs.
 
 # Thumbnails are tiny (~32 KiB); cache enough to hold every tile of a large
 # dataset (16x16x8 = 2048 tiles ~= 64 MiB) so re-navigation is instant.
 _THUMB_CACHE_MAX = 4096
+# Source MIPs are ~96 KiB/tile (xy/xz/yz). Hold a whole-dataset working set so
+# prefetched z-blocks aren't evicted before the user scrubs to them; bounded so
+# huge datasets still cap memory (LRU drops the most distant z-blocks).
+_MIP_CACHE_FLOOR = 8192
+_MIP_CACHE_MAX_HARD = 24576
 # GPU textures are bigger; bound to about one z-block plus slack.
 _GPU_CACHE_MAX = 320
+
+# Parallel tile readers. Reads release the GIL in the codec / numpy, so a small
+# pool fills a z-block several-fold faster than one thread.
+_PREFETCH_WORKERS = max(2, min(8, (os.cpu_count() or 4) - 1))
 
 _CONTRAST_DISPLAY = 0
 _CONTRAST_AUTO = 1
@@ -180,6 +197,25 @@ class TileGridViewer(Widget):
         self._range: tuple[float, float] | None = None
         self._range_sig: tuple | None = None
 
+        # Background tile readers. Only `_mip_cache` is shared with the draw
+        # thread (workers write, draw reads) and is guarded by `_cache_lock`;
+        # `_cache_gen` bumps on reset so an in-flight read can't commit stale
+        # data after a dataset change. A pool of workers drains `_prefetch_req`
+        # (jobs are (ti, c, view_mode, plane)) via the `_prefetch_pos` cursor,
+        # which hands each job to exactly one worker. The job list spans every
+        # z-block, nearest-to-current first, so scrubbing Z finds tiles cached.
+        self._cache_lock = threading.Lock()
+        self._cache_gen: int = 0
+        self._mip_cache_max: int = _MIP_CACHE_FLOOR
+        self._prefetch_threads: list[threading.Thread] = []
+        self._prefetch_stop = threading.Event()
+        self._prefetch_wake = threading.Event()
+        self._prefetch_req_lock = threading.Lock()
+        self._prefetch_req: list[tuple] = []
+        self._prefetch_pos: int = 0
+        self._prefetch_sig: tuple | None = None
+        self._prefetch_arr: Any = None
+
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
         return cls._find(parent) is not None
@@ -287,6 +323,18 @@ class TileGridViewer(Widget):
             "cols": cols, "rows": rows, "zblocks": zblocks, "placed": placed,
             "ntiles": len(entries),
         }
+        # Size the source cache to whichever mode's working set is larger, so
+        # prefetched tiles survive until the user scrubs to them (hard-capped
+        # for memory): MIP mode needs xy/xz/yz for every tile; plane mode needs
+        # every plane of the current z-block plus the current plane elsewhere.
+        ntiles = len(entries)
+        tiles_per_block = max((len(v) for v in placed.values()), default=1)
+        mip_need = ntiles * 3
+        plane_need = tiles_per_block * max(1, self._nplanes) + ntiles
+        self._mip_cache_max = min(
+            _MIP_CACHE_MAX_HARD,
+            max(_MIP_CACHE_FLOOR, mip_need, plane_need) + 64,
+        )
         self._zblock = min(self._zblock, max(0, len(zblocks) - 1))
         return True
 
@@ -295,7 +343,13 @@ class TileGridViewer(Widget):
             gpu.destroy()
         self._gpu_cache.clear()
         self._thumb_cache.clear()
-        self._mip_cache.clear()
+        with self._cache_lock:
+            self._mip_cache.clear()
+            self._cache_gen += 1
+        with self._prefetch_req_lock:
+            self._prefetch_req = []
+            self._prefetch_pos = 0
+        self._prefetch_sig = None
         self._range = None
         self._range_sig = None
 
@@ -316,43 +370,62 @@ class TileGridViewer(Widget):
             return s, sz, s * dxy, sz * dz
         return s, 1, 1.0, 1.0
 
+    def _cached_source(self, key: tuple) -> np.ndarray | None:
+        """Non-blocking ``_mip_cache`` lookup for the draw thread (no read)."""
+        with self._cache_lock:
+            v = self._mip_cache.get(key)
+            if v is not None:
+                self._mip_cache.move_to_end(key)
+            return v
+
     def _load_source_plane(self, arr, ti, c, z) -> np.ndarray | None:
-        """Single decimated Z-plane for one tile, read lazily and cached per
-        ``(ti, c, "plane", z)``. Only the requested plane is pulled from the
-        lazy array, so scrubbing planes stays cheap even on raw stacks."""
+        """Single decimated Z-plane for one tile, read on the prefetch thread
+        and cached per ``(ti, c, "plane", z)``. Only the requested plane is
+        pulled from the lazy array, so scrubbing planes stays cheap even on
+        raw stacks. The slow read runs outside the cache lock."""
         z = int(z)
         key = (ti, c, "plane", z)
-        cached = self._mip_cache.get(key)
-        if cached is not None:
-            self._mip_cache.move_to_end(key)
-            return cached
+        with self._cache_lock:
+            cached = self._mip_cache.get(key)
+            if cached is not None:
+                self._mip_cache.move_to_end(key)
+                return cached
+            gen = self._cache_gen
         s, _sz, _, _ = self._mip_params(arr)
         try:
             plane = np.asarray(arr[ti, c, z, ::s, ::s])
             plane = np.squeeze(plane)
             if plane.ndim != 2:
                 return None
-            self._mip_cache[key] = np.ascontiguousarray(plane)
+            plane = np.ascontiguousarray(plane)
         except Exception:
             return None
-        while len(self._mip_cache) > _THUMB_CACHE_MAX:
-            self._mip_cache.popitem(last=False)
-        return self._mip_cache.get(key)
+        with self._cache_lock:
+            if gen != self._cache_gen:
+                return None  # dataset changed during the read; drop it
+            self._mip_cache[key] = plane
+            while len(self._mip_cache) > self._mip_cache_max:
+                self._mip_cache.popitem(last=False)
+            return self._mip_cache.get(key)
 
     def _load_source_mip(self, arr, ti, c, axis) -> np.ndarray | None:
-        """Decimated MIP for one axis, cached per ``(ti, c, axis)``.
+        """Decimated MIP for one axis, read on the prefetch thread and cached
+        per ``(ti, c, axis)``.
 
         Maxes over the full depth (Y/X strided down to thumbnail size) so
         every orientation shows a real projection, and one read fills all
         three axes (xz/yz come for free from the same block). The default
         xy and the post-rotation xy are therefore the same image — no
         sparse-vs-full mismatch where the untransformed tile looks worse.
+        The slow read runs outside the cache lock.
         """
         key = (ti, c, axis)
-        cached = self._mip_cache.get(key)
-        if cached is not None:
-            self._mip_cache.move_to_end(key)
-            return cached
+        with self._cache_lock:
+            cached = self._mip_cache.get(key)
+            if cached is not None:
+                self._mip_cache.move_to_end(key)
+                return cached
+            gen = self._cache_gen
         s, sz, _, _ = self._mip_params(arr)
         try:
             block = np.asarray(arr[ti, c, :, ::s, ::s])
@@ -360,14 +433,130 @@ class TileGridViewer(Widget):
                 block = np.squeeze(block)
             if block.ndim != 3:
                 return None
-            self._mip_cache[(ti, c, "xy")] = np.ascontiguousarray(block.max(axis=0))
-            self._mip_cache[(ti, c, "xz")] = np.ascontiguousarray(block.max(axis=1)[::sz])
-            self._mip_cache[(ti, c, "yz")] = np.ascontiguousarray(block.max(axis=2)[::sz])
+            xy = np.ascontiguousarray(block.max(axis=0))
+            xz = np.ascontiguousarray(block.max(axis=1)[::sz])
+            yz = np.ascontiguousarray(block.max(axis=2)[::sz])
         except Exception:
             return None
-        while len(self._mip_cache) > _THUMB_CACHE_MAX:
-            self._mip_cache.popitem(last=False)
-        return self._mip_cache.get(key)
+        with self._cache_lock:
+            if gen != self._cache_gen:
+                return None  # dataset changed during the read; drop it
+            self._mip_cache[(ti, c, "xy")] = xy
+            self._mip_cache[(ti, c, "xz")] = xz
+            self._mip_cache[(ti, c, "yz")] = yz
+            while len(self._mip_cache) > self._mip_cache_max:
+                self._mip_cache.popitem(last=False)
+            return self._mip_cache.get(key)
+
+    def _ensure_prefetch_threads(self) -> None:
+        if self._prefetch_stop.is_set():
+            return
+        self._prefetch_threads = [
+            t for t in self._prefetch_threads if t.is_alive()
+        ]
+        while len(self._prefetch_threads) < _PREFETCH_WORKERS:
+            t = threading.Thread(
+                target=self._prefetch_loop,
+                name=f"tilegrid-prefetch-{len(self._prefetch_threads)}",
+                daemon=True,
+            )
+            self._prefetch_threads.append(t)
+            t.start()
+
+    def _prefetch_jobs(self) -> list[tuple]:
+        """Ordered ``(ti, c, view_mode, plane)`` for the current view.
+
+        The current z-block's tiles come first (display order). Once the popup
+        is open the queue is widened so scrubbing never blacks out:
+        - MIP mode: every other z-block, by distance from the current one.
+        - Plane mode: every plane of the current z-block (current plane first,
+          nearest outward), then the current plane of the other z-blocks.
+        While closed only the current z-block at the current plane is queued, so
+        an unopened widget doesn't read the whole dataset. ``plane`` is -1 in
+        MIP mode (the read covers all planes).
+        """
+        g = self._grid
+        if not g:
+            return []
+        self._seed_camera_defaults(self._c_index)
+        layout = self._get_layout(g)  # current z-block, faithful display order
+        c = self._c_index
+        vm = self._view_mode
+        cur_z = self._zblock
+        placed = g["placed"]
+        cur_tiles = [layout[cell] for cell in sorted(layout.keys())]
+
+        def other_zblocks(plane):
+            for z in sorted(placed.keys(), key=lambda zz: (abs(zz - cur_z), zz)):
+                if z == cur_z:
+                    continue
+                cells = placed[z]
+                for cell in sorted(cells.keys()):
+                    yield (cells[cell][0], c, vm, plane)
+
+        if vm != 1:  # MIP mode
+            jobs = [(ti, c, 0, -1) for ti in cur_tiles]
+            if self._popup_open:
+                jobs.extend(other_zblocks(-1))
+            return jobs
+
+        # Plane mode
+        nplanes = max(1, self._nplanes)
+        cur_p = min(max(0, self._plane), nplanes - 1)
+        if not self._popup_open:
+            return [(ti, c, 1, cur_p) for ti in cur_tiles]
+        plane_order = sorted(range(nplanes), key=lambda p: (abs(p - cur_p), p))
+        jobs = [(ti, c, 1, p) for p in plane_order for ti in cur_tiles]
+        jobs.extend(other_zblocks(cur_p))
+        return jobs
+
+    def _prefetch_current_view(self, arr) -> None:
+        """Start/keep the workers fed with the current view. A no-op until the
+        view changes (same signature), so it is cheap to call every frame —
+        including while the popup is closed, which readies the first z-block
+        before the grid is opened. Opening expands the queue to every z-block."""
+        self._prefetch_arr = arr
+        self._ensure_prefetch_threads()
+        sig = (
+            self._sig, self._zblock, self._c_index, self._view_mode,
+            self._plane if self._view_mode == 1 else -1, self._popup_open,
+        )
+        if sig == self._prefetch_sig:
+            return
+        self._prefetch_sig = sig
+        jobs = self._prefetch_jobs()
+        with self._prefetch_req_lock:
+            self._prefetch_req = jobs
+            self._prefetch_pos = 0  # re-prioritise from the new current z-block
+        self._prefetch_wake.set()
+
+    def _next_prefetch_job(self) -> "tuple | None":
+        """Hand the next queued job to exactly one worker (cursor advance)."""
+        with self._prefetch_req_lock:
+            if self._prefetch_pos >= len(self._prefetch_req):
+                return None
+            job = self._prefetch_req[self._prefetch_pos]
+            self._prefetch_pos += 1
+            return job
+
+    def _prefetch_loop(self) -> None:
+        while not self._prefetch_stop.is_set():
+            job = self._next_prefetch_job()
+            if job is None:
+                self._prefetch_wake.wait(timeout=0.5)
+                self._prefetch_wake.clear()
+                continue
+            arr = self._prefetch_arr
+            if arr is None:
+                continue
+            ti, c, vm, plane = job
+            try:
+                if vm == 1:
+                    self._load_source_plane(arr, ti, c, plane)
+                else:
+                    self._load_source_mip(arr, ti, c, "xy")
+            except Exception:
+                pass
 
     def _contrast_range(
         self, arr, loaded: list[np.ndarray], plan_key: tuple
@@ -385,9 +574,16 @@ class TileGridViewer(Widget):
         if loaded:
             sample = np.concatenate([t.ravel() for t in loaded])
             self._range = _auto_range(sample)
-        else:
-            self._range = (0.0, 1.0)
-        self._range_sig = sig
+            self._range_sig = sig
+        elif self._range is None:
+            # nothing cached yet: seed from the main viewer's display range so
+            # tiles don't clip to the colormap top (viridis -> yellow) before
+            # thumbs load. Recomputed once thumbs arrive.
+            lo = float(getattr(arr, "_cached_vmin", 0.0) or 0.0)
+            hi = float(getattr(arr, "_cached_vmax", 1000.0) or 1000.0)
+            self._range = (lo, hi if hi > lo else lo + 1.0)
+        # else: hold the last range until the new view's thumbs load, so
+        # scrolling Z/plane doesn't flash a bad auto range for one frame.
         return self._range
 
     def _ensure_gpu(self, key: tuple[int, int], thumb: np.ndarray,
@@ -474,6 +670,10 @@ class TileGridViewer(Widget):
         arr = self._active_array()
         if arr is None or not self._ensure_grid(arr):
             return
+        # Read tiles for the current view in the background so the grid is
+        # already populated by the time the popup is opened, and stays
+        # responsive while the rest fill in.
+        self._prefetch_current_view(arr)
         self._suppress_fpl_right_click_menu()
         draw_section_header("Tile Grid")
         imgui.indent(8)
@@ -487,8 +687,17 @@ class TileGridViewer(Widget):
             imgui.text_colored(_WHITE, f"{g['ntiles']} tiles")
             imgui.text_colored(_WHITE, f"grid: {ncols} x {nrows}")
             imgui.text_colored(_WHITE, f"z-blocks: {nz}")
-            if self._is_rotated:
-                imgui.text_colored(_WHITE, "rotated: 90deg seeded")
+            # source dataset + detected mounting, so it's obvious which array
+            # and orientation the grid is actually reading (vs another loaded).
+            sr = str(getattr(arr, "scan_root", "") or "")
+            src = sr.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            if src:
+                imgui.text_colored(_WHITE, f"source: {src}")
+            imgui.text_colored(
+                _WHITE,
+                "orientation: rotated (90deg seeded)"
+                if self._is_rotated else "orientation: normal",
+            )
         finally:
             imgui.unindent(8)
 
@@ -514,94 +723,108 @@ class TileGridViewer(Widget):
         nz = len(zblocks)
 
         # Row 1 — source: Mode (MIP / single lazy plane), plane slider, z-block.
-        imgui.set_next_item_width(100)
-        m_changed, new_m = imgui.combo(
-            "Mode##tilegrid", self._view_mode, ["MIP", "Plane"]
-        )
-        if m_changed:
-            self._view_mode = int(new_m)
+        def _mode():
+            ch, v = imgui.combo("##tilegrid_mode", self._view_mode, ["MIP", "Plane"])
+            if ch:
+                self._view_mode = int(v)
+
+        row1 = [("Mode", 100.0, _mode)]
         if self._view_mode == 1 and self._nplanes > 1:
-            imgui.same_line()
-            imgui.set_next_item_width(260)
-            p_changed, new_p = imgui.slider_int(
-                "Plane##tilegrid", self._plane, 0, self._nplanes - 1,
-                f"%d / {self._nplanes - 1}",
-            )
-            if p_changed:
-                self._plane = int(new_p)
+            def _plane():
+                ch, v = imgui.slider_int(
+                    "##tilegrid_plane", self._plane, 0, self._nplanes - 1,
+                    f"%d / {self._nplanes - 1}",
+                )
+                if ch:
+                    self._plane = int(v)
+            row1.append(("Plane", 260.0, _plane))
         if nz > 1:
-            imgui.same_line()
             lo, hi = self._zblock_range(self._zblock)
-            imgui.set_next_item_width(260)
-            changed, new_z = imgui.slider_int(
-                "Z-block##tilegrid", self._zblock, 0, nz - 1,
-                f"%d/{nz - 1}  z {lo:.0f}-{hi:.0f}um",
-            )
-            if changed:
-                self._zblock = int(new_z)
+            def _zblock():
+                ch, v = imgui.slider_int(
+                    "##tilegrid_zblock", self._zblock, 0, nz - 1,
+                    f"%d/{nz - 1}  z {lo:.0f}-{hi:.0f}um",
+                )
+                if ch:
+                    self._zblock = int(v)
+            row1.append(("Z-block", 260.0, _zblock))
+        draw_toolbar_row(row1)
 
         # Row 2 — display: channel, colormap, contrast, manual min/max.
+        row2 = []
         if len(self._channel_names) > 1:
-            imgui.set_next_item_width(140)
-            c_changed, new_c = imgui.combo(
-                "View##tilegrid", self._c_index, list(self._channel_names)
+            def _view():
+                ch, v = imgui.combo(
+                    "##tilegrid_view", self._c_index, list(self._channel_names)
+                )
+                if ch:
+                    self._c_index = v
+            row2.append(("View", 140.0, _view))
+
+        def _cmap():
+            ch, v = imgui.combo("##tilegrid_cmap", self._cmap_idx, list(self._cmaps))
+            if ch:
+                self._cmap_idx = v
+
+        def _contrast():
+            ch, v = imgui.combo(
+                "##tilegrid_contrast", self._contrast_mode, list(_CONTRAST_LABELS)
             )
-            if c_changed:
-                self._c_index = new_c
-            imgui.same_line()
-        imgui.set_next_item_width(120)
-        cmap_changed, new_cmap = imgui.combo(
-            "Cmap##tilegrid", self._cmap_idx, list(self._cmaps)
-        )
-        if cmap_changed:
-            self._cmap_idx = new_cmap
+            if ch:
+                self._contrast_mode = v
 
-        imgui.same_line()
-        imgui.set_next_item_width(100)
-        ctr_changed, new_ctr = imgui.combo(
-            "Contrast##tilegrid", self._contrast_mode, list(_CONTRAST_LABELS)
-        )
-        if ctr_changed:
-            self._contrast_mode = new_ctr
-
+        row2.append(("Cmap", 120.0, _cmap))
+        row2.append(("Contrast", 100.0, _contrast))
         if self._contrast_mode == _CONTRAST_MANUAL:
-            imgui.same_line()
-            imgui.set_next_item_width(90)
-            lo_chg, lo_val = imgui.drag_float(
-                "##tilemin", self._manual_lo, 1.0, 0.0, 65535.0, "min %.0f"
-            )
-            if lo_chg:
-                self._manual_lo = float(lo_val)
-            imgui.same_line()
-            imgui.set_next_item_width(90)
-            hi_chg, hi_val = imgui.drag_float(
-                "##tilemax", self._manual_hi, 1.0, 0.0, 65535.0, "max %.0f"
-            )
-            if hi_chg:
-                self._manual_hi = float(hi_val)
-            imgui.same_line()
-            if imgui.small_button("0-300##tilepreset"):
-                self._manual_lo, self._manual_hi = 0.0, 300.0
+            def _min():
+                ch, v = imgui.drag_float(
+                    "##tilemin", self._manual_lo, 1.0, 0.0, 65535.0, "%.0f"
+                )
+                if ch:
+                    self._manual_lo = float(v)
 
-        # Row 3 — layout: move tiles + resets + hint. Its own line so it can't
-        # be pushed off the right edge. Right-click a tile to rotate / flip.
-        _, self._edit_layout = imgui.checkbox("Move tiles", self._edit_layout)
-        if not self._edit_layout:
-            self._pick = None
-        imgui.same_line()
-        if imgui.small_button("Reset layout"):
-            self._layout.pop((self._c_index, self._zblock), None)
-            self._pick = None
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("restore tile positions (this camera)")
-        imgui.same_line()
-        if imgui.small_button("Reset flips"):
-            self._tile_flips.clear()
-            self._tile_rot.clear()
-            self._flip_seeded.clear()  # re-seed per-camera defaults next frame
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("restore default tile flips/rotations")
-        imgui.same_line()
+            def _max():
+                ch, v = imgui.drag_float(
+                    "##tilemax", self._manual_hi, 1.0, 0.0, 65535.0, "%.0f"
+                )
+                if ch:
+                    self._manual_hi = float(v)
+
+            def _preset():
+                if imgui.small_button("0-300##tilepreset"):
+                    self._manual_lo, self._manual_hi = 0.0, 300.0
+
+            row2.append(("Min", 90.0, _min))
+            row2.append(("Max", 90.0, _max))
+            row2.append((None, button_width("0-300"), _preset))
+        draw_toolbar_row(row2)
+
+        # Row 3 — layout: move tiles + resets. Right-click a tile to rotate/flip.
+        def _move():
+            _, self._edit_layout = imgui.checkbox("Move tiles", self._edit_layout)
+            if not self._edit_layout:
+                self._pick = None
+
+        def _reset_layout():
+            if imgui.small_button("Reset layout"):
+                self._layout.pop((self._c_index, self._zblock), None)
+                self._pick = None
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("restore tile positions (this camera)")
+
+        def _reset_flips():
+            if imgui.small_button("Reset flips"):
+                self._tile_flips.clear()
+                self._tile_rot.clear()
+                self._flip_seeded.clear()  # re-seed per-camera defaults next frame
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("restore default tile flips/rotations")
+
+        draw_toolbar_row([
+            (None, button_width("Move tiles") + 20.0, _move),
+            (None, button_width("Reset layout"), _reset_layout),
+            (None, button_width("Reset flips"), _reset_flips),
+        ])
         imgui.text_colored(
             imgui.ImVec4(0.2, 0.9, 1.0, 1.0),
             "right-click a tile to rotate / flip"
@@ -609,14 +832,16 @@ class TileGridViewer(Widget):
         )
 
     def _camera_number(self, c: int):
-        """Actual camera index (CM##) for view-combo index ``c``, or ``None``
-        when the view isn't a single camera (fused pairs / non-camera views)."""
+        """Camera index for view-combo index ``c`` (from its ``VW{angle}``
+        label), or ``None`` for fused pairs / non-camera views."""
         try:
             name = self._channel_names[c]
         except (IndexError, TypeError):
             return None
-        cams = re.findall(r"CM(\d+)", str(name))
-        return int(cams[0]) if len(cams) == 1 else None
+        if str(name).endswith("_fused"):
+            return None  # fused pair, not a single camera
+        from mbo_utilities.arrays.isoview.array import camera_from_view_label
+        return camera_from_view_label(name)
 
     def _camera_is_mirrored(self, c: int) -> bool:
         """Columns mirrored left-right for this camera (verified per-camera
@@ -740,7 +965,6 @@ class TileGridViewer(Widget):
         dark = imgui.color_convert_float4_to_u32(imgui.ImVec4(0.08, 0.08, 0.08, 1.0))
         yellow = imgui.color_convert_float4_to_u32(imgui.ImVec4(1.0, 0.85, 0.2, 1.0))
 
-        budget = _LOAD_PER_FRAME
         imgui.begin_child("##tilegrid_canvas", imgui.ImVec2(0, 0), child_flags=0)
         draw_list = imgui.get_window_draw_list()
         imgui.push_style_var(imgui.StyleVar_.item_spacing, imgui.ImVec2(spacing, spacing))
@@ -783,15 +1007,17 @@ class TileGridViewer(Widget):
                     if clicked_r:
                         self._orient_menu_ti = ti  # opened after end_child
                         self._orient_menu_open = True
-                    # source: single plane (lazy) or whole-tile MIP
+                    # source: single plane (lazy) or whole-tile MIP. Reads
+                    # happen on the prefetch thread; here we only consume what
+                    # it has already decompressed (cache miss -> placeholder).
                     plane_key = self._plane if self._view_mode == 1 else -1
                     gkey = (ti, c, self._view_mode, plane_key, rot, fx, fy)
                     thumb = self._thumb_cache.get(gkey)
-                    if thumb is None and budget > 0:
+                    if thumb is None:
                         if self._view_mode == 1:
-                            src = self._load_source_plane(arr, ti, c, self._plane)
+                            src = self._cached_source((ti, c, "plane", self._plane))
                         else:
-                            src = self._load_source_mip(arr, ti, c, "xy")
+                            src = self._cached_source((ti, c, "xy"))
                         if src is not None:
                             t = src
                             if rot:  # rotate first, then flips act on the view
@@ -804,7 +1030,6 @@ class TileGridViewer(Widget):
                             self._thumb_cache[gkey] = thumb
                             while len(self._thumb_cache) > _THUMB_CACHE_MAX:
                                 self._thumb_cache.popitem(last=False)
-                        budget -= 1
                     gpu = (
                         self._ensure_gpu(gkey, thumb, lo, hi)
                         if thumb is not None else None
@@ -906,14 +1131,8 @@ class TileGridViewer(Widget):
     @staticmethod
     def _toggle_button(label: str, active: bool, w: float) -> bool:
         """Button that stays highlighted while ``active``; returns True on click."""
-        if active:
-            imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
-            imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
-            imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
-        clicked = imgui.button(label, imgui.ImVec2(w, 0))
-        if active:
-            imgui.pop_style_color(3)
-        return clicked
+        with selected_button_style(active):
+            return imgui.button(label, imgui.ImVec2(w, 0))
 
     def _draw_tile_orient_menu(self, ti: int, label: str) -> None:
         """Rotate / flip menu for one tile (right-click popup body).
@@ -977,4 +1196,9 @@ class TileGridViewer(Widget):
         imgui.end()
 
     def cleanup(self) -> None:
+        self._prefetch_stop.set()
+        self._prefetch_wake.set()
+        for t in self._prefetch_threads:
+            t.join(timeout=1.0)
+        self._prefetch_threads = []
         self._reset_caches()

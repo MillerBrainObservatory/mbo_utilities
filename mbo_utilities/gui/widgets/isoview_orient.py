@@ -23,6 +23,7 @@ import tifffile
 from imgui_bundle import imgui
 
 from mbo_utilities.gui import _isoview_orient_state as orient_state
+from mbo_utilities.gui._imgui_helpers import draw_toolbar_row
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui.widgets._orient import (
     compose_R,
@@ -41,7 +42,8 @@ from mbo_utilities.gui.widgets.summary_image import (
 _WHITE = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
 _THUMB_MAX = 256
 _AXES = ("xy", "xz", "yz")
-_TOGGLE_LABELS = ("overlay", "reference", "adjustable")
+# 0 reference (ref alone), 1 target (2nd member alone), 2 overlay (both)
+_TOGGLE_LABELS = ("Reference", "Target", "Overlay")
 
 # pre-multiplier that picks which oriented axis is projected (down its Z):
 # xy -> Z, xz -> Y, yz -> X.
@@ -92,7 +94,7 @@ class IsoviewViewAlign(Widget):
         self._popup_open = False
         self._axis_idx = 0
         self._tile = 0
-        self._toggle = 0  # 0 overlay, 1 reference only, 2 adjustable only
+        self._toggle = 2  # 0 reference, 1 target, 2 overlay (default)
         self._sig: str | None = None
         self._pairs: list[dict] = []
         self._projections: dict | None = None
@@ -155,10 +157,12 @@ class IsoviewViewAlign(Widget):
             cams = sorted(cam for cam, v in cvm.items() if int(v) == vw_angle)
             cams = [cam for cam in cams if cam in views]
             if len(cams) >= 2:
+                from mbo_utilities.arrays.isoview.array import camera_view_label
                 pairs.append({
                     "view_key": vw_key,
                     "ref_c": views.index(cams[0]), "adj_c": views.index(cams[1]),
-                    "ref_label": f"CM{cams[0]:02d}", "adj_label": f"CM{cams[1]:02d}",
+                    "ref_label": camera_view_label(cams[0]),
+                    "adj_label": camera_view_label(cams[1]),
                 })
         return pairs
 
@@ -270,11 +274,11 @@ class IsoviewViewAlign(Widget):
         adj = _resize_to(adj, ref.shape)
         r = self._norm(ref, lo, hi)
         a = self._norm(adj, lo, hi)
-        if self._toggle == 1:        # reference only (gray)
+        if self._toggle == 0:        # reference only (gray)
             rgb = np.stack([r, r, r], axis=-1)
-        elif self._toggle == 2:      # adjustable only (gray)
+        elif self._toggle == 1:      # target only (gray)
             rgb = np.stack([a, a, a], axis=-1)
-        else:                         # overlay: reference cyan, adjustable red
+        else:                         # overlay: reference cyan, target red
             rgb = np.stack([a, r, r], axis=-1)
         return np.ascontiguousarray((rgb * 255).astype(np.uint8))
 
@@ -312,26 +316,32 @@ class IsoviewViewAlign(Widget):
             self._draw_popup(arr)
 
     def _draw_toolbar(self, arr) -> None:
-        imgui.set_next_item_width(90)
-        ch, ai = imgui.combo("Axis##viewalign", self._axis_idx, list(_AXES))
-        if ch:
-            self._axis_idx = ai
+        def _axis():
+            ch, v = imgui.combo("##viewalign_axis", self._axis_idx, list(_AXES))
+            if ch:
+                self._axis_idx = v
+
+        def _show():
+            ch, v = imgui.combo("##viewalign_show", self._toggle, list(_TOGGLE_LABELS))
+            if ch:
+                self._toggle = v
+
+        def _flip():
+            if imgui.small_button("flip##viewalign"):
+                self._toggle = 0 if self._toggle == 2 else 2
+
+        items = [("Axis", 90.0, _axis)]
         nt = int(arr.shape[0])
         if nt > 1:
-            imgui.same_line()
-            imgui.set_next_item_width(160)
-            tch, tv = imgui.slider_int("Tile##viewalign", self._tile, 0, nt - 1)
-            if tch:
-                self._tile = int(tv)
-        imgui.same_line()
-        imgui.set_next_item_width(120)
-        gch, gv = imgui.combo("View##viewalign_tog", self._toggle, list(_TOGGLE_LABELS))
-        if gch:
-            self._toggle = gv
-        imgui.same_line()
-        if imgui.small_button("flip overlay##viewalign"):
-            self._toggle = 0 if self._toggle else 1
-        imgui.text_colored(_WHITE, "overlay: reference = cyan, adjustable = red")
+            def _tile():
+                ch, v = imgui.slider_int("##viewalign_tile", self._tile, 0, nt - 1)
+                if ch:
+                    self._tile = int(v)
+            items.append(("Tile", 160.0, _tile))
+        items.append(("Show", 120.0, _show))
+        items.append((None, 48.0, _flip))
+        draw_toolbar_row(items)
+        imgui.text_colored(_WHITE, "overlay: reference = cyan, target = red")
 
     def _draw_pair(self, arr, pair: dict, cell: float) -> None:
         axis = _AXES[self._axis_idx]
@@ -342,7 +352,7 @@ class IsoviewViewAlign(Widget):
 
         imgui.text_colored(
             _WHITE,
-            f"{pair['view_key']}:  {pair['ref_label']} (ref) <- {pair['adj_label']} (adj)",
+            f"{pair['view_key']}:  {pair['ref_label']} (ref) <- {pair['adj_label']} (target)",
         )
         draw_orient_row(rotations, flips, key=pair["view_key"])
 

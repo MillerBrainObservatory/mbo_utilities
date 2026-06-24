@@ -14,6 +14,8 @@ from __future__ import annotations
 import numpy as np
 from imgui_bundle import imgui
 
+from mbo_utilities.gui._imgui_helpers import selected_button_style
+
 _WHITE = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
 
 
@@ -134,14 +136,8 @@ def orientation_ops(rotations: list, flips: list) -> list:
 
 def _orient_toggle(label: str, active: bool) -> bool:
     """Highlighted small button; returns True when clicked."""
-    if active:
-        imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.20, 0.45, 0.85, 1.0))
-        imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.0))
-        imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.16, 0.38, 0.75, 1.0))
-    clicked = imgui.small_button(label)
-    if active:
-        imgui.pop_style_color(3)
-    return clicked
+    with selected_button_style(active):
+        return imgui.small_button(label)
 
 
 def draw_orient_row(rotations: list, flips: list, key: str = "") -> bool:

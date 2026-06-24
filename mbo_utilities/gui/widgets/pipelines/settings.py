@@ -1235,7 +1235,9 @@ def _init_s2p_selection_state(self):
                 if num_planes == 1:
                     num_planes = len(self.fpath)
 
-            if hasattr(data, "num_color_channels"):
+            if hasattr(data, "num_views"):
+                num_channels = data.num_views
+            elif hasattr(data, "num_color_channels"):
                 num_channels = data.num_color_channels
             elif hasattr(data, "_num_color_channels"):
                 num_channels = data._num_color_channels

@@ -71,6 +71,19 @@ from mbo_utilities.arrays.features._stats import (
     PlaneStats,
     SliceStats,
 )
+from mbo_utilities.arrays.features._summary_stats import (
+    DEFAULT_BUDGET,
+    DEFAULT_METRICS,
+    StatsDim,
+    StatsDimRole,
+    StatsMetric,
+    SubsampleBudget,
+    SummaryStatsSpec,
+    build_summary_stats_spec,
+    canonical_axis,
+    default_dim_role,
+    subsample_indices,
+)
 from mbo_utilities.arrays.features._slicing import (
     ArraySlicing,
     ChunkInfo,
@@ -129,6 +142,18 @@ __all__ = [
     # stats
     "PlaneStats",
     "SliceStats",
+    # summary stats
+    "DEFAULT_BUDGET",
+    "DEFAULT_METRICS",
+    "StatsDim",
+    "StatsDimRole",
+    "StatsMetric",
+    "SubsampleBudget",
+    "SummaryStatsSpec",
+    "build_summary_stats_spec",
+    "canonical_axis",
+    "default_dim_role",
+    "subsample_indices",
     # roi
     "ROIFeature",
     "RoiFeatureMixin",

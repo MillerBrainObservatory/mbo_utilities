@@ -269,6 +269,7 @@ def summary(arr: Any) -> str:
     crops = get_crops(arr)
     if not crops:
         return "(none)"
+    from mbo_utilities.arrays.isoview.array import camera_view_label
     parts: list[str] = []
     for camera in sorted(crops):
         b = crops[camera]
@@ -276,7 +277,7 @@ def summary(arr: Any) -> str:
         y0, y1 = b["y"]
         x0, x1 = b["x"]
         parts.append(
-            f"CM{camera:02d} z[{z0}:{z1}] y[{y0}:{y1}] x[{x0}:{x1}]"
+            f"{camera_view_label(camera)} z[{z0}:{z1}] y[{y0}:{y1}] x[{x0}:{x1}]"
             + ("" if not _is_full_extent(b) else " (full)")
         )
     return " | ".join(parts)

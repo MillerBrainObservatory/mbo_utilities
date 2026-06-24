@@ -184,6 +184,54 @@ class LazyArray:
 
         return get_slider_dims(self)
 
+    def summary_stats_dim_role(self, name: str):
+        """How a scrollable dim is treated by the summary-stats tab.
+
+        Returns ``(is_series_candidate, off_role)`` where ``off_role`` is the
+        role the dim takes when it is not the chosen series axis. ``name`` is a
+        canonical axis label (``"Z"``/``"T"``/``"C"``/…). Override per array to
+        reclassify a dim (e.g. an array whose ``T`` axis holds spatial tiles
+        should return ``(False, GROUP)`` so tiles are broken out, not averaged).
+        See `mbo_utilities.arrays.features._summary_stats`.
+        """
+        from mbo_utilities.arrays.features._summary_stats import default_dim_role
+
+        return default_dim_role(name)
+
+    def summary_stats_metrics(self):
+        """Metric columns shown by the summary-stats tab (default: mean/std/SNR).
+
+        Override to add or replace metrics; each is a
+        `mbo_utilities.arrays.features._summary_stats.StatsMetric`.
+        """
+        from mbo_utilities.arrays.features._summary_stats import DEFAULT_METRICS
+
+        return DEFAULT_METRICS
+
+    def summary_stats_spec(
+        self, *, dims=None, shape=None, series_pref=None, labels=None
+    ):
+        """Resolve this array's summary-stats layout into a ``SummaryStatsSpec``.
+
+        ``dims``/``shape`` default to the array's own; the GUI passes the
+        rendered (possibly singleton-squeezed) view so axis positions match
+        what it indexes. ``series_pref`` ("z"/"t") and ``labels`` (canonical ->
+        display label) come from the GUI. The spec states exactly what the tab
+        will show via ``spec.describe()``.
+        """
+        from mbo_utilities.arrays.features._summary_stats import (
+            build_summary_stats_spec,
+        )
+
+        return build_summary_stats_spec(
+            tuple(dims) if dims is not None else tuple(self.dims),
+            tuple(shape) if shape is not None else tuple(self.shape),
+            dim_role=self.summary_stats_dim_role,
+            metrics=self.summary_stats_metrics(),
+            series_pref=series_pref,
+            labels=labels,
+        )
+
     def dim_index(self, label: str) -> int | None:
         try:
             return self.dims.index(label.upper())

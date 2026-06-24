@@ -15,11 +15,14 @@ from imgui_bundle import imgui, hello_imgui, implot, ImVec4, ImVec2
 __all__ = [
     "PopupAutoSize",
     "begin_popup_size",
+    "button_width",
     "checkbox_with_tooltip",
     "draw_boxed_label",
     "draw_checkbox_grid",
+    "draw_toolbar_row",
     "fmt_multivalue",
     "fmt_value",
+    "selected_button_style",
     "set_tooltip",
     "settings_row_with_popup",
     "style_imgui_opaque",
@@ -27,6 +30,76 @@ __all__ = [
     "text_wrapped_cell",
     "tooltip_marks_right",
 ]
+
+
+@contextmanager
+def selected_button_style(active: bool):
+    """Style a toggle button as the chosen option while ``active``.
+
+    Pushes a brighter blue fill plus a thin white border so the selected
+    option stands out clearly from the unselected ones. A no-op when
+    ``active`` is False (the button keeps its default look). Wrap one
+    ``imgui.button`` / ``imgui.small_button`` call::
+
+        with selected_button_style(active):
+            clicked = imgui.button(label)
+    """
+    if active:
+        imgui.push_style_color(imgui.Col_.button, ImVec4(0.26, 0.59, 1.0, 1.0))
+        imgui.push_style_color(imgui.Col_.button_hovered, ImVec4(0.34, 0.66, 1.0, 1.0))
+        imgui.push_style_color(imgui.Col_.button_active, ImVec4(0.20, 0.50, 0.95, 1.0))
+        imgui.push_style_color(imgui.Col_.border, ImVec4(1.0, 1.0, 1.0, 1.0))
+        imgui.push_style_var(imgui.StyleVar_.frame_border_size, 1.5)
+    try:
+        yield
+    finally:
+        if active:
+            imgui.pop_style_var(1)
+            imgui.pop_style_color(4)
+
+
+def button_width(label: str) -> float:
+    """Approximate width of a button labeled ``label``, for toolbar wrap math."""
+    style = imgui.get_style()
+    return imgui.calc_text_size(label).x + 2 * style.frame_padding.x
+
+
+def draw_toolbar_row(items: list) -> None:
+    """Lay out a horizontal control row that wraps to a new line on overflow.
+
+    ``items`` is a list of ``(label, width, draw)``:
+      - ``label`` (str): drawn as ``"label:"`` before the control; the helper
+        also calls ``set_next_item_width(width)`` before ``draw()``. Use a
+        ``##``-hidden imgui id inside ``draw`` so the built-in trailing label
+        stays off.
+      - ``label is None``: ``draw()`` renders as-is (button / checkbox /
+        text); ``width`` is its approximate pixel width, used only to decide
+        whether it still fits before the right edge.
+
+    A control group whose right edge would pass the content region's right
+    edge starts a new line instead of continuing on the same one, so nothing
+    runs off the right side.
+    """
+    style = imgui.get_style()
+    inner = style.item_inner_spacing.x
+    right = imgui.get_cursor_screen_pos().x + imgui.get_content_region_avail().x
+    for i, (label, width, draw) in enumerate(items):
+        total = (
+            width if label is None
+            else imgui.calc_text_size(f"{label}:").x + inner + width
+        )
+        if i > 0:
+            nxt = imgui.get_item_rect_max().x + style.item_spacing.x + total
+            if nxt <= right:
+                imgui.same_line()
+        if label is None:
+            draw()
+        else:
+            imgui.align_text_to_frame_padding()
+            imgui.text(f"{label}:")
+            imgui.same_line(0, inner)
+            imgui.set_next_item_width(width)
+            draw()
 
 
 def draw_boxed_label(

@@ -765,7 +765,7 @@ def _write_aux_2d_per_tc(
     src_dtype = sample.dtype
 
     nt = iso_arr.num_timepoints
-    nc = iso_arr.num_color_channels
+    nc = iso_arr.num_views
     shape = (nt, nc, 1, dim0, dim1)
     chunk = (1, 1, 1, dim0, dim1)
 
@@ -1065,7 +1065,7 @@ def _write_min_intensity(
         return
 
     nt = iso_arr.num_timepoints
-    nc = iso_arr.num_color_channels
+    nc = iso_arr.num_views
     data = np.zeros((nt, nc, 2), dtype=np.float32)
 
     for ti, per_cam in scanner.items():

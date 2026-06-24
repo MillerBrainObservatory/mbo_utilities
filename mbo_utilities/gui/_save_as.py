@@ -625,10 +625,9 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
     """If mean-subtract is enabled and zstats are computed, write a (C, Z, Y, X)
     npy file and return its path. Returns None if not applicable / unavailable.
 
-    ``_zstats_means[i]`` is a dict keyed by channel int; this writer
-    picks the channel currently selected for stats display (which
-    follows the C slider by default) so the saved stack matches what
-    the user sees in the GUI.
+    ``_zstats_means[i]`` is a dict keyed by the breakout-combo tuple; this
+    writer picks the combo currently shown in the stats tab (which follows
+    the sliders) so the saved stack matches what the user sees in the GUI.
     """
     if not getattr(parent, "_saveas_video_mean_subtract", False):
         return None
@@ -639,8 +638,7 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
     import numpy as np
     import tempfile
 
-    from mbo_utilities.gui._stats import _selected_channel
-    channel = _selected_channel(parent)
+    from mbo_utilities.gui._stats import current_breakout_key
 
     stacks = []
     for i in range(getattr(parent, "num_graphics", len(means))):
@@ -649,9 +647,11 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
         slot = means[i]
         if not isinstance(slot, dict) or not slot:
             return None
-        arr = slot.get(channel)
+        arr = slot.get(current_breakout_key(parent, i))
         if arr is None:
-            arr = slot.get(0)
+            arr = slot.get(())
+        if arr is None:
+            arr = next(iter(slot.values()))
         if arr is None:
             return None
         stacks.append(np.asarray(arr, dtype=np.float32))
@@ -876,8 +876,10 @@ def _draw_selection_section(parent: Any):
             num_planes = data.num_planes
         else:
             num_planes = 1
-        # get color channels (PMT/detector channels)
-        if hasattr(data, "num_color_channels"):
+        # C axis: num_views for IsoView (cameras), else color channels
+        if hasattr(data, "num_views"):
+            num_channels = data.num_views
+        elif hasattr(data, "num_color_channels"):
             num_channels = data.num_color_channels
         elif hasattr(data, "_num_color_channels"):
             num_channels = data._num_color_channels

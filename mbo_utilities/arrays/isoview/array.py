@@ -402,7 +402,7 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
     Keys produced (when present in source XML):
       data_header, specimen_name (+ parsed tile_name/tile_x/tile_y/tile_z
       when it ends in three grid digits), timestamp, time_point,
-      specimen_XYZT (+ parsed stage_x/stage_y/stage_z), angle,
+      stage_x/stage_y/stage_z (parsed from specimen_XYZT), angle,
       camera_index, camera_type,
       camera_roi, wavelength, illumination_arms, illumination_filter,
       exposure_time, detection_filter, detection_objective (+ objective_mag),
@@ -437,7 +437,7 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
             ("time_point", int), ("time_step", float),
             ("camera_pixel_pitch_um", float),
             ("specimen_name", str), ("data_header", str), ("timestamp", str),
-            ("specimen_XYZT", str), ("camera_index", str), ("camera", str),
+            ("camera_index", str), ("camera", str),
             ("camera_type", str), ("camera_roi", str), ("wavelength", str),
             ("camera_orientation", str), ("magnification", str),
             ("illumination_arms", str), ("illumination_filter", str),
@@ -445,7 +445,6 @@ def _parse_isoview_xml(xml_path: Path) -> dict:
             ("stack_direction", str), ("planes", str),
             ("laser_power", str), ("experiment_notes", str),
             ("software_version", str), ("z_offset_planes", str),
-            ("specimen_drift", str),
         ):
             if key in a:
                 try:
@@ -641,11 +640,18 @@ def _split_common_vs_tile(
     return shared, per_tile
 
 
-# fields whose comma is internal to a single value (NOT a per-camera split)
+# fields NOT split on their comma: either the comma is internal to one value,
+# or the comma pair describes the camera pair as a whole (stack_direction
+# "-Z,+Z" is kept intact and copied to both cameras of the view).
 _NOT_PER_CAMERA_FIELDS = frozenset({
     "laser_power", "specimen_XYZT", "z_offset_planes", "y_offset_planes",
-    "experiment_notes", "timestamp",
+    "experiment_notes", "timestamp", "stack_direction",
 })
+
+# per-tile stride fields surfaced in each tile's metadata section
+_TILE_STRIDE_KEYS = (
+    "tile_stride_xyz_um", "tile_stride_x", "tile_stride_y", "tile_stride_z",
+)
 
 
 def _cameras_for_xml(meta: dict) -> list[int]:
@@ -663,36 +669,29 @@ def _cameras_for_xml(meta: dict) -> list[int]:
     return []
 
 
-def _view_for_xml(meta: dict) -> int | None:
-    """View angle for one per-view XML: 0 (Z-scan) or 90 (Y-scan)."""
-    direction = str(meta.get("stack_direction", "")).upper()
-    if "Z" in direction:
-        return 0
-    if "Y" in direction:
-        return 90
-    return None
+def _build_cameras_views(parsed: list[dict], common_keys: set) -> dict:
+    """Fold per-view XMLs into a single per-camera metadata section.
 
-
-def _build_cameras_views(parsed: list[dict]) -> tuple[dict, dict]:
-    """Split per-view XMLs into camera- and view-keyed sections.
-
-    Each XML is one view (VW00 = Z-scan cameras 0,1; VW90 = Y-scan cameras
-    2,3). A comma-separated field carries one value per camera and lands in
-    ``cameras[cam]`` (split); every other (non-comma) field lands in
-    ``views[VW##]``. Per-camera ``pixel_resolution_um`` is derived from the
-    view's ``camera_pixel_pitch_um`` and the camera's ``magnification``.
-    Returns ``(cameras, views)``.
+    Each XML covers a camera pair (cameras 0,1 = Z-scan; 2,3 = Y-scan).
+    A comma-separated field carries one value per camera and is split into
+    ``cameras[cam]``; ``stack_direction`` is kept whole (``-Z,+Z`` describes
+    the pair, copied to both cameras). A non-comma field that differs between
+    views (e.g. ``illumination_arms``, ``z_step``/``y_step``) is copied whole
+    to each camera in that view; fields already shared across all XMLs stay in
+    the common metadata (``common_keys``) and are not duplicated here.
+    Per-camera ``pixel_resolution_um`` is derived from
+    ``camera_pixel_pitch_um`` and the camera's ``magnification``.
     """
     cameras: dict[int, dict] = {}
-    views: dict[str, dict] = {}
     for meta in parsed:
         cams = _cameras_for_xml(meta)
-        view = _view_for_xml(meta)
-        vkey = f"VW{view:02d}" if view is not None else None
+        if not cams:
+            continue
         for key, val in meta.items():
+            if key == "camera":
+                continue  # "01"/"23" pair label: resolves cams, not surfaced
             per_cam = (
-                bool(cams)
-                and key not in _NOT_PER_CAMERA_FIELDS
+                key not in _NOT_PER_CAMERA_FIELDS
                 and isinstance(val, str)
                 and "," in val
                 and len(val.split(",")) == len(cams)
@@ -700,15 +699,16 @@ def _build_cameras_views(parsed: list[dict]) -> tuple[dict, dict]:
             if per_cam:
                 for cam, part in zip(cams, val.split(",")):
                     cameras.setdefault(cam, {})[key] = part.strip()
-            elif key == "dimensions" and cams and getattr(val, "ndim", 0) == 2 \
+            elif key == "dimensions" and getattr(val, "ndim", 0) == 2 \
                     and val.shape[0] == len(cams):
                 for i, cam in enumerate(cams):
                     cameras.setdefault(cam, {})["dimensions"] = val[i].tolist()
-            elif vkey is not None:
-                views.setdefault(vkey, {})[key] = val
+            elif key not in common_keys:
+                for cam in cams:
+                    cameras.setdefault(cam, {})[key] = val
         # per-camera resolution = view pixel pitch / camera magnification
         pitch = meta.get("camera_pixel_pitch_um")
-        if cams and pitch:
+        if pitch:
             for cam in cams:
                 mag_str = cameras.get(cam, {}).get("magnification")
                 if not mag_str:
@@ -719,13 +719,13 @@ def _build_cameras_views(parsed: list[dict]) -> tuple[dict, dict]:
                     )
                 except (ValueError, TypeError, ZeroDivisionError):
                     pass
-    return cameras, views
+    return cameras
 
 
 def _read_all_isoview_xml(
     candidate_dirs: list[Path],
     specimen: int = 0,
-) -> tuple[dict, dict, dict]:
+) -> tuple[dict, dict]:
     """Read XMLs across one or more candidate directories, split by camera.
 
     ``candidate_dirs`` is tried in order. The first directory yielding any
@@ -734,10 +734,10 @@ def _read_all_isoview_xml(
     corrected/fused copies are byte-identical fallbacks.
 
     Returns ``(common_metadata, per_camera_metadata)`` where:
-      - ``common_metadata`` carries every field whose value matches across
-        all parsed XMLs (numpy arrays compared with ``np.allclose``).
-      - ``per_camera_metadata[cam_idx]`` carries the channel-specific
-        fields when at least one XML disagrees on that key.
+      - ``common_metadata`` carries every field present in *all* parsed XMLs
+        with a matching value (numpy arrays compared with ``np.allclose``).
+      - ``per_camera_metadata[cam_idx]`` carries the per-camera fields (comma
+        split) plus the per-view fields that differ between views.
 
     Two convenience fields are synthesized when possible:
       - ``camera_view_map``: ``{0:0, 1:0}`` for Z-scan and ``{2:90, 3:90}``
@@ -794,13 +794,16 @@ def _read_all_isoview_xml(
     common: dict = {}
     for key in all_keys:
         values = [meta.get(key) for meta in parsed if key in meta]
-        if not values:
-            continue
-        if all(_meta_eq(values[0], v) for v in values[1:]):
+        # common = present in EVERY parsed XML with a matching value; a field
+        # in only one view (e.g. z_step on the Z-scan view) is view-specific
+        # and folds into that view's cameras instead.
+        if len(values) == len(parsed) and all(
+            _meta_eq(values[0], v) for v in values[1:]
+        ):
             common[key] = values[0]
 
-    # cameras (per-camera, comma fields split) + views (per-view, non-comma)
-    cameras, views = _build_cameras_views(parsed)
+    # per-camera section: comma fields split, view-specific fields folded in
+    cameras = _build_cameras_views(parsed, set(common))
 
     if camera_view_map:
         common["camera_view_map"] = camera_view_map
@@ -817,7 +820,7 @@ def _read_all_isoview_xml(
                 common["axial_step"] = meta["y_step"]
                 break
 
-    return common, cameras, views
+    return common, cameras
 
 
 def _ome_block(zarr_attrs: dict) -> dict:
@@ -1016,17 +1019,65 @@ def _first_method_dir(fused_root: Path) -> Path | None:
 # group(1): leading tile token — SPM## (legacy/timelapse) or a tiled
 # specimen_name grid token (e.g. TL000); the token has no underscore.
 _CORRECTED_RE = re.compile(
-    r"^([^_]+)(?:_TM(\d+))?_CM(\d+)(?:_(?:VW|CHN)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
+    r"^([^_]+)(?:_TM(\d+))?_(CM|VW)(\d+)(?:_(?:CHN|CH)(\d+))?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
+# VW##_VW## is a fused camera pair (the two view angles); a lone VW## is a
+# single-camera passthrough. CH## is the wavelength channel.
 _FUSED_RE = re.compile(
-    # CM##_CM## is a fused camera pair; a lone CM## is a single-camera view.
+    r"^([^_]+)(?:_TM(\d+))?_VW(\d+)(?:_VW(\d+))?_CH(\d+)"
+    r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
+)
+# legacy fused naming: CM##_CM##_VW##(_CHN##); a lone CM##_VW## is single-camera.
+_FUSED_LEGACY_RE = re.compile(
     r"^([^_]+)(?:_TM(\d+))?_CM(\d+)(?:_CM(\d+))?_(?:VW|CHN)(\d+)(?:_CHN(\d+))?"
     r"(?:\.fusedStack)?\.(?:ome\.tif|tif|tiff|ome\.zarr|zarr|klb)$"
 )
+
+
+def _match_fused(name: str):
+    """``(tile, a0, a1, chn)`` for a fused filename (a1=-1 when single), with
+    a0/a1 as view angles. Matches new VW##_VW##_CH## and legacy CM##_CM##_VW##.
+    Returns ``None`` if neither matches."""
+    m = _FUSED_RE.match(name)
+    if m:
+        a1 = int(m.group(4)) if m.group(4) is not None else -1
+        return m.group(1), int(m.group(3)), a1, int(m.group(5))
+    m = _FUSED_LEGACY_RE.match(name)
+    if m:
+        c0 = int(m.group(3))
+        c1 = int(m.group(4)) if m.group(4) is not None else -1
+        chn = int(m.group(6)) if m.group(6) is not None else 0
+        a0 = CAMERA_VIEW_ANGLE.get(c0, c0)
+        a1 = CAMERA_VIEW_ANGLE.get(c1, c1) if c1 >= 0 else -1
+        return m.group(1), a0, a1, chn
+    return None
 _RAW_STACK_RE = re.compile(
     r"SPC(\d+)_TM(\d+)_ANG\d+_CM(\d+)_CHN(\d+)_PH\d+\.stack$"
 )
 _KLB_TM_RE = re.compile(r"SPM(\d+)_TM(\d+)_CM(\d+)_CHN(\d+)\.klb$")
+
+# Camera index -> view angle (deg): the four cameras sit at 0/90/180/270 around
+# the sample (CM0=VW00 ref, CM2=VW90, CM1=VW180, CM3=VW270). User-facing labels
+# are VW{angle}; raw .stack/.klb filenames keep their CM# (microscope naming).
+CAMERA_VIEW_ANGLE = {0: 0, 1: 180, 2: 90, 3: 270}
+VIEW_ANGLE_CAMERA = {v: k for k, v in CAMERA_VIEW_ANGLE.items()}
+
+
+def camera_view_label(cam: int) -> str:
+    """``VW{angle}`` label for a camera index (falls back to the index)."""
+    return f"VW{CAMERA_VIEW_ANGLE.get(int(cam), int(cam)):02d}"
+
+
+def camera_from_view_label(label: str) -> "int | None":
+    """Camera index for a ``VW{angle}`` label, or ``None`` if it isn't one."""
+    m = re.search(r"VW(\d+)", str(label))
+    return VIEW_ANGLE_CAMERA.get(int(m.group(1))) if m else None
+
+
+def _token_to_camera(token: str, num: int) -> int:
+    """Camera index from a filename view token: ``CM##`` is the literal camera
+    (raw/legacy); ``VW{angle}`` maps the view angle back to the camera."""
+    return int(num) if str(token).upper() == "CM" else VIEW_ANGLE_CAMERA.get(int(num), int(num))
 
 # Per-kind filename regex whose group(1) is the specimen (tile) number.
 # Used to recover the SPC/SPM id of each tile slot for per-tile XML reads.
@@ -1037,13 +1088,15 @@ _KIND_SPECIMEN_RE = {
     "clusterpt": _KLB_TM_RE,
 }
 
-# projection group(1): leading tile token (SPM## or grid token, no underscore)
+# projection group(1): leading tile token (SPM## or grid token, no underscore).
+# group(3) is the camera/angle number (CM index or VW angle) — camera_view_label
+# yields the right VW label for either, so the CM|VW prefix is non-capturing.
 _PROJ_FLAT_RE = re.compile(
-    r"^([^_]+)(?:_TM(\d+))?_CM(\d+)(?:_CHN\d+)?\.(xy|xz|yz)Projection\.tif$",
+    r"^([^_]+)(?:_TM(\d+))?_(?:CM|VW)(\d+)(?:_(?:CHN|CH)\d+)?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_FUSED_RE = re.compile(
-    r"^([^_]+)(?:_TM(\d+))?_CM(\d+)(?:_CM(\d+))?_(?:VW|CHN)(\d+)(?:_CHN(\d+))?\.(xy|xz|yz)Projection\.tif$",
+    r"^([^_]+)(?:_TM(\d+))?_(?:CM|VW)(\d+)(?:_(?:CM|VW)(\d+))?_(?:VW|CHN|CH)(\d+)(?:_(?:CHN|CH)(\d+))?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_VW_ONLY_RE = re.compile(
@@ -1051,6 +1104,20 @@ _PROJ_VW_ONLY_RE = re.compile(
     re.IGNORECASE,
 )
 _AXIS_ORDER = ("xy", "xz", "yz")
+
+# Acquisition-time MIPs written by the microscope live under
+# <base>/projections/<raw_name>/ as CV (=xy, max-Z) and OV (=xz, max-Y); the
+# scope writes no yz. Two redundant variants exist: per-timepoint
+# MI_Projection_* and across-time Global_MI_Projection_* (no TM).
+_MIC_VIEW_AXIS = {"cv": "xy", "ov": "xz"}
+_MIC_PERTM_RE = re.compile(
+    r"^MI_Projection_(CV|OV)_SPC(\d+)_TM(\d+)_ANG\d+_CM(\d+)_CH\d+_PH\d+\.tif$",
+    re.IGNORECASE,
+)
+_MIC_GLOBAL_RE = re.compile(
+    r"^Global_MI_Projection_(CV|OV)_CM(\d+)_SPC(\d+)_CH\d+\.tif$",
+    re.IGNORECASE,
+)
 
 
 def _finalize_projections(
@@ -1098,7 +1165,7 @@ def _scan_flat_projections(proj_dir: Path) -> dict | None:
     views: set[str] = set()
     files: dict[tuple[str, str, int], Path] = {}
     for spm, tm, cm, axis, f in parsed:
-        view = f"CM{cm:02d}"
+        view = camera_view_label(cm)
         axes.add(axis)
         views.add(view)
         files[(axis, view, spm if use_spm else tm)] = f
@@ -1121,7 +1188,7 @@ def _iter_fused_leaf_dirs(root: Path):
 
     def _has_fused(d: Path) -> bool:
         try:
-            return any(_FUSED_RE.match(c.name) for c in d.iterdir())
+            return any(_match_fused(c.name) is not None for c in d.iterdir())
         except OSError:
             return False
 
@@ -1242,7 +1309,7 @@ def _scan_corrected(spm_dir: Path):
             m = _CORRECTED_RE.match(f.name)
             if not m:
                 continue
-            cam = int(m.group(3))
+            cam = _token_to_camera(m.group(3), m.group(4))
             tp_paths.setdefault(ti, {})[cam] = f
             cams.add(cam)
 
@@ -1264,7 +1331,7 @@ def _scan_corrected(spm_dir: Path):
             _read_cams(tm, ti)
 
     view_keys = sorted(cams)
-    channel_names = [f"CM{c:02d}" for c in view_keys]
+    channel_names = [camera_view_label(c) for c in view_keys]
     return tp_paths, view_keys, channel_names, is_tiled
 
 
@@ -1298,16 +1365,15 @@ def _scan_fused(method_dir: Path):
                 continue
             if _is_aux(f):
                 continue
-            m = _FUSED_RE.match(f.name)
-            if not m:
+            parsed = _match_fused(f.name)
+            if parsed is None:
                 continue
+            tile_tok, a0, a1, chn = parsed
             # tiled leaves (no TM dir) key the slot by the leading tile token
             # (SPM## or grid name) so each tile gets its own timepoint;
             # timelapse keys by the TM dir.
-            slot = tm_from_dir if tm_from_dir is not None else m.group(1)
-            chn = int(m.group(6)) if m.group(6) is not None else -1
-            cam1 = int(m.group(4)) if m.group(4) is not None else -1
-            key = (int(m.group(3)), cam1, int(m.group(5)), chn)
+            slot = tm_from_dir if tm_from_dir is not None else tile_tok
+            key = (a0, a1, chn)
             by_tm.setdefault(slot, {})[key] = f
             views.add(key)
 
@@ -1317,8 +1383,9 @@ def _scan_fused(method_dir: Path):
     tp_paths = {ti: by_tm[tm] for ti, tm in enumerate(sorted(by_tm))}
     view_keys = sorted(views)
     channel_names = [
-        f"VW{vw:02d}_CHN{chn:02d}_fused" if chn >= 0 else f"VW{vw:02d}_fused"
-        for _, _, vw, chn in view_keys
+        (f"VW{a0:02d}_VW{a1:02d}_CH{chn:02d}_fused" if a1 >= 0
+         else f"VW{a0:02d}_CH{chn:02d}_fused")
+        for a0, a1, chn in view_keys
     ]
     return tp_paths, view_keys, channel_names, is_tiled
 
@@ -1368,7 +1435,7 @@ def _scan_raw(base_path: Path):
     sorted_keys = sorted(by_key)
     tp_paths = {ti: by_key[k] for ti, k in enumerate(sorted_keys)}
     view_keys = sorted(views)
-    channel_names = [f"CM{cm}_CHN{ch:02d}" for cm, ch in view_keys]
+    channel_names = [camera_view_label(cm) for cm, ch in view_keys]
     return tp_paths, view_keys, channel_names, use_spc
 
 
@@ -1398,7 +1465,7 @@ def _scan_klb_tm(base_path: Path):
             views.add(key)
 
     view_keys = sorted(views)
-    channel_names = [f"CM{cm:02d}_CHN{ch:02d}" for cm, ch in view_keys]
+    channel_names = [camera_view_label(cm) for cm, ch in view_keys]
     return tp_paths, view_keys, channel_names, False
 
 
@@ -1543,28 +1610,72 @@ def _raw_projections(arr: "IsoviewArray") -> dict | None:
     )
 
 
+def _scan_microscope_projections(mic_dir: Path) -> dict | None:
+    """Index acquisition-time MIPs written by the microscope, or ``None``.
+
+    Keys are ``(axis, spc, cam, tm)`` where ``axis`` is ``xy``/``xz`` (from
+    CV/OV) and ``tm`` is ``None`` for the across-time ``Global_MI`` variant,
+    used as a fallback when no per-timepoint file exists.
+    """
+    if not mic_dir.is_dir():
+        return None
+    index: dict[tuple[str, int, int, int | None], Path] = {}
+    for f in mic_dir.iterdir():
+        if not f.is_file():
+            continue
+        m = _MIC_PERTM_RE.match(f.name)
+        if m:
+            view, spc, tm, cam = m.groups()
+            index[(_MIC_VIEW_AXIS[view.lower()], int(spc), int(cam), int(tm))] = f
+            continue
+        m = _MIC_GLOBAL_RE.match(f.name)
+        if m:
+            view, cam, spc = m.groups()
+            index.setdefault(
+                (_MIC_VIEW_AXIS[view.lower()], int(spc), int(cam), None), f
+            )
+    return index or None
+
+
+def _microscope_sources(index: dict, spc: int, tm: int, cam: int) -> dict | None:
+    """Return ``{"xy": path, "xz": path}`` for one camera (per-timepoint file
+    preferred over the across-time fallback), or ``None`` unless both axes are
+    present so the caller falls back to reading the raw volume.
+    """
+    out = {}
+    for axis in ("xy", "xz"):
+        p = index.get((axis, spc, cam, tm)) or index.get((axis, spc, cam, None))
+        if p is None:
+            return None
+        out[axis] = p
+    return out
+
+
 def make_raw_projections(
     raw_dir: str | Path,
     *,
     overwrite: bool = False,
     progress_callback=None,
 ) -> dict:
-    """Write per-camera XY/XZ/YZ max-projections for a raw isoview acquisition.
+    """Write per-camera XY and XZ max-projections for a raw isoview acquisition.
 
-    For each ``(specimen, timepoint, camera)`` raw ``.stack`` the volume
-    (Z, Y, X) is read once and reduced over Z/Y/X to XY/XZ/YZ MIPs, written
-    into the flat sibling ``<raw_dir>.raw.projections/`` directory — the same
-    location and names :func:`_raw_projections` (and the GUI previews) read.
-    Names are ``<tile>_CM##.{xy,xz,yz}Projection.tif`` for tiled acquisitions
-    (``<tile>`` = specimen_name grid token, else SPM##) and
-    ``SPM##_TM######_CM##.…`` for timelapse. Matches MATLAB correctStack.m.
-    Existing files are skipped unless ``overwrite``.
+    When the microscope wrote acquisition-time MIPs under
+    ``<base>/projections/<raw_name>/`` (CV=xy, OV=xz), they are copied directly
+    and no raw volume is read. Otherwise each ``(specimen, timepoint, camera)``
+    raw ``.stack`` volume (Z, Y, X) is read once and reduced over Z/Y to the
+    XY/XZ MIPs. YZ is not produced (the scope writes none; only the
+    orthogonal-views preview used it). Output goes to the flat sibling
+    ``<raw_dir>.raw.projections/`` — the same location and names
+    :func:`_raw_projections` (and the GUI previews) read. Names are
+    ``<tile>_CM##.{xy,xz}Projection.tif`` for tiled acquisitions (``<tile>`` =
+    specimen_name grid token, else SPM##) and ``SPM##_TM######_CM##.…`` for
+    timelapse. Existing files are skipped unless ``overwrite``.
 
     CHN in a raw filename marks the camera's view, not a color channel,
     so views collapse to one projection set per camera (lowest CHN wins).
 
     Returns ``{"dir": Path, "written": int, "skipped": int, "total": int}``
-    where ``written``/``skipped`` count cameras (each writes three planes).
+    where ``written``/``skipped`` count cameras (each writes two planes).
     """
     import tifffile
 
@@ -1595,6 +1706,9 @@ def make_raw_projections(
             best[key] = (chn, f)
 
     proj_dir = raw_dir.parent / f"{raw_dir.name}.raw.projections"
+    mic_index = _scan_microscope_projections(
+        raw_dir.parent / "projections" / raw_dir.name
+    )
     total = len(best)
     written = skipped = 0
     if total:
@@ -1626,21 +1740,33 @@ def make_raw_projections(
             base = f"{spc_to_token[spc]}_CM{cam:02d}"
         else:
             base = f"SPM{spc:02d}_TM{tm:06d}_CM{cam:02d}"
-        # stack is (Z, Y, X): axis 0/1/2 -> XY/XZ/YZ (matches correctStack.m)
-        targets = [
-            (0, proj_dir / f"{base}.xyProjection.tif"),
-            (1, proj_dir / f"{base}.xzProjection.tif"),
-            (2, proj_dir / f"{base}.yzProjection.tif"),
-        ]
-        if not overwrite and all(p.exists() for _, p in targets):
+        # stack is (Z, Y, X): axis 0 -> XY (max-Z), axis 1 -> XZ (max-Y)
+        targets = {
+            "xy": (0, proj_dir / f"{base}.xyProjection.tif"),
+            "xz": (1, proj_dir / f"{base}.xzProjection.tif"),
+        }
+        if not overwrite and all(p.exists() for _, p in targets.values()):
             skipped += 1
-        else:
-            vol = np.asarray(LazyVolume(path, dimensions=(w, h, 0))[:])
-            for axis, out_path in targets:
+            if progress_callback is not None:
+                progress_callback(i + 1, total, base)
+            continue
+        src = _microscope_sources(mic_index, spc, tm, cam) if mic_index else None
+        if src is not None:
+            for axis_name, (_axis, out_path) in targets.items():
                 if out_path.exists() and not overwrite:
                     continue
-                tifffile.imwrite(out_path, np.max(vol, axis=axis))
-            written += 1
+                tifffile.imwrite(
+                    out_path, tifffile.imread(src[axis_name]), compression="zstd"
+                )
+        else:
+            vol = np.asarray(LazyVolume(path, dimensions=(w, h, 0))[:])
+            for axis, out_path in targets.values():
+                if out_path.exists() and not overwrite:
+                    continue
+                tifffile.imwrite(
+                    out_path, np.max(vol, axis=axis), compression="zstd"
+                )
+        written += 1
         if progress_callback is not None:
             progress_callback(i + 1, total, base)
 
@@ -1776,7 +1902,6 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         self._raw_dims: tuple[int, int, int] | None = None
         self._metadata: dict = {}
         self._camera_metadata: dict[int, dict] = {}
-        self._view_metadata: dict[str, dict] = {}
         self._tile_metadata: dict[int, dict] = {}
         if self._kind_cfg["needs_raw_dims"]:
             self._probe_raw_xml()
@@ -1883,25 +2008,23 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             return
         if not candidate_dirs:
             return
-        common, cameras, views = _read_all_isoview_xml(candidate_dirs)
+        common, cameras = _read_all_isoview_xml(candidate_dirs)
         # don't clobber raw kind's authoritative dimensions array
         if "dimensions" in self._metadata:
             common.pop("dimensions", None)
         self._metadata.update(common)
         if cameras:
             self._camera_metadata.update(cameras)
-        if views:
-            self._view_metadata.update(views)
 
     def _load_tiled_xml_metadata(self, xml_dirs_fn) -> None:
-        """Read each tile's XML and split fields three ways.
+        """Read each tile's XML and split fields into shared/camera/tile.
 
         Shared fields (identical across every tile) merge into
-        ``self._metadata``; per-camera fields (scan direction, wavelength,
-        view) into ``self._camera_metadata`` — both shared the same way a
-        timelapse dataset would surface them. Fields that differ per tile
-        (stage_x/y/z, specimen_XYZT, specimen_name, specimen) land in
-        ``self._tile_metadata`` keyed by tile (T-axis) index.
+        ``self._metadata``; per-camera fields (scan direction, illumination,
+        z/y step) into ``self._camera_metadata``. Fields that differ per tile
+        (stage_x/y/z, specimen_name, tile grid index) land in
+        ``self._tile_metadata`` keyed by tile (T-axis) index, along with the
+        per-tile stride (``tile_stride_*``).
 
         Reuses :func:`_read_all_isoview_xml` per tile (which already does
         the per-camera split + camera_view_map synthesis) and then folds
@@ -1916,21 +2039,17 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         specimens = self._tile_specimen_ids()
         per_tile_common: dict[int, dict] = {}
         cameras: dict[int, dict] = {}
-        views: dict[str, dict] = {}
         for ti in self._timepoints:
             spc = specimens.get(ti, ti)
             dirs = self._tile_xml_dirs(ti, base_dirs)
-            common_ti, cameras_ti, views_ti = _read_all_isoview_xml(dirs, specimen=spc)
+            common_ti, cameras_ti = _read_all_isoview_xml(dirs, specimen=spc)
             if not common_ti and not cameras_ti:
                 continue
-            common_ti["specimen"] = spc
             per_tile_common[ti] = common_ti
-            # camera/view intrinsics are identical across tiles — keep the
-            # first tile's split as the shared cameras/views sections.
+            # camera intrinsics are identical across tiles — keep the first
+            # tile's split as the shared cameras section.
             if cameras_ti and not cameras:
                 cameras = cameras_ti
-            if views_ti and not views:
-                views = views_ti
 
         if not per_tile_common:
             return
@@ -1938,6 +2057,14 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         shared, per_tile = _split_common_vs_tile(per_tile_common)
         if "dimensions" in self._metadata:
             shared.pop("dimensions", None)
+        # Surface the tile stride per tile (it is identical across tiles, so
+        # _split_common_vs_tile parks it in `shared`); move it into each
+        # tile's section so the strides live alongside the per-tile offsets.
+        for ti, d in per_tile_common.items():
+            for k in _TILE_STRIDE_KEYS:
+                if k in d:
+                    per_tile.setdefault(ti, {})[k] = d[k]
+                shared.pop(k, None)
         # Drop tile-varying fields seeded into _metadata by the single-XML
         # probe (e.g. stage_x/y/z, specimen_name from spec00) so they don't
         # linger as stale "shared" values once they live in the tiles section.
@@ -1947,8 +2074,6 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         self._metadata.update(shared)
         if cameras:
             self._camera_metadata.update(cameras)
-        if views:
-            self._view_metadata.update(views)
         self._tile_metadata.update(per_tile)
 
     def _tile_specimen_ids(self) -> dict[int, int]:
@@ -2045,6 +2170,18 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
     def is_tiled(self) -> bool:
         return self._is_tiled
 
+    def summary_stats_dim_role(self, name: str):
+        """Tiled datasets fold spatial tiles into T, so T is a group (one stats
+        series per tile), never collapsed. Otherwise use the default mapping."""
+        from mbo_utilities.arrays.features._summary_stats import (
+            StatsDimRole,
+            default_dim_role,
+        )
+
+        if name.upper() == "T" and self._is_tiled:
+            return (False, StatsDimRole.GROUP)
+        return default_dim_role(name)
+
     @property
     def slider_dim_labels(self) -> tuple[str, ...]:
         """User-facing slider labels for non-singleton T, C, Z axes.
@@ -2087,7 +2224,24 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
 
     @property
     def num_color_channels(self) -> int:
-        return len(self._view_keys)
+        """Number of distinct optical color channels (excitation wavelengths).
+
+        A color channel is one wavelength, NOT a camera: isoview images each
+        wavelength with several cameras/views, so this is usually 1 even
+        though the C axis (:attr:`num_views`) holds 2-4 cameras. C-axis
+        consumers (writers, consolidate) iterate :attr:`num_views`. Counted
+        from distinct ``wavelength`` values across the XML sidecars; 1 when no
+        wavelength metadata is present.
+        """
+        wavelengths = set()
+        w = self._metadata.get("wavelength")
+        if w not in (None, ""):
+            wavelengths.add(str(w))
+        for cam in self._camera_metadata.values():
+            cw = cam.get("wavelength")
+            if cw not in (None, ""):
+                wavelengths.add(str(cw))
+        return len(wavelengths) or 1
 
     @property
     def views(self) -> list:
@@ -2103,34 +2257,24 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
 
         Carries the comma-separated fields split per camera (``magnification``,
         ``camera_type``, ``camera_roi``, ``detection_objective``,
-        ``stack_direction``, ``dimensions``, ``planes``) plus the derived
-        per-camera ``pixel_resolution_um``. Per-view (non-comma) fields live
-        on :attr:`view_metadata`. Empty when no XML sidecar was found.
+        ``dimensions``, ``planes``) plus per-view fields that differ between
+        views folded onto each camera (``stack_direction`` as the whole
+        ``-Z,+Z`` pair, ``illumination_arms``, ``z_step``/``y_step``) and the
+        derived per-camera ``pixel_resolution_um``. Fields shared across all
+        cameras live on :attr:`metadata`. Empty when no XML sidecar was found.
         """
         return {k: dict(v) for k, v in self._camera_metadata.items()}
-
-    @property
-    def view_metadata(self) -> dict[str, dict]:
-        """Per-view XML metadata, keyed by view (``"VW00"``/``"VW90"``).
-
-        Each per-view XML (VW00 = Z-scan, VW90 = Y-scan) contributes its
-        non-comma fields here (``camera_pixel_pitch_um``, ``camera_orientation``,
-        ``wavelength``, ``illumination_arms``, ``exposure_time``, ``z_step`` /
-        ``y_step``, plus the shared acquisition fields). Comma-separated
-        per-camera fields live on :attr:`camera_metadata`.
-        """
-        return {k: dict(v) for k, v in self._view_metadata.items()}
 
     @property
     def tile_metadata(self) -> dict[int, dict]:
         """Per-tile XML metadata, keyed by tile (T-axis) index.
 
         Populated only for tiled acquisitions. Carries fields that differ
-        between tiles (stage_x/y/z, specimen_XYZT, specimen_name,
-        tile_name/tile_x/tile_y/tile_z grid index, specimen); fields
-        shared across tiles live on :attr:`metadata`
-        and per-camera fields on :attr:`camera_metadata`. Empty for
-        timelapse / non-tiled datasets.
+        between tiles (stage_x/y/z, specimen_name,
+        tile_name/tile_x/tile_y/tile_z grid index, tile_offset_*) plus the
+        per-tile stride (``tile_stride_*``); fields shared across tiles live
+        on :attr:`metadata` and per-camera fields on :attr:`camera_metadata`.
+        Empty for timelapse / non-tiled datasets.
         """
         return {k: dict(v) for k, v in self._tile_metadata.items()}
 
@@ -2178,10 +2322,6 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             # the IsoviewArray.camera_metadata property is the programmatic
             # accessor for the same data.
             meta["cameras"] = {k: dict(v) for k, v in self._camera_metadata.items()}
-        if self._view_metadata:
-            # GUI renders a "Views" panel from metadata["views"] (VW00/VW90);
-            # IsoviewArray.view_metadata is the programmatic accessor.
-            meta["views"] = {k: dict(v) for k, v in self._view_metadata.items()}
         if self._tile_metadata:
             # Tiled-only: the GUI metadata viewer renders a "Tiles" panel
             # from metadata["tiles"]; IsoviewArray.tile_metadata is the

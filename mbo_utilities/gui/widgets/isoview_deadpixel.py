@@ -26,6 +26,8 @@ import numpy as np
 from imgui_bundle import imgui, icons_fontawesome_6 as fa
 from scipy.ndimage import median_filter
 
+from mbo_utilities.gui._imgui_helpers import button_width, draw_toolbar_row
+
 
 _DEFAULT_CAMERA_VIEW_MAP = {0: 0, 1: 0, 2: 90, 3: 90}
 _VIEW_COLORS = {0: (1.0, 0.35, 0.35, 1.0), 90: (1.0, 0.95, 0.4, 1.0)}
@@ -595,56 +597,61 @@ def draw_window(parent: Any) -> None:
 
 
 def _draw_display_controls(parent: Any) -> None:
-    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), "Display:")
-    imgui.same_line()
-
-    imgui.set_next_item_width(_DISPLAY_DRAG_W)
     speed = max(1.0, abs(parent._iso_dp_vmax - parent._iso_dp_vmin) / 200.0)
-    _, parent._iso_dp_vmin = imgui.drag_float(
-        "vmin##iso_dp", float(parent._iso_dp_vmin), speed, 0.0, 0.0, "%.0f",
-    )
-    imgui.same_line()
-    imgui.set_next_item_width(_DISPLAY_DRAG_W)
-    _, parent._iso_dp_vmax = imgui.drag_float(
-        "vmax##iso_dp", float(parent._iso_dp_vmax), speed, 0.0, 0.0, "%.0f",
-    )
-    if parent._iso_dp_vmax <= parent._iso_dp_vmin:
-        parent._iso_dp_vmax = parent._iso_dp_vmin + 1.0
 
-    imgui.same_line()
-    if imgui.button("Auto##iso_dp_auto"):
-        lo, hi = _initial_display_range(parent)
-        parent._iso_dp_vmin = lo
-        parent._iso_dp_vmax = hi
+    def _vmin():
+        _, parent._iso_dp_vmin = imgui.drag_float(
+            "##iso_dp_vmin", float(parent._iso_dp_vmin), speed, 0.0, 0.0, "%.0f",
+        )
+
+    def _vmax():
+        _, parent._iso_dp_vmax = imgui.drag_float(
+            "##iso_dp_vmax", float(parent._iso_dp_vmax), speed, 0.0, 0.0, "%.0f",
+        )
+
+    def _auto():
+        if imgui.button("Auto##iso_dp_auto"):
+            lo, hi = _initial_display_range(parent)
+            parent._iso_dp_vmin = lo
+            parent._iso_dp_vmax = hi
+
+    items = [
+        ("Min", _DISPLAY_DRAG_W, _vmin),
+        ("Max", _DISPLAY_DRAG_W, _vmax),
+        (None, button_width("Auto"), _auto),
+    ]
 
     tiled = bool(getattr(_get_iso_array(parent), "is_tiled", False))
     tps = parent._iso_dp_timepoints
+    if tps:
+        try:
+            cur_idx = tps.index(parent._iso_dp_current_tp)
+        except ValueError:
+            cur_idx = 0
+        label = "Tile" if tiled else "Timepoint"
+        value_fmt = (
+            f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
+            if tiled
+            else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
+        )
+
+        def _tp():
+            ch, v = imgui.slider_int(
+                "##iso_dp_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
+            )
+            if ch:
+                parent._iso_dp_current_tp = tps[max(0, min(v, len(tps) - 1))]
+        items.append((label, 220.0, _tp))
+
+    draw_toolbar_row(items)
+    if parent._iso_dp_vmax <= parent._iso_dp_vmin:
+        parent._iso_dp_vmax = parent._iso_dp_vmin + 1.0
     if not tps:
         unit = "per-tile" if tiled else "per-timepoint"
         imgui.text_colored(
             imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
             f"(no {unit} projections — slider values still save)",
         )
-        return
-
-    try:
-        cur_idx = tps.index(parent._iso_dp_current_tp)
-    except ValueError:
-        cur_idx = 0
-    label = "Tile:" if tiled else "Timepoint:"
-    value_fmt = (
-        f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
-        if tiled
-        else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
-    )
-    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), label)
-    imgui.same_line()
-    imgui.set_next_item_width(220)
-    changed, new_idx = imgui.slider_int(
-        "##iso_dp_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
-    )
-    if changed:
-        parent._iso_dp_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
 def _draw_param_controls(parent: Any, iso: Any) -> None:
@@ -731,8 +738,9 @@ def _draw_view_previews(parent: Any, iso: Any) -> None:
 
 def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float, raw_mode: bool = False) -> None:
     if raw_mode:
+        from mbo_utilities.arrays.isoview.array import camera_view_label
         color = _CAMERA_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
-        label_text = f"CM{view:02d}"
+        label_text = camera_view_label(view)
     else:
         color = _VIEW_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
         label_text = f"VW{view:02d}"

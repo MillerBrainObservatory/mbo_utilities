@@ -28,6 +28,7 @@ import numpy as np
 from imgui_bundle import imgui, hello_imgui, icons_fontawesome_6 as fa
 
 from mbo_utilities.gui import _isoview_crop_state as crop_state
+from mbo_utilities.gui._imgui_helpers import button_width, draw_toolbar_row
 
 
 _DEFAULT_CAMERA_VIEW_MAP = {0: 0, 1: 0, 2: 90, 3: 90}
@@ -538,63 +539,65 @@ def draw_window(parent: Any) -> None:
 
 def _draw_display_controls(parent: Any, arr: Any) -> None:
     """Shared vmin/vmax + timepoint scrubber. Both apply to every view."""
-    imgui.text_colored(
-        imgui.ImVec4(0.85, 0.85, 0.85, 1.0),
-        "Display:",
-    )
-    imgui.same_line()
-
     # Loose drag bounds — keep some headroom over the current dataset
     # so users can over-pull (e.g. to wash out bright fiducials).
-    imgui.set_next_item_width(_DISPLAY_DRAG_W)
     speed = max(1.0, abs(parent._iso_crop_vmax - parent._iso_crop_vmin) / 200.0)
-    _, parent._iso_crop_vmin = imgui.drag_float(
-        "vmin##iso_crop", float(parent._iso_crop_vmin), speed, 0.0, 0.0, "%.0f",
-    )
-    imgui.same_line()
-    imgui.set_next_item_width(_DISPLAY_DRAG_W)
-    _, parent._iso_crop_vmax = imgui.drag_float(
-        "vmax##iso_crop", float(parent._iso_crop_vmax), speed, 0.0, 0.0, "%.0f",
-    )
-    if parent._iso_crop_vmax <= parent._iso_crop_vmin:
-        parent._iso_crop_vmax = parent._iso_crop_vmin + 1.0
 
-    imgui.same_line()
-    if imgui.button("Auto##iso_crop_auto"):
-        lo, hi = _initial_display_range(parent, arr)
-        parent._iso_crop_vmin = lo
-        parent._iso_crop_vmax = hi
+    def _vmin():
+        _, parent._iso_crop_vmin = imgui.drag_float(
+            "##iso_crop_vmin", float(parent._iso_crop_vmin), speed, 0.0, 0.0, "%.0f",
+        )
+
+    def _vmax():
+        _, parent._iso_crop_vmax = imgui.drag_float(
+            "##iso_crop_vmax", float(parent._iso_crop_vmax), speed, 0.0, 0.0, "%.0f",
+        )
+
+    def _auto():
+        if imgui.button("Auto##iso_crop_auto"):
+            lo, hi = _initial_display_range(parent, arr)
+            parent._iso_crop_vmin = lo
+            parent._iso_crop_vmax = hi
+
+    items = [
+        ("Min", _DISPLAY_DRAG_W, _vmin),
+        ("Max", _DISPLAY_DRAG_W, _vmax),
+        (None, button_width("Auto"), _auto),
+    ]
 
     tiled = bool(getattr(arr, "is_tiled", False))
     tps = parent._iso_crop_timepoints
+    if tps:
+        # Scrubber — use the index into the common-tile/timepoint list so it's
+        # always 0..N-1 regardless of SPM/TM numbering gaps.
+        try:
+            cur_idx = tps.index(parent._iso_crop_current_tp)
+        except ValueError:
+            cur_idx = 0
+        label = "Tile" if tiled else "Timepoint"
+        value_fmt = (
+            f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
+            if tiled
+            else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
+        )
+
+        def _tp():
+            ch, v = imgui.slider_int(
+                "##iso_crop_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
+            )
+            if ch:
+                parent._iso_crop_current_tp = tps[max(0, min(v, len(tps) - 1))]
+        items.append((label, 220.0, _tp))
+
+    draw_toolbar_row(items)
+    if parent._iso_crop_vmax <= parent._iso_crop_vmin:
+        parent._iso_crop_vmax = parent._iso_crop_vmin + 1.0
     if not tps:
         unit = "per-tile" if tiled else "per-timepoint"
         imgui.text_colored(
             imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
             f"(no {unit} projections — preview will not animate)",
         )
-        return
-
-    # Scrubber — use the index into the common-tile/timepoint list so it's
-    # always 0..N-1 regardless of SPM/TM numbering gaps.
-    try:
-        cur_idx = tps.index(parent._iso_crop_current_tp)
-    except ValueError:
-        cur_idx = 0
-    label = "Tile:" if tiled else "Timepoint:"
-    value_fmt = (
-        f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
-        if tiled
-        else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
-    )
-    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), label)
-    imgui.same_line()
-    imgui.set_next_item_width(220)
-    changed, new_idx = imgui.slider_int(
-        "##iso_crop_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
-    )
-    if changed:
-        parent._iso_crop_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
 def _draw_camera_section(
@@ -613,11 +616,12 @@ def _draw_camera_section(
     y0, y1 = pending["y"]
     x0, x1 = pending["x"]
 
+    from mbo_utilities.arrays.isoview.array import camera_view_label
     color = _CAMERA_COLORS.get(camera, (0.6, 0.8, 1.0, 1.0))
     spm = f"{_tp_label(tile)}  " if tile is not None else ""
     imgui.text_colored(
         imgui.ImVec4(*color),
-        f"{spm}CM{camera:02d}   shape=(Z={nz}, Y={ny}, X={nx})",
+        f"{spm}{camera_view_label(camera)}   shape=(Z={nz}, Y={ny}, X={nx})",
     )
 
     imgui.push_id(f"iso_crop_cm_{camera}")

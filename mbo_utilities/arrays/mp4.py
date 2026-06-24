@@ -738,7 +738,10 @@ class MP4Array(ReductionMixin, Shape5DMixin):
 
         s5 = arr._shape5d()
         num_planes = s5[2]
-        num_channels = getattr(arr, "num_color_channels", s5[1])
+        # C axis = num_views for IsoView (cameras), else num_color_channels
+        num_channels = getattr(arr, "num_views", None) or getattr(
+            arr, "num_color_channels", s5[1]
+        )
         nframes_total = s5[0]
 
         planes_0idx = [p - 1 for p in planes] if planes else list(range(num_planes))

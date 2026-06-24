@@ -20,7 +20,11 @@ import numpy as np
 import tifffile
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
-from mbo_utilities.gui._imgui_helpers import set_tooltip
+from mbo_utilities.gui._imgui_helpers import (
+    button_width,
+    draw_toolbar_row,
+    set_tooltip,
+)
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui.widgets.summary_image import (
     STATUS_ERROR_COLOR,
@@ -309,57 +313,60 @@ class ProjectionsViewer(Widget):
         if self._axis not in axes:
             self._axis = axes[0]
             self._on_selection_changed()
-        imgui.set_next_item_width(120)
-        labels = [_AXIS_DISPLAY.get(a, a) for a in axes]
-        idx = axes.index(self._axis)
-        changed, new_idx = imgui.combo("Axis##projections", idx, labels)
-        if changed:
-            self._axis = axes[new_idx]
-            self._on_selection_changed()
-
         if self._view not in views:
             self._view = views[0]
             self._on_selection_changed()
-        imgui.same_line()
-        imgui.set_next_item_width(100)
-        idx = views.index(self._view)
-        changed, new_idx = imgui.combo("View##projections", idx, views)
-        if changed:
-            self._view = views[new_idx]
-            self._on_selection_changed()
+
+        axis_labels = [_AXIS_DISPLAY.get(a, a) for a in axes]
+
+        def _axis():
+            ch, v = imgui.combo("##projaxis", axes.index(self._axis), axis_labels)
+            if ch:
+                self._axis = axes[v]
+                self._on_selection_changed()
+
+        def _view():
+            ch, v = imgui.combo("##projview", views.index(self._view), views)
+            if ch:
+                self._view = views[v]
+                self._on_selection_changed()
+
+        items = [("Axis", 120.0, _axis), ("View", 100.0, _view)]
 
         # Union across views so a tile present on only some cameras is
         # still reachable; the image area reports when the active view
         # lacks the selected tile.
         tps = _timepoints_for_axis(g, self._axis)
+        if tps:
+            if self._timepoint not in tps:
+                self._timepoint = tps[0]
+                self._on_selection_changed()
+            cur_pos = tps.index(self._timepoint)
+            if self._is_tiled:
+                label = "Tile"
+                lo, hi = tps[0], tps[-1]
+                if isinstance(lo, int):
+                    value_fmt = f"%d / {len(tps) - 1}  (SPM{lo:02d}-SPM{hi:02d})"
+                else:
+                    value_fmt = f"%d / {len(tps) - 1}  ({lo}-{hi})"
+            else:
+                label = "T"
+                value_fmt = f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})"
+
+            def _tp():
+                ch, v = imgui.slider_int(
+                    "##projtp", cur_pos, 0, len(tps) - 1, value_fmt,
+                )
+                if ch:
+                    self._timepoint = tps[int(v)]
+                    self._on_selection_changed()
+            items.append((label, 220.0, _tp))
+
+        draw_toolbar_row(items)
         if not tps:
             imgui.text_colored(
-                STATUS_ERROR_COLOR,
-                f"no {self._axis} projections",
+                STATUS_ERROR_COLOR, f"no {self._axis} projections",
             )
-            return
-        if self._timepoint not in tps:
-            self._timepoint = tps[0]
-            self._on_selection_changed()
-
-        imgui.set_next_item_width(220)
-        cur_pos = tps.index(self._timepoint)
-        if self._is_tiled:
-            slider_label = "Tile##projections"
-            lo, hi = tps[0], tps[-1]
-            if isinstance(lo, int):
-                value_fmt = f"%d / {len(tps) - 1}  (SPM{lo:02d}-SPM{hi:02d})"
-            else:
-                value_fmt = f"%d / {len(tps) - 1}  ({lo}-{hi})"
-        else:
-            slider_label = "T##projections"
-            value_fmt = f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})"
-        changed, new_pos = imgui.slider_int(
-            slider_label, cur_pos, 0, len(tps) - 1, value_fmt,
-        )
-        if changed:
-            self._timepoint = tps[int(new_pos)]
-            self._on_selection_changed()
 
     def draw(self) -> None:
         if not self._ensure_projections():
@@ -386,29 +393,35 @@ class ProjectionsViewer(Widget):
     def _draw_toolbar(self) -> None:
         self._draw_popup_selectors()
 
-        imgui.set_next_item_width(110)
-        cmap_changed, new_cmap = imgui.combo(
-            "Cmap##projections", self._cmap_idx, list(self._cmaps)
-        )
-        if cmap_changed:
-            self._cmap_idx = new_cmap
+        def _cmap():
+            ch, v = imgui.combo("##projcmap", self._cmap_idx, list(self._cmaps))
+            if ch:
+                self._cmap_idx = v
 
-        imgui.same_line()
-        imgui.set_next_item_width(110)
-        ctr_changed, new_ctr = imgui.combo(
-            "Contrast##projections", self._contrast_mode, list(_CONTRAST_MODES)
-        )
-        if ctr_changed:
-            self._contrast_mode = new_ctr
+        def _contrast():
+            ch, v = imgui.combo(
+                "##projcontrast", self._contrast_mode, list(_CONTRAST_MODES)
+            )
+            if ch:
+                self._contrast_mode = v
 
-        imgui.same_line()
-        if imgui.button("Reset##projections"):
-            self._reset_view()
+        def _reset():
+            if imgui.button("Reset##projections"):
+                self._reset_view()
 
-        imgui.same_line()
-        if imgui.button("Save...##projections"):
-            self._open_save_dialog()
-        set_tooltip("Save the colormapped projection as a PNG (native resolution).")
+        def _save():
+            if imgui.button("Save...##projections"):
+                self._open_save_dialog()
+            set_tooltip(
+                "Save the colormapped projection as a PNG (native resolution)."
+            )
+
+        draw_toolbar_row([
+            ("Cmap", 110.0, _cmap),
+            ("Contrast", 110.0, _contrast),
+            (None, button_width("Reset"), _reset),
+            (None, button_width("Save..."), _save),
+        ])
 
         _, self._show_pixel_values = imgui.checkbox(
             "Pixel values##projections", self._show_pixel_values

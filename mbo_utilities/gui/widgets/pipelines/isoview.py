@@ -434,9 +434,10 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._stitcher_upright: bool = True
 
         # Link the existing .corrected zarrs in the dataset.xml instead of
-        # writing a converted copy (no conversion step). Forwarded to
+        # writing a converted copy (no conversion step). On by default; uncheck
+        # to extract a converted copy. Forwarded to
         # generate_bigstitcher_xml(link_existing=...).
-        self._stitcher_link_existing: bool = False
+        self._stitcher_link_existing: bool = True
 
         # Per-camera export from .corrected (comma-separated CM indices, e.g.
         # "0,2"). Empty = export fused VW00/VW90 pairs. Forwarded to
@@ -1276,9 +1277,14 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "rotation; orient in BigStitcher)."
             )
 
-            _, self._stitcher_link_existing = imgui.checkbox(
+            ch_link, self._stitcher_link_existing = imgui.checkbox(
                 "Link existing (.corrected)", self._stitcher_link_existing,
             )
+            if ch_link:
+                # toggling link flips per-camera <-> fused, which switches the
+                # orientation targets (per-camera tables vs the VW00 profile).
+                # Re-seed so a fused VW00 profile can't leak onto cam0.
+                self._apply_orient_profile_all(self._stitcher_orient_profile)
             set_tooltip(
                 "Reference the .corrected zarrs in place, no conversion. "
                 "Much faster; .corrected only."
