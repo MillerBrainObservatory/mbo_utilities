@@ -47,19 +47,37 @@ uv venv --python 3.12.9
 # .venv\Scripts\activate   # optional 
 ```
 
-### Base (I/O, metadata, GUI, suite2p pipeline)
+### Quick viewer (no install)
+
+Open data in the viewer without installing anything:
+
+```bash
+uvx --from mbo-utilities mbo /path/to/data
+```
+
+### Base (viewer, I/O, metadata, scan-phase)
 
 ```bash
 uv pip install mbo_utilities
 ```
 
-### With extra processing pipelines
+The base install is lightweight (no pytorch). Add an extra for the
+processing pipelines:
 
 ```bash
-# adds rastermap for activity sorting
+# suite2p / cellpose pipeline + z-registration (pulls pytorch + Qt)
+uv pip install "mbo_utilities[processing]"
+
+# napari viewer
+uv pip install "mbo_utilities[napari]"
+
+# jupyterlab + notebook rendering
+uv pip install "mbo_utilities[notebooks]"
+
+# rastermap activity sorting
 uv pip install "mbo_utilities[rastermap]"
 
-# everything (rastermap + docs)
+# everything
 uv pip install "mbo_utilities[all]"
 ```
 
@@ -67,7 +85,7 @@ uv pip install "mbo_utilities[all]"
 
 PyTorch and CuPy require CUDA-specific wheels that must be installed separately.
 
-Suite2p requires pytorch. Installation depends on your cuda version. See the pytorch [Get Started](https://pytorch.org/get-started/locally/) page for the correct install command for your OS/Cuda version.
+Suite2p (from the `[processing]` extra) requires pytorch. Installation depends on your cuda version. See the pytorch [Get Started](https://pytorch.org/get-started/locally/) page for the correct install command for your OS/Cuda version.
 
 ```bash
 # pytorch with CUDA 12.N (required for suite2p GPU)
