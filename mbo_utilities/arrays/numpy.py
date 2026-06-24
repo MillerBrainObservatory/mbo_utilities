@@ -319,11 +319,6 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
         """Declared axis order of the wrapped array (None if unknown)."""
         return self._declared_dims
 
-    @property
-    def num_planes(self) -> int:
-        """Number of Z-planes (index 2 in 5D TCZYX)."""
-        return self.shape[2]
-
     # _compute_frame_vminmax / vmin / vmax inherited from ReductionMixin
 
     @property

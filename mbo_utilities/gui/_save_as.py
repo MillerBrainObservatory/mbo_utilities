@@ -15,6 +15,7 @@ from imgui_bundle import imgui, hello_imgui, portable_file_dialogs as pfd
 
 from mbo_utilities.reader import MBO_AVAILABLE_FTYPES, imread
 from mbo_utilities.writer import imwrite
+from mbo_utilities.metadata import get_param
 from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_timepoint_selection, TimeSelection
 from mbo_utilities.preferences import get_last_dir, set_last_dir
@@ -528,20 +529,15 @@ _VIDEO_TEMPORAL_MODES = ["mean", "max", "std"]
 
 
 def _preview_fps(parent: Any) -> float | None:
-    """Look up sampling frequency from the loaded array, trying several sources."""
+    """Sampling frequency from the loaded array (arr.fs), else parent metadata."""
     try:
         data0 = parent.image_widget.data[0]
     except Exception:
         data0 = None
-    candidates = []
-    if data0 is not None:
-        candidates.append(getattr(data0, "fs", None))
-        md = getattr(data0, "metadata", None)
-        if isinstance(md, dict):
-            candidates.append(md.get("fs"))
+    candidates = [getattr(data0, "fs", None)]
     md = getattr(parent, "metadata", None)
     if isinstance(md, dict):
-        candidates.append(md.get("fs"))
+        candidates.append(get_param(md, "fs"))
     for v in candidates:
         try:
             f = float(v)
@@ -629,10 +625,9 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
     """If mean-subtract is enabled and zstats are computed, write a (C, Z, Y, X)
     npy file and return its path. Returns None if not applicable / unavailable.
 
-    ``_zstats_means[i]`` is a dict keyed by channel int; this writer
-    picks the channel currently selected for stats display (which
-    follows the C slider by default) so the saved stack matches what
-    the user sees in the GUI.
+    ``_zstats_means[i]`` is a dict keyed by the breakout-combo tuple; this
+    writer picks the combo currently shown in the stats tab (which follows
+    the sliders) so the saved stack matches what the user sees in the GUI.
     """
     if not getattr(parent, "_saveas_video_mean_subtract", False):
         return None
@@ -643,8 +638,7 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
     import numpy as np
     import tempfile
 
-    from mbo_utilities.gui._stats import _selected_channel
-    channel = _selected_channel(parent)
+    from mbo_utilities.gui._stats import current_breakout_key
 
     stacks = []
     for i in range(getattr(parent, "num_graphics", len(means))):
@@ -653,9 +647,11 @@ def _write_mean_subtract_stack(parent: Any) -> str | None:
         slot = means[i]
         if not isinstance(slot, dict) or not slot:
             return None
-        arr = slot.get(channel)
+        arr = slot.get(current_breakout_key(parent, i))
         if arr is None:
-            arr = slot.get(0)
+            arr = slot.get(())
+        if arr is None:
+            arr = next(iter(slot.values()))
         if arr is None:
             return None
         stacks.append(np.asarray(arr, dtype=np.float32))
@@ -880,8 +876,10 @@ def _draw_selection_section(parent: Any):
             num_planes = data.num_planes
         else:
             num_planes = 1
-        # get color channels (PMT/detector channels)
-        if hasattr(data, "num_color_channels"):
+        # C axis: num_views for IsoView (cameras), else color channels
+        if hasattr(data, "num_views"):
+            num_channels = data.num_views
+        elif hasattr(data, "num_color_channels"):
             num_channels = data.num_color_channels
         elif hasattr(data, "_num_color_channels"):
             num_channels = data._num_color_channels

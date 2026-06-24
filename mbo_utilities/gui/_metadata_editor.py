@@ -71,12 +71,9 @@ def _build_suggested_fields(parent: Any) -> list[dict]:
             "dtype": float,
             "description": "Distance between Z-planes in micrometers.",
         }
-        if current_data and hasattr(current_data, "metadata"):
-            meta = current_data.metadata
-            if isinstance(meta, dict):
-                val = meta.get("dz") or meta.get("z_step_um") or meta.get("axial_step_um")
-                if val:
-                    z_step_field["value"] = val
+        val = getattr(current_data, "dz", None)
+        if val:
+            z_step_field["value"] = val
         suggested_fields.append(z_step_field)
         existing_canonicals.add("dz")
 
@@ -91,12 +88,9 @@ def _build_suggested_fields(parent: Any) -> list[dict]:
             "dtype": float,
             "description": "Volume (or frame) sampling rate in Hz.",
         }
-        if current_data and hasattr(current_data, "metadata"):
-            meta = current_data.metadata
-            if isinstance(meta, dict):
-                val = meta.get("fs") or meta.get("frame_rate") or meta.get("framerate")
-                if val:
-                    fs_field["value"] = val
+        val = getattr(current_data, "fs", None)
+        if val:
+            fs_field["value"] = val
         suggested_fields.append(fs_field)
         existing_canonicals.add("fs")
 

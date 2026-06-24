@@ -11,13 +11,10 @@ handles automatic adjustment of metadata when writing subsets:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from mbo_utilities.metadata.params import get_param, get_voxel_size
 from mbo_utilities.metadata.base import VoxelSize
-
-if TYPE_CHECKING:
-    from mbo_utilities.arrays.features._dim_spec import DimensionSpecs
 
 
 @dataclass
@@ -376,49 +373,6 @@ class OutputMetadata:
         if fs is None or n_frames is None:
             return None
         return n_frames / fs
-
-    @classmethod
-    def from_dimension_specs(
-        cls,
-        source_specs: "DimensionSpecs",
-        selections: dict[str, list[int]] | None = None,
-        source_metadata: dict | None = None,
-    ) -> "OutputMetadata":
-        """
-        create OutputMetadata from DimensionSpecs.
-
-        parameters
-        ----------
-        source_specs : DimensionSpecs
-            dimension specs from source array
-        selections : dict | None
-            mapping of dim name -> 0-based indices selected
-        source_metadata : dict | None
-            additional source metadata
-
-        returns
-        -------
-        OutputMetadata
-        """
-        source = source_metadata.copy() if source_metadata else {}
-
-        # add scale values from specs
-        for spec in source_specs:
-            if spec.name == "X":
-                source.setdefault("dx", spec.scale)
-            elif spec.name == "Y":
-                source.setdefault("dy", spec.scale)
-            elif spec.name == "Z":
-                source.setdefault("dz", spec.scale)
-            elif spec.name == "T" and spec.scale > 0:
-                source.setdefault("fs", 1.0 / spec.scale)
-
-        return cls(
-            source=source,
-            source_shape=source_specs.shape,
-            source_dims=source_specs.dims,
-            selections=selections,
-        )
 
     def to_imagej(self, shape: tuple) -> tuple[dict, tuple]:
         """

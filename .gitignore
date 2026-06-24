@@ -74,6 +74,7 @@ instance/
 # Sphinx documentation
 docs/_build/
 docs/build/
+docs/jupyter_execute/
 docs/user_guide.ipynb
 
 # PyBuilder
@@ -197,3 +198,4 @@ demos/_wk_compare/
 
 # generated at build from demos/ (see setup.py); demos/ is the source of truth
 mbo_utilities/assets/notebooks/
+docs/_tmpbuild

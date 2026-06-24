@@ -132,11 +132,12 @@ def set_tile_camera_bounds(
     x: tuple[int, int],
     shape: tuple[int, int, int],
 ) -> None:
-    """Record ``camera``'s crop within spatial tile ``tile`` (SPM index)."""
+    """Record ``camera``'s crop within spatial ``tile`` (specimen_name grid
+    token, e.g. ``TL100``, else ``SPM##``)."""
     k = _key(arr)
     if k is None:
         return
-    _TILE_STORE.setdefault(k, {}).setdefault(int(tile), {})[int(camera)] = {
+    _TILE_STORE.setdefault(k, {}).setdefault(tile, {})[int(camera)] = {
         "z": (int(z[0]), int(z[1])),
         "y": (int(y[0]), int(y[1])),
         "x": (int(x[0]), int(x[1])),
@@ -223,8 +224,9 @@ def to_config_args(arr: Any) -> dict[str, dict[int, int]]:
 def _tile_config_args(arr: Any) -> dict[str, dict]:
     """Build isoview ``tile_crops`` from the per-tile store.
 
-    ``{"tile_crops": {"SPM##": {crop_param: {camera: value}}}}``. Tiles
-    (and cameras) whose bounds span the full source shape are omitted, so
+    ``{"tile_crops": {"<tile>": {crop_param: {camera: value}}}}`` where
+    ``<tile>`` is the specimen_name grid token (or SPM##). Tiles (and
+    cameras) whose bounds span the full source shape are omitted, so
     untouched tiles stay uncropped.
     """
     tile_crops = get_tile_crops(arr)
@@ -247,7 +249,7 @@ def _tile_config_args(arr: Any) -> dict[str, dict]:
             params.setdefault("crop_height", {})[camera] = y1 - y0
             params.setdefault("crop_depth", {})[camera] = z1 - z0
         if params:
-            out[f"SPM{int(tile):02d}"] = params
+            out[str(tile)] = params
 
     return {"tile_crops": out} if out else {}
 
@@ -262,11 +264,12 @@ def summary(arr: Any) -> str:
         ]
         if not cropped:
             return "(none)"
-        return "per-tile: " + ", ".join(f"SPM{int(t):02d}" for t in sorted(cropped))
+        return "per-tile: " + ", ".join(str(t) for t in sorted(cropped))
 
     crops = get_crops(arr)
     if not crops:
         return "(none)"
+    from mbo_utilities.arrays.isoview.array import camera_view_label
     parts: list[str] = []
     for camera in sorted(crops):
         b = crops[camera]
@@ -274,7 +277,7 @@ def summary(arr: Any) -> str:
         y0, y1 = b["y"]
         x0, x1 = b["x"]
         parts.append(
-            f"CM{camera:02d} z[{z0}:{z1}] y[{y0}:{y1}] x[{x0}:{x1}]"
+            f"{camera_view_label(camera)} z[{z0}:{z1}] y[{y0}:{y1}] x[{x0}:{x1}]"
             + ("" if not _is_full_extent(b) else " (full)")
         )
     return " | ".join(parts)

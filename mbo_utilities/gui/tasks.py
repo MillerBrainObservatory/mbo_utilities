@@ -870,6 +870,8 @@ def _build_isoview_processing_config(args: dict):
         "segment_threshold",
         "splitting",
         "apply_segmentation_mask",
+        "subtract_background",
+        "background_mode",
         "background_percentile",
         "mask_percentile",
         "subsample_factor",
@@ -1040,16 +1042,31 @@ def _bridge_isoview_logging(worker_logger: logging.Logger) -> None:
     isoview uses its own top-level ``isoview`` logger; by default only
     WARNING+ flows to stderr and INFO/DEBUG lands in
     ``<fused_dir>/<method>/fusion.log`` — which the GUI user can't see
-    in real time. This helper attaches a forwarding
-    handler that mirrors INFO+ records to the worker logger's handlers
-    (the per-task file), sets ``isoview``'s
+    in real time. This helper attaches a forwarding handler that mirrors
+    INFO+ records (DEBUG+ when debug logging is on) to the worker logger's
+    handlers (the per-task file), sets ``isoview``'s
     propagation to ``False`` so nothing double-prints, and is idempotent
     — only one bridge is installed per process even if both isoview
-    tasks fire (the second call refreshes its target list to pick up
-    any handlers added since).
+    tasks fire (the second call refreshes its target list and level to
+    pick up any handlers added since).
     """
+    # Honor the GUI "Debug logging" toggle: the worker inherits MBO_DEBUG in
+    # its environment at spawn (_options_popup sets it), with the persisted
+    # preference as a fallback for fresh launches. When on, forward isoview
+    # DEBUG records to the process console; otherwise INFO only. isoview's
+    # setup_logging() forces its logger to DEBUG, so the bridge handler level
+    # is the real gate.
+    debug = bool(int(os.getenv("MBO_DEBUG", "0")))
+    if not debug:
+        try:
+            from mbo_utilities.preferences import get_debug_logging
+            debug = get_debug_logging()
+        except Exception:
+            debug = False
+    level = logging.DEBUG if debug else logging.INFO
+
     iso_logger = logging.getLogger("isoview")
-    iso_logger.setLevel(logging.INFO)
+    iso_logger.setLevel(level)
     iso_logger.propagate = False
 
     # Mirror isoview records onto the worker logger's own handlers (the
@@ -1067,9 +1084,10 @@ def _bridge_isoview_logging(worker_logger: logging.Logger) -> None:
     existing = getattr(iso_logger, _ISOVIEW_BRIDGE_ATTR, None)
     if isinstance(existing, _ForwardingHandler):
         existing._targets = targets  # refresh target list
+        existing.setLevel(level)
         return
 
-    bridge = _ForwardingHandler(targets, level=logging.INFO)
+    bridge = _ForwardingHandler(targets, level=level)
     iso_logger.addHandler(bridge)
     setattr(iso_logger, _ISOVIEW_BRIDGE_ATTR, bridge)
 
@@ -1275,8 +1293,18 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
         xml_path = generate_bigstitcher_xml(
             config,
             method=args.get("method"),
-            bake_tile_positions=args.get("bake_tile_positions", False),
+            included_tiles=args.get("included_tiles"),
+            bake_tile_positions=args.get("bake_tile_positions", True),
             orientation=args.get("orientation"),
+            orientation_vw90=args.get("orientation_vw90"),
+            camera_orientations=args.get("camera_orientations"),
+            cameras=args.get("cameras"),
+            source=args.get("source", "fused"),
+            orient_to_cm00=args.get("orient_to_cm00", True),
+            reverse_z=args.get("reverse_z", False),
+            zarr_version=args.get("zarr_version", 2),
+            upright=args.get("upright", True),
+            link_existing=args.get("link_existing", False),
         )
         logger.info(f"  wrote: {xml_path}")
         _record_isoview_runtime(

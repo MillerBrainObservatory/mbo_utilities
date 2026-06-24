@@ -19,6 +19,7 @@ def get_param(
     *,
     override: Any = None,
     shape: tuple | None = None,
+    _apply_transforms: bool = True,
 ) -> Any:
     """
     Get a metadata parameter, checking all known aliases.
@@ -111,6 +112,17 @@ def get_param(
                     pass
             elif isinstance(pixel_res, (int, float)):
                 return float(pixel_res)
+
+    # transform aliases: derive from a converted form (e.g. fs from finterval).
+    # _apply_transforms=False on the nested lookup prevents A->B->A recursion.
+    if _apply_transforms and param.transforms:
+        for src_key, (to_canonical, _from_canonical) in param.transforms.items():
+            src_val = get_param(metadata, src_key, _apply_transforms=False)
+            if src_val is not None:
+                try:
+                    return param.dtype(to_canonical(src_val))
+                except (TypeError, ValueError, ZeroDivisionError):
+                    continue
 
     # fallback: extract Lx/Ly from shape
     if shape is not None:
@@ -358,5 +370,11 @@ def normalize_metadata(
             # set all aliases
             for alias in param.aliases:
                 metadata[alias] = value
+            # emit transform aliases (e.g. finterval from fs)
+            for src_key, (_to, from_canonical) in param.transforms.items():
+                try:
+                    metadata[src_key] = from_canonical(value)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
 
     return metadata

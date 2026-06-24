@@ -38,6 +38,23 @@ This guide assumes you've read [this scientifica article](https://www.scientific
 ΔF/F traces for 30 cells, sorted by similarity using the [Rastermap](https://github.com/MouseLand/rastermap) algorithm.
 ```
 
+(dynamics)=
+## Indicator Dynamics
+
+Decay time constant (tau) per GCaMP variant — the fluorescence decay after a spike that deconvolution tools (Suite2p, OASIS/CNMF, CaImAn) take as a prior. Pick the value matching your indicator.
+
+| **GCaMP Variant**     | **Optimal Tau (s)** | **Notes / Sources** |
+|-----------------------|---------------------|----------------------|
+| **GCaMP6f (fast)**    | ~0.5–0.7 s          | Suite2p: ~0.7 s ([docs](https://suite2p.readthedocs.io)). OASIS/CNMF: ~0.5–0.7 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~0.4 s ([docs](https://caiman.readthedocs.io)). |
+| **GCaMP6m (medium)**  | ~1.0–1.25 s         | Suite2p: ~1.0 s. OASIS: ~1.25 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.0 s ([docs](https://caiman.readthedocs.io)). |
+| **GCaMP6s (slow)**    | ~1.5–2.0 s          | Suite2p: 1.25–1.5 s. OASIS/Suite2p: ~2.0 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.5–2.0 s. |
+| **GCaMP7f (fast)**    | ~0.5 s              | Spike inference tuning ([bioRxiv](https://www.biorxiv.org)). Similar to GCaMP6f. |
+| **GCaMP7m (medium)**  | ~1.0 s (est.)       | Estimated by analogy to GCaMP6m. No default in tools. |
+| **GCaMP7s (slow)**    | ~1.0–1.5 s          | In vivo half-decay ~0.7 s ([eLife](https://elifesciences.org)). Tau ≈ 1.0 s. |
+| **GCaMP8f (fast)**    | ~0.3 s              | OASIS fine-tuning ([bioRxiv](https://www.biorxiv.org)). Fastest decay; tenfold faster than 6f/7f ([Nature](https://www.nature.com)). |
+| **GCaMP8m (medium)**  | ~0.3 s              | Slightly slower than 8f, still ~0.3 s ([bioRxiv](https://www.biorxiv.org); [Nature](https://www.nature.com)). |
+| **GCaMP8s (slow)**    | ~0.7 s              | Spike inference optimal tau ~0.7 s ([bioRxiv](https://www.biorxiv.org)). Faster than 6s ([Nature](https://www.nature.com)). |
+
 ## Baseline F₀ Strategies
 
 Choosing the correct baseline strategy depends on many factors:
@@ -190,44 +207,6 @@ EXTRACT outputs raw fluorescence signals without built-in ΔF/F₀ calculation. 
 | **CaImAn**   | 8th percentile, 500-frame window    | Yes, in pipeline          | Modeled via CNMF, no manual subtraction          |
 | **Suite2p**  | Maximin (default) or 8th percentile | No, user divides post hoc | 0.7 × F<sub>neu</sub> subtracted before baseline |
 | **EXTRACT**  | User-defined (e.g. 10th percentile) | No, user computes         | Implicitly handled via robust model              |
-
-## Calculating ΔF/F
-
-The most important consideration you must consider is how you calculate your baseline activity, which depends on your experimental question.
-
-```{figure} ./_images/dff_1.png
-:name: fig-dff-example
-:width: 600px
-:alt: Example ΔF/F trace baseline comparisons
-
-Example of ΔF/F trace showing different baseline choices. Adapted from Fig. 1.
-```
-
-1. Spike inference from mouse spinal cord calcium imaging data ({cite:t}`rupprecht2024`)
-- DF/F = Lower 10th percentile  
-- GCaMP6s
-
-2. Spike inference on GCaMP8 indicators {cite:t}`rupprecht2025`  
-- GCaMP8, GCaMP7f
-
-3. GCaMP6 calibration study {cite:t}`huang`
-- ΔF/F = (F − F₀,local)/F₀,global, where F₀,local is the mean fluorescence over 100 ms before the first AP, and F₀,global is the minimum F₀,local across trials  
-- GCaMP6f
-
-(dynamics)=
-## Indicator Dynamics
-
-| **GCaMP Variant**     | **Optimal Tau (s)** | **Notes / Sources** |
-|-----------------------|---------------------|----------------------|
-| **GCaMP6f (fast)**    | ~0.5–0.7 s          | Suite2p: ~0.7 s ([docs](https://suite2p.readthedocs.io)). OASIS/CNMF: ~0.5–0.7 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~0.4 s ([docs](https://caiman.readthedocs.io)). |
-| **GCaMP6m (medium)**  | ~1.0–1.25 s         | Suite2p: ~1.0 s. OASIS: ~1.25 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.0 s ([docs](https://caiman.readthedocs.io)). |
-| **GCaMP6s (slow)**    | ~1.5–2.0 s          | Suite2p: 1.25–1.5 s. OASIS/Suite2p: ~2.0 s ([PMC](https://www.ncbi.nlm.nih.gov/pmc/)). CaImAn: ~1.5–2.0 s. |
-| **GCaMP7f (fast)**    | ~0.5 s              | Spike inference tuning ([bioRxiv](https://www.biorxiv.org)). Similar to GCaMP6f. |
-| **GCaMP7m (medium)**  | ~1.0 s (est.)       | Estimated by analogy to GCaMP6m. No default in tools. |
-| **GCaMP7s (slow)**    | ~1.0–1.5 s          | In vivo half-decay ~0.7 s ([eLife](https://elifesciences.org)). Tau ≈ 1.0 s. |
-| **GCaMP8f (fast)**    | ~0.3 s              | OASIS fine-tuning ([bioRxiv](https://www.biorxiv.org)). Fastest decay; tenfold faster than 6f/7f ([Nature](https://www.nature.com)). |
-| **GCaMP8m (medium)**  | ~0.3 s              | Slightly slower than 8f, still ~0.3 s ([bioRxiv](https://www.biorxiv.org); [Nature](https://www.nature.com)). |
-| **GCaMP8s (slow)**    | ~0.7 s              | Spike inference optimal tau ~0.7 s ([bioRxiv](https://www.biorxiv.org)). Faster than 6s ([Nature](https://www.nature.com)). |
 
 ## References
 

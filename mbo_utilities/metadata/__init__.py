@@ -32,7 +32,6 @@ from .scanimage import (
     detect_stack_type,
     is_lbm_stack,
     is_piezo_stack,
-    is_pollen_stack,
     get_saved_channel_ports,
     get_color_channel_ports,
     get_beamlets_per_port,
@@ -44,10 +43,8 @@ from .scanimage import (
     get_num_volumes,
     get_num_slices,
     get_frames_per_volume,
-    compute_num_timepoints,
     get_roi_info,
     get_frame_rate,
-    get_stack_info,
     extract_roi_slices,
 )
 
@@ -92,7 +89,6 @@ __all__ = [
     "VoxelSize",
     "_build_ome_metadata",
     "clean_scanimage_metadata",
-    "compute_num_timepoints",
     "default_ops",
     "detect_stack_type",
     "extract_roi_slices",
@@ -114,13 +110,11 @@ __all__ = [
     # parameter access
     "get_param",
     "get_roi_info",
-    "get_stack_info",
     "get_voxel_size",
     "get_z_step_size",
     # file I/O
     "is_lbm_stack",
     "is_piezo_stack",
-    "is_pollen_stack",
     "is_raw_scanimage",
     "normalize_metadata",
     "normalize_resolution",

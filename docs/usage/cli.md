@@ -22,30 +22,50 @@ mbo /path/to/data            # open specific file
 mbo /path/to/data --metadata # show only metadata
 ```
 
-<p align="center">
-  <img src="/_images/gui/readme/01_step_file_dialog.png" height="360" alt="File Selection" />
-  <img src="/_images/gui/readme/02_step_data_view.png" height="360" alt="Data Viewer" />
-</p>
+::::{grid} 1 1 2 2
+:gutter: 3
+
+:::{grid-item}
+```{image} /_images/gui/readme/01_step_file_dialog.png
+:alt: File selection dialog
+:width: 100%
+```
+:::
+
+:::{grid-item}
+```{image} /_images/gui/readme/02_step_data_view.png
+:alt: Data viewer
+:width: 100%
+```
+:::
+::::
 
 ## Convert
 
-Convert between formats, optionally selecting planes/frames and applying phase correction.
+Convert between formats, optionally selecting planes/timepoints and applying phase correction.
 
 ```bash
-mbo convert /data/raw output/ -e .zarr            # tiff to zarr
-mbo convert /data/raw output/ -e .bin             # tiff to suite2p binary
-mbo convert /data/volume.zarr output/ -e .tiff    # zarr to tiff
-mbo convert /data/raw output/ -p 1 -p 7           # specific planes (repeat -p)
-mbo convert /data/raw output/ -n 500              # first 500 frames
-mbo convert /data/raw output/ --fix-phase         # with phase correction
+mbo convert /data/raw output/ -e .zarr               # tiff to zarr
+mbo convert /data/raw output/ -e .bin                # tiff to suite2p binary
+mbo convert /data/volume.zarr output/ -e .tiff       # zarr to tiff
+mbo convert /data/raw output/ -p 1 -p 7              # specific planes (repeat -p)
+mbo convert /data/raw output/ -t 1 -t 50             # specific timepoints (repeat -t)
+mbo convert /data/raw output/ -c 1 -c 2              # specific channels (repeat -c)
+mbo convert /data/raw output/ --num-timepoints 500   # first 500 timepoints
+mbo convert /data/raw output/ --roi 0                # split ROIs into roiNN/ subdirs
+mbo convert /data/raw output/ -e .zarr --compressor zstd --pyramid   # compressed pyramid
+mbo convert /data/raw output/ --fix-phase            # with phase correction
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-e, --ext` | Output format: `.tiff`, `.zarr`, `.bin`, `.h5`, `.npy` (leading dot required) |
 | `-p, --planes` | Z-plane to export (1-based); repeat for multiple: `-p 4 -p 5` |
-| `-n, --num-frames` | Limit number of frames |
-| `--roi` | ROI: `None`=stitch, `0`=split, `N`=specific, `"1,3"`=multiple |
+| `-t, --timepoints` | Timepoint to export (1-based); repeat for multiple: `-t 1 -t 50` |
+| `-c, --channels` | Color channel to export (1-based); repeat for multiple: `-c 1 -c 2` |
+| `--num-timepoints` | Export first N timepoints |
+| `--num-zplanes` | Export first N z-planes |
+| `--roi` | ROI: `None`=stitch, `0`=split, `N`=specific, `"1,3"`=multiple. Split/multiple write each ROI to a `roiNN/` subdir |
 | `--fix-phase` | Bidirectional phase correction |
 | `--overwrite` | Replace existing files |
 
@@ -55,10 +75,27 @@ mbo convert /data/raw output/ --fix-phase         # with phase correction
 | Option | Description |
 |--------|-------------|
 | `--output-name` | Output filename (binary format) |
-| `--phasecorr-method` | `mean`, `median`, or `max` |
+| `--output-suffix` | Suffix appended to output filenames |
+| `--order` | Reorder planes before writing (0-based indices into `--planes`) |
+| `--roi-mode` | `concat_y`=stitch, `separate`=one file per ROI (implied by `--roi`) |
+| `--dataset-name` | HDF5 dataset name (`.h5` only, default `mov`) |
 | `--register-z` | Z-plane registration (Suite3D) |
+| `--reg-max-frames` | register-z: subsample frame count (default 200) |
+| `--reg-chunk-frames` | register-z: streaming batch size (default 10) |
+| `--reg-max-xy` | register-z: search radius in pixels (default 30) |
+| `--phasecorr-method` | `mean`, `median`, or `max` |
+| `--border` | Phase correction: border pixels excluded from estimation |
+| `--max-offset` | Phase correction: max pixel offset to search |
+| `--use-fft/--no-use-fft` | Phase correction: FFT-based 2D correction |
 | `--ome/--no-ome` | OME-zarr metadata (zarr only, default on) |
+| `--compressor` | Zarr codec: `none`, `gzip`, `zstd`, `blosc-lz4`, `blosc-zstd` (zarr only) |
+| `--compression-level` | Zarr compression level (zarr only) |
+| `--sharded/--no-sharded` | Zarr v3 sharding (zarr only) |
+| `--pyramid/--no-pyramid` | Write multiscale pyramid (zarr only) |
+| `--pyramid-max-layers` | Max pyramid resolution levels (zarr only, default 4) |
+| `--pyramid-method` | Pyramid downsampling: `mean`, `median`, `mode`, `gaussian`, `nearest`, `local_mean` |
 | `--chunk-mb` | Streaming chunk size in MB (default: 100) |
+| `-n, --num-frames` | Deprecated alias for `--num-timepoints` |
 | `--debug` | Verbose logging |
 
 </details>
@@ -66,7 +103,7 @@ mbo convert /data/raw output/ --fix-phase         # with phase correction
 Output is named from the timepoint, channel, and plane ranges.
 
 ```
-$ mbo convert E:/demo/mk355/raw E:/demo/mk355/convert -n 500 -p 4
+$ mbo convert E:/demo/mk355/raw E:/demo/mk355/convert --num-timepoints 500 -p 4
 Reading: E:/demo/mk355/raw
   Shape: (1574, 1, 14, 550, 448), dtype: int16
 Writing: E:/demo/mk355/convert (format: .tiff)
@@ -77,8 +114,10 @@ Done! Output saved to: E:/demo/mk355/convert/tp00001-00500_ch01_zplane04.tif
 
 **Note:**
 - `-e/--ext` needs the leading dot: `.zarr`, not `zarr`.
-- `-p/--planes` is repeatable; pass each plane separately (`-p 4 -p 5`), not `4 5` or `4,5,6`.
-- The frame limit is `-n/--num-frames` (not `--frames` or `--timepoints`).
+- `-p/--planes`, `-t/--timepoints`, and `-c/--channels` are repeatable; pass each value separately (`-p 4 -p 5`), not `4 5` or `4,5,6`.
+- `-t/--timepoints` selects specific timepoints; `--num-timepoints` limits to the first N. (`-n/--num-frames` is a deprecated alias for `--num-timepoints`.)
+- `--roi 0` (split) and `--roi "1,3"` (multiple) write each ROI to its own `roiNN/` subdirectory. `--roi N` selects one ROI; omitting `--roi` stitches all ROIs into one FOV.
+- Zarr-only options (`--compressor`, `--compression-level`, `--sharded`, `--pyramid*`) are ignored for other formats. `--dataset-name` applies to `.h5` only.
 
 ## Info
 

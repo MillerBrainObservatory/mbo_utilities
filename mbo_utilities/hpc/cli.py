@@ -13,22 +13,30 @@ def hpc():
 
     \b
     Typical flow:
-      mbo hpc info                     show partitions: nodes/CPUs/GPUs/free mem
-      mbo hpc init /data/raw           write hpc.toml (edit input/output/params)
-      mbo hpc check hpc.toml           does the request fit the data + partition?
-      mbo hpc run hpc.toml --mode array   submit array + dependent aggregate
+      mbo hpc info                  show partitions: nodes/CPUs/GPUs/free mem
+      mbo hpc init /data/raw        write hpc.toml (edit input/output/params)
+      mbo hpc check hpc.toml        does the request fit the data + partition?
+      mbo hpc run hpc.toml          submit it
 
     \b
-    Resources (size from `mbo hpc info`, verify with `mbo hpc check`):
-      One job = one GPU (gres). planes_per_gpu (F) planes share it, each holding a
-      movie in RAM, so peak RAM ~= F x per-plane size; set mem_gb to the node's
-      capacity, not a small default (too low OOMs at the cgroup cap).
-      --mode array only helps across MULTIPLE nodes. On a single-node partition all
-      tasks pile onto one node, and cpus_per_task x tasks must fit the node's CPUs.
+    Modes (mbo hpc run --mode):
+      single   one GPU job, all planes packed onto one node          [default]
+      array    SLURM array + dependent aggregate, spreads over nodes
+      local    run inline on this machine, no SLURM (--gpu N picks the device)
+
+    \b
+    Resources  (size with `mbo hpc info`, verify with `mbo hpc check`)
+      - One job = one GPU (gres).
+      - planes_per_gpu (F) planes share that GPU, each holding a movie in RAM,
+        so peak RAM ~= F x per-plane size. Set mem_gb to the node's capacity,
+        not a small default; too low OOMs at the cgroup cap.
+      - cpus_per_task x tasks must fit one node's CPUs.
+      - --mode array only spreads when the partition has MULTIPLE nodes;
+        on a single-node partition every task piles onto the one node.
     """
 
 
-@hpc.command("init")
+@hpc.command("init", short_help="Write a commented TOML config next to your data.")
 @click.argument("data_path", required=False, type=click.Path())
 @click.option("-o", "--config", "config_path", type=click.Path(), default=None,
               help="Config file to write (default: <data_path>/hpc.toml, else ./hpc.toml).")
@@ -80,7 +88,7 @@ def hpc_init(data_path, config_path, output_root, overwrite):
     click.echo(f"Edit it, then: mbo hpc run {cfg_file}")
 
 
-@hpc.command("run")
+@hpc.command("run", short_help="Submit the pipeline described by CONFIG_PATH.")
 @click.argument("config_path", type=click.Path(exists=True), default="hpc.toml")
 @click.option("--mode", type=click.Choice(["single", "array", "local"]), default="single",
               help="single GPU job, SLURM array+aggregate, or inline local run.")
@@ -143,7 +151,7 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
         raise click.ClickException(str(e))
 
 
-@hpc.command("status")
+@hpc.command("status", short_help="Show a job's state, an output folder's timings, or your SLURM queue.")
 @click.argument("target", required=False)
 def hpc_status(target):
     """
@@ -199,7 +207,7 @@ def hpc_status(target):
         click.secho("squeue not found (not on a SLURM login node?)", fg="yellow")
 
 
-@hpc.command("watch")
+@hpc.command("watch", short_help="Follow a run's .err/.out logs, from a job id, config, or output dir.")
 @click.argument("target", required=False, default="hpc.toml", type=click.Path())
 @click.option("-o", "--out", "stream_out", is_flag=True,
               help="Start on stdout (.out); default is stderr (.err).")
@@ -232,7 +240,7 @@ def hpc_watch(target, stream_out, no_follow, lines):
         pass
 
 
-@hpc.command("info")
+@hpc.command("info", short_help="Show cluster partitions (nodes, CPUs, GPUs, memory) matching PATTERN.")
 @click.argument("pattern", required=False, default="hpc")
 def hpc_info(pattern):
     """
@@ -240,7 +248,7 @@ def hpc_info(pattern):
 
     PATTERN is a regex on the partition name (default 'hpc'), so it isn't tied
     to one cluster. Use it to size a job: NODES tells you whether --mode array
-    can spread; FREE / GPUS tell you what to request.
+    can spread; CPUS(A/I) and GPU USE show what's busy vs free.
 
     \b
     Examples:
@@ -260,7 +268,7 @@ def hpc_info(pattern):
     click.echo(cluster.format_partitions(parts))
 
 
-@hpc.command("check")
+@hpc.command("check", short_help="Check a config's requested resources against the data and partition.")
 @click.argument("config_path", type=click.Path(exists=True), default="hpc.toml")
 @click.option("--mode", type=click.Choice(["single", "array", "local"]), default="single",
               help="Mode to check the request against (CPU packing depends on it).")
@@ -287,101 +295,4 @@ def hpc_check(config_path, mode):
     try:
         run_check(cfg, mode=mode)
     except (ValueError, OSError, RuntimeError) as e:
-        raise click.ClickException(str(e))
-
-
-@hpc.command("bench")
-@click.argument("output_dir", type=click.Path(exists=True))
-def hpc_bench(output_dir):
-    """
-    Join an array run's per-plane `io` to the node each task ran on.
-
-    Tells you whether SLURM actually spread the tasks across nodes, and whether
-    `io` is lower on less-loaded nodes (packing hurts -> spreading helps) or
-    uniform regardless (a lustre/OST or external-load limit). Run it on the
-    output dir of a finished `--mode array` run.
-
-    \b
-    Examples:
-      mbo hpc bench /lustre/.../2026_06_14_s2p
-    """
-    from mbo_utilities.hpc.bench import run_bench
-
-    try:
-        run_bench(output_dir)
-    except (FileNotFoundError, RuntimeError, OSError) as e:
-        raise click.ClickException(str(e))
-
-
-@hpc.command("compare")
-@click.argument("output_dirs", nargs=-1, type=click.Path(exists=True), required=True)
-def hpc_compare(output_dirs):
-    """
-    Tabulate timings.json across runs side-by-side (no SLURM needed).
-
-    Works for local runs, so it's the way to compare a local sweep:
-    run `mbo hpc run hpc.toml --local --planes-per-gpu N` for N=1,2,4 (different
-    --name each), then compare their `io` to see if the tiff->bin step
-    parallelizes on local disk.
-
-    \b
-    Examples:
-      mbo hpc compare ./cmp/*_f1 ./cmp/*_f2 ./cmp/*_f4
-    """
-    from mbo_utilities.hpc.bench import run_compare
-
-    run_compare(output_dirs)
-
-
-@hpc.command("ioprobe")
-@click.argument("raw", type=click.Path(exists=True))
-@click.option("--plane", default=1, show_default=True, help="1-based z-plane to read.")
-@click.option("--frames", default=2000, show_default=True, help="Frames to read cold.")
-def hpc_ioprobe(raw, plane, frames):
-    """
-    Decompose tiff->bin into read / phase-correct / write on real data.
-
-    Proves whether `io` is read-bound (strided filesystem reads -> staging helps)
-    or phase-bound (FFT scan-phase correction -> drop use_fft). Reads N frames of
-    one plane cold, then times phase-apply and write on that in-memory chunk.
-    Run it on a fresh range so the read isn't served from page cache.
-
-    \b
-    Examples:
-      mbo hpc ioprobe /lustre/.../raw
-      mbo hpc ioprobe /lustre/.../raw --plane 3 --frames 4000
-    """
-    from mbo_utilities.hpc.bench import run_ioprobe
-
-    try:
-        run_ioprobe(raw, plane=plane, frames=frames)
-    except (OSError, ValueError, RuntimeError) as e:
-        raise click.ClickException(str(e))
-
-
-@hpc.command("iobench")
-@click.argument("raw", type=click.Path(exists=True))
-@click.option("--planes", default="",
-              help="1-based z-planes, comma-separated (e.g. 1,7,14). Default: a few evenly-spaced.")
-@click.option("--frames", default=500, show_default=True, help="Frames per plane to read.")
-def hpc_iobench(raw, planes, frames):
-    """
-    Estimate the full run's io from a few planes, without processing all of them.
-
-    Reads `frames` of each chosen plane (strided -> the io bottleneck), then
-    scales to all planes x all frames. Compare a few planes against the
-    full-dataset estimate without the multi-hour pipeline. Run on a fresh range
-    so the read isn't served from page cache.
-
-    \b
-    Examples:
-      mbo hpc iobench /lustre/.../raw
-      mbo hpc iobench /lustre/.../raw --planes 1,7,13 --frames 1000
-    """
-    from mbo_utilities.hpc.bench import run_iobench
-
-    pl = [int(p) for p in planes.split(",") if p.strip()] if planes else None
-    try:
-        run_iobench(raw, frames=frames, planes=pl)
-    except (OSError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e))

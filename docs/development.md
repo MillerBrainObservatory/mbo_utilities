@@ -187,6 +187,19 @@ Each dialog type maintains its own last-used directory:
 
 Standardized metadata handling with alias resolution across formats (ScanImage, Suite2p, OME, TIFF tags).
 
+For the full design of the canonical / alias-aware / reactive metadata layer
+— how `array.dx` resolves any source's keys, the single place to add an
+alias, and how to wire it into a lazy array — see
+[Canonical Metadata Layer](canonical_metadata.md).
+
+```{toctree}
+---
+maxdepth: 1
+hidden:
+---
+Canonical Metadata Layer <canonical_metadata>
+```
+
 #### Parameter Registry
 
 Parameters are defined in `METADATA_PARAMS` with canonical names and aliases:
@@ -264,6 +277,43 @@ The canonical names for dx and Lx have been chosen to match suite2p, as that was
 | `num_mrois` | num_rois, nrois | - | mROI count |
 
 Note: `num_timepoints` is the canonical name for the T dimension. The alias `nframes` is maintained for Suite2p compatibility (Suite2p's `ops["nframes"]` maps to `num_timepoints`).
+
+---
+
+### Summary Stats (Signal Quality tab)
+
+The GUI's Signal Quality tab is **array-defined**. Each array declares how its
+dimensions map to the tab; the GUI just renders the resolved
+`SummaryStatsSpec`. Lives in `mbo_utilities/arrays/features/_summary_stats.py`.
+
+Every dimension is either an **image** dim (`Y`/`X` — stats are computed over
+these) or a **scrollable** dim. Each scrollable dim takes one role:
+
+| Role | Meaning | Example |
+|------|---------|---------|
+| `SERIES` | the x-axis / table rows (one if multiple → "pick one") | Zplane |
+| `GROUP` | a separate series per index, follows its slider | Tile, Cam, View |
+| `REDUCE` | collapsed into each point by the metric (mean) | Timepoints |
+
+Default: `Z` → series candidate, else group; `T` → series candidate, else
+reduce; everything else → group. Most arrays need no changes. Override the
+instance hook to reclassify a dim:
+
+```python
+from mbo_utilities.arrays.features import StatsDimRole, default_dim_role
+
+class MyArray(LazyArray):
+    def summary_stats_dim_role(self, name):
+        # name is a canonical axis: "Z"/"T"/"C"/...
+        if name == "T" and self.is_tiled:        # T holds spatial tiles
+            return (False, StatsDimRole.GROUP)   # group, never collapse
+        return default_dim_role(name)            # (is_series_candidate, off_role)
+```
+
+Metrics (columns) default to mean / std / SNR; override
+`summary_stats_metrics()` to add or replace them (each a `StatsMetric` with a
+`reducer(stack, mean_img, has_reduce) -> float`). `arr.summary_stats_spec()`
+resolves everything and `spec.describe()` states exactly what the tab shows.
 
 ---
 

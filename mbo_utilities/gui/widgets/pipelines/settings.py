@@ -707,10 +707,10 @@ class Suite2pSettings:
     `MboSuite2pExtras`.
     """
 
-    # top-level — defaults match suite2p.parameters.SETTINGS exactly.
-    # Don't bake in LBM tunings here; users start from upstream defaults
-    # and tweak from there (the schema helper at _s2p_schema.py is the
-    # single source of truth for what "default" means).
+    # top-level — these dataclass defaults are the values the GUI starts
+    # from and define what "default"/"modified" means in the run tab
+    # (_s2p_schema.get_default reads them). Most match upstream suite2p;
+    # a few carry LBM tunings (e.g. cellprob_threshold, flow_threshold).
     torch_device: str = "cuda"  # upstream default
     tau: float = 1.0  # upstream default
     fs: float = 10.0  # upstream default
@@ -1235,7 +1235,9 @@ def _init_s2p_selection_state(self):
                 if num_planes == 1:
                     num_planes = len(self.fpath)
 
-            if hasattr(data, "num_color_channels"):
+            if hasattr(data, "num_views"):
+                num_channels = data.num_views
+            elif hasattr(data, "num_color_channels"):
                 num_channels = data.num_color_channels
             elif hasattr(data, "_num_color_channels"):
                 num_channels = data._num_color_channels
@@ -3565,7 +3567,11 @@ def _draw_section_suite2p_content(self):
     )
     imgui.spacing()
     imgui.spacing()
-    if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)):
+    # one-shot programmatic open, used by scripts/capture_docs.py
+    _force_settings = getattr(self, "_force_pipe_settings", False)
+    if _force_settings:
+        self._force_pipe_settings = False
+    if imgui.button("Open##pipe_settings_btn", imgui.ImVec2(_BTN_W, 0)) or _force_settings:
         _popup_states["pipeline_settings"] = True
         self._pipe_settings_just_opened = True
         # NOTE: before_open() is called in the popup body below, not
@@ -3579,11 +3585,12 @@ def _draw_section_suite2p_content(self):
     imgui.spacing()
 
     # === MODIFIED PARAMETERS PREVIEW ===
-    # Shows fields whose current value differs from the upstream suite2p
-    # default. Driven by collect_modified_params() which iterates the
-    # _MBO_TO_S2P / _MBO_DB_TO_S2P maps and uses _is_default() for the
-    # diff check. Useful right after a settings.npy hydration so the
-    # user can see at a glance what's changed.
+    # Shows fields whose current value differs from the mbo default (the
+    # Suite2pSettings/Suite2pDB dataclass default the GUI starts from).
+    # Driven by collect_modified_params() which iterates the _MBO_TO_S2P /
+    # _MBO_DB_TO_S2P maps and uses _is_default() for the diff check. Useful
+    # right after a settings.npy hydration so the user can see at a glance
+    # what's changed.
     _mods = collect_modified_params(self.s2p, self.s2p_db, self.s2p_extras)
     _n_mods = len(_mods)
     imgui.text(f"Modified parameters ({_n_mods})")
@@ -4107,12 +4114,10 @@ def _draw_section_suite2p_content(self):
 
                 imgui.same_line()
 
-                # Defaults — suite2p-yellow. Resets BOTH upstream suite2p
-                # fields (Suite2pSettings + Suite2pDB; values pulled live
-                # from suite2p.parameters.SETTINGS via the schema helper)
-                # AND mbo-only fields on MboSuite2pExtras (defaults from
-                # the dataclass spec). Upstream bumps a default → the
-                # button picks it up automatically.
+                # Defaults — suite2p-yellow. Resets Suite2pSettings +
+                # Suite2pDB fields (and mbo-only fields on MboSuite2pExtras)
+                # to their dataclass defaults via the schema helper. Editing
+                # a dataclass default → the button picks it up automatically.
                 imgui.push_style_color(imgui.Col_.button, imgui.ImVec4(0.55, 0.45, 0.15, 1.0))
                 imgui.push_style_color(imgui.Col_.button_hovered, imgui.ImVec4(0.70, 0.60, 0.22, 1.0))
                 imgui.push_style_color(imgui.Col_.button_active, imgui.ImVec4(0.45, 0.38, 0.12, 1.0))
@@ -4163,10 +4168,8 @@ def _draw_section_suite2p_content(self):
                         setattr(self.s2p_extras, _ef.name, _ef.default)
                 imgui.pop_style_color(3)
                 set_tooltip(
-                    "Reset every parameter in this popup to its default. "
-                    "Suite2p fields pull from suite2p.parameters.SETTINGS; "
-                    "LBM-Suite2p-Python fields reset to their dataclass "
-                    "defaults. Both groups are tinted orange when modified.",
+                    "Reset every parameter in this popup to its dataclass "
+                    "default. Both groups are tinted orange when modified.",
                     show_mark=False,
                 )
 
@@ -4176,7 +4179,11 @@ def _draw_section_suite2p_content(self):
                 # and draw_boxed_label helper so the legend tracks palette
                 # tweaks automatically.
                 imgui.same_line()
-                if imgui.button("Legend##pipe_legend", imgui.ImVec2(_btn_w, 0)):
+                # one-shot programmatic open, used by scripts/capture_docs.py
+                _force_legend = getattr(self, "_force_pipe_legend", False)
+                if _force_legend:
+                    self._force_pipe_legend = False
+                if imgui.button("Legend##pipe_legend", imgui.ImVec2(_btn_w, 0)) or _force_legend:
                     imgui.open_popup("Legend##pipe_legend_popup")
                 if imgui.begin_popup("Legend##pipe_legend_popup"):
                     imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p parameter")

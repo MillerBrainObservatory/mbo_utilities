@@ -29,6 +29,8 @@ import numpy as np
 from imgui_bundle import imgui, icons_fontawesome_6 as fa
 from scipy.ndimage import convolve1d
 
+from mbo_utilities.gui._imgui_helpers import button_width, draw_toolbar_row
+
 
 _DEFAULT_CAMERA_VIEW_MAP = {0: 0, 1: 0, 2: 90, 3: 90}
 _VIEW_COLORS = {0: (1.0, 0.35, 0.35, 1.0), 90: (1.0, 0.95, 0.4, 1.0)}
@@ -86,6 +88,12 @@ def _is_raw(arr: Any) -> bool:
     return str(getattr(arr, "kind", "") or "").lower() == "raw"
 
 
+def _tp_label(slot) -> str:
+    """Display label for a tiled projection slot: a specimen_name grid token
+    (string) as-is, else SPM## for a legacy integer slot."""
+    return f"SPM{slot:02d}" if isinstance(slot, int) else str(slot)
+
+
 def _build_projection_index(
     arr: Any, projections: dict | None,
 ) -> dict[int, dict[int, Path]]:
@@ -113,7 +121,7 @@ def _build_projection_index(
             key = raw_int if raw_mode else cv.get(raw_int, raw_int)
         else:
             key = raw_int
-        per_view_by_label.setdefault(key, {}).setdefault(label, {})[int(t)] = Path(path)
+        per_view_by_label.setdefault(key, {}).setdefault(label, {})[t] = Path(path)
 
     out: dict[int, dict[int, Path]] = {}
     for key, by_label in per_view_by_label.items():
@@ -428,7 +436,7 @@ def _get_filtered(
     if work is None:
         return None
     proj, factor = work
-    key = (int(view), int(tp), round(float(sigma), 3), int(kernel), factor)
+    key = (int(view), tp, round(float(sigma), 3), int(kernel), factor)
     cache = parent._iso_seg_filtered_cache
     if key in cache:
         try:
@@ -608,56 +616,61 @@ def draw_window(parent: Any) -> None:
 
 def _draw_display_controls(parent: Any) -> None:
     """vmin/vmax + timepoint scrubber, same affordance as the crop window."""
-    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), "Display:")
-    imgui.same_line()
-
-    imgui.set_next_item_width(_DISPLAY_DRAG_W)
     speed = max(1.0, abs(parent._iso_seg_vmax - parent._iso_seg_vmin) / 200.0)
-    _, parent._iso_seg_vmin = imgui.drag_float(
-        "vmin##iso_seg", float(parent._iso_seg_vmin), speed, 0.0, 0.0, "%.0f",
-    )
-    imgui.same_line()
-    imgui.set_next_item_width(_DISPLAY_DRAG_W)
-    _, parent._iso_seg_vmax = imgui.drag_float(
-        "vmax##iso_seg", float(parent._iso_seg_vmax), speed, 0.0, 0.0, "%.0f",
-    )
-    if parent._iso_seg_vmax <= parent._iso_seg_vmin:
-        parent._iso_seg_vmax = parent._iso_seg_vmin + 1.0
 
-    imgui.same_line()
-    if imgui.button("Auto##iso_seg_auto"):
-        lo, hi = _initial_display_range(parent)
-        parent._iso_seg_vmin = lo
-        parent._iso_seg_vmax = hi
+    def _vmin():
+        _, parent._iso_seg_vmin = imgui.drag_float(
+            "##iso_seg_vmin", float(parent._iso_seg_vmin), speed, 0.0, 0.0, "%.0f",
+        )
+
+    def _vmax():
+        _, parent._iso_seg_vmax = imgui.drag_float(
+            "##iso_seg_vmax", float(parent._iso_seg_vmax), speed, 0.0, 0.0, "%.0f",
+        )
+
+    def _auto():
+        if imgui.button("Auto##iso_seg_auto"):
+            lo, hi = _initial_display_range(parent)
+            parent._iso_seg_vmin = lo
+            parent._iso_seg_vmax = hi
+
+    items = [
+        ("Min", _DISPLAY_DRAG_W, _vmin),
+        ("Max", _DISPLAY_DRAG_W, _vmax),
+        (None, button_width("Auto"), _auto),
+    ]
 
     tiled = bool(getattr(_get_iso_array(parent), "is_tiled", False))
     tps = parent._iso_seg_timepoints
+    if tps:
+        try:
+            cur_idx = tps.index(parent._iso_seg_current_tp)
+        except ValueError:
+            cur_idx = 0
+        label = "Tile" if tiled else "Timepoint"
+        value_fmt = (
+            f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
+            if tiled
+            else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
+        )
+
+        def _tp():
+            ch, v = imgui.slider_int(
+                "##iso_seg_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
+            )
+            if ch:
+                parent._iso_seg_current_tp = tps[max(0, min(v, len(tps) - 1))]
+        items.append((label, 220.0, _tp))
+
+    draw_toolbar_row(items)
+    if parent._iso_seg_vmax <= parent._iso_seg_vmin:
+        parent._iso_seg_vmax = parent._iso_seg_vmin + 1.0
     if not tps:
         unit = "per-tile" if tiled else "per-timepoint"
         imgui.text_colored(
             imgui.ImVec4(0.6, 0.6, 0.65, 1.0),
             f"(no {unit} projections — slider values still save)",
         )
-        return
-
-    try:
-        cur_idx = tps.index(int(parent._iso_seg_current_tp))
-    except ValueError:
-        cur_idx = 0
-    label = "Tile:" if tiled else "Timepoint:"
-    value_fmt = (
-        f"SPM{tps[cur_idx]:02d}  ({cur_idx + 1}/{len(tps)})"
-        if tiled
-        else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
-    )
-    imgui.text_colored(imgui.ImVec4(0.85, 0.85, 0.85, 1.0), label)
-    imgui.same_line()
-    imgui.set_next_item_width(220)
-    changed, new_idx = imgui.slider_int(
-        "##iso_seg_tp", cur_idx, 0, max(0, len(tps) - 1), value_fmt,
-    )
-    if changed:
-        parent._iso_seg_current_tp = tps[max(0, min(new_idx, len(tps) - 1))]
 
 
 def _draw_param_controls(parent: Any, iso: Any) -> None:
@@ -762,14 +775,15 @@ def _draw_view_previews(parent: Any, iso: Any) -> None:
 
 def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float, raw_mode: bool = False) -> None:
     if raw_mode:
+        from mbo_utilities.arrays.isoview.array import camera_view_label
         color = _CAMERA_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
-        label_text = f"CM{view:02d}"
+        label_text = camera_view_label(view)
     else:
         color = _VIEW_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
         label_text = f"VW{view:02d}"
     imgui.text_colored(imgui.ImVec4(*color), label_text)
 
-    tp = int(parent._iso_seg_current_tp)
+    tp = parent._iso_seg_current_tp
     sigma = float(iso._correct_gauss_sigma)
     kernel = int(iso._correct_gauss_kernel)
     threshold = float(iso._correct_segment_threshold)

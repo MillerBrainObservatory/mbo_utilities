@@ -94,8 +94,7 @@ All rows are `mbo_utilities/arrays/isoview/consolidate.py`.
 
 | Path | Function | What it does | Called by |
 |------|----------|--------------|-----------|
-| mbo_utilities/metadata/io.py | `_build_ome_metadata(shape, dtype, metadata, dims)` (`:924`) | Builds the full OME-NGFF v0.5 dict (axes, multiscales, coordinateTransformations, omero). | _writers.py:1915 (`_write_zarr`); arrays/zarr.py:762 (`merge_zarr_zplanes`) |
-| mbo_utilities/metadata/io.py | `_build_omero_metadata(shape, dtype, metadata)` (`:1157`) | Builds the OMERO channel/window/render block. | metadata/io.py:1019 (`_build_ome_metadata`) |
+| mbo_utilities/metadata/io.py | `_build_ome_metadata(shape, dtype, metadata, dims)` (`:924`) | Builds the full OME-NGFF v0.5 dict (axes, multiscales, coordinateTransformations). | _writers.py:1915 (`_write_zarr`); arrays/zarr.py:762 (`merge_zarr_zplanes`) |
 | mbo_utilities/metadata/output.py | `OutputMetadata.to_ome_ngff(dims)` (`:465`) | Builds OME-NGFF axes + coordinateTransformations from reactive voxel size. | _writers.py:1492 (`_write_volumetric_zarr`) |
 | mbo_utilities/metadata/output.py | `OutputMetadata.to_napari_scale(dims)` (`:509`) | Builds a napari scale tuple (finterval + voxel). | gui/run_gui.py:1100 |
 | mbo_utilities/metadata/output.py | `OutputMetadata.voxel_size` (`:326`) | Returns adjusted `(dx,dy,dz)` after selections; supplies pyramid voxel input. | _writers.py:916; output.py internal; gui/run_gui.py:1096 |

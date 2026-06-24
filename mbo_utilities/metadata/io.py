@@ -17,7 +17,6 @@ from mbo_utilities import log
 from mbo_utilities.file_io import get_files
 from mbo_utilities.file_io import load_npy
 
-# import from sibling modules
 from .params import normalize_resolution, get_param
 
 __all__ = [
@@ -930,9 +929,6 @@ def _build_ome_metadata(
     """
     Build comprehensive OME-NGFF v0.5 metadata from ScanImage and other metadata.
 
-    Creates OMERO rendering settings, custom metadata fields, and proper
-    coordinate transformations based on available metadata.
-
     Parameters
     ----------
     shape : tuple
@@ -1014,15 +1010,6 @@ def _build_ome_metadata(
         "version": "0.5",
         "multiscales": multiscales,
     }
-
-    # Add OMERO rendering metadata
-    omero_metadata = _build_omero_metadata(
-        shape=shape,
-        dtype=dtype,
-        metadata=metadata,
-    )
-    if omero_metadata:
-        ome_content["omero"] = omero_metadata
 
     result = {"ome": ome_content}
 
@@ -1152,98 +1139,3 @@ def _build_ome_metadata(
                 pass
 
     return result
-
-
-def _build_omero_metadata(shape: tuple, dtype, metadata: dict) -> dict:
-    """
-    Build OMERO rendering metadata for OME-NGFF.
-
-    Parameters
-    ----------
-    shape : tuple
-        Shape of the array (variable ndim, typically 3D TYX or 4D TZYX)
-    dtype : np.dtype
-        Data type of the array
-    metadata : dict
-        Metadata dictionary
-
-    Returns
-    -------
-    dict
-        OMERO metadata or empty dict if not enough info
-    """
-    import numpy as np
-
-    # handle variable ndim - extract Z if present
-    ndim = len(shape)
-    if ndim == 4:
-        _T, Z, _Y, _X = shape
-    elif ndim == 3:
-        _T, _Y, _X = shape
-        Z = 1
-    else:
-        # 2D or other - no Z
-        Z = 1
-
-    # Determine data range for window settings
-    if np.issubdtype(dtype, np.integer):
-        info = np.iinfo(dtype)
-        data_min, data_max = info.min, info.max
-    else:
-        data_min, data_max = 0.0, 1.0
-
-    # Build channel metadata
-    channels = []
-
-    # Get channel names from metadata
-    channel_names = metadata.get("channel_names")
-    num_channels = metadata.get("num_planes", 1)
-
-    if channel_names is None:
-        # Generate default channel names
-        if num_channels == 1:
-            channel_names = ["Channel 1"]
-        else:
-            channel_names = [f"Z-plane {i + 1}" for i in range(num_channels)]
-
-    # Default colors (cycle through common microscopy colors)
-    default_colors = [
-        "00FF00",  # Green
-        "FF0000",  # Red
-        "0000FF",  # Blue
-        "FFFF00",  # Yellow
-        "FF00FF",  # Magenta
-        "00FFFF",  # Cyan
-        "FFFFFF",  # White
-    ]
-
-    for i, name in enumerate(channel_names[:num_channels]):
-        channel = {
-            "active": True,
-            "coefficient": 1.0,
-            "color": default_colors[i % len(default_colors)],
-            "family": "linear",
-            "inverted": False,
-            "label": name,
-            "window": {
-                "end": float(data_max),
-                "max": float(data_max),
-                "min": float(data_min),
-                "start": float(data_min),
-            },
-        }
-        channels.append(channel)
-
-    if not channels:
-        return {}
-
-    return {
-        "channels": channels,
-        "rdefs": {
-            "defaultT": 0,
-            "defaultZ": Z // 2,  # Middle z-plane
-            "model": "greyscale",
-        },
-        "version": "0.5",
-    }
-

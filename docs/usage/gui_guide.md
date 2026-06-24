@@ -4,9 +4,11 @@
 
 Interactive data preview and processing tools for calcium imaging data.
 
-```{image} /_images/gui/readme/02_step_data_view.png
+```{figure} /_images/gui/readme/02_step_data_view.png
 :width: 100%
 :alt: Miller Brain Studio
+
+The time-series viewer: image canvas with axes and histogram, plus the side panel (Preview / Signal Quality / Run tabs) for window functions, spatial filtering, scan-phase correction, z-stats, and pipelines.
 ```
 
 ## Quick Start
@@ -120,11 +122,27 @@ Features:
 
 Press `k` in the GUI to see this list at any time.
 
+```{figure} /_images/gui/readme/10_keybinds.png
+:width: 70%
+:alt: Keybinds cheatsheet
+
+The in-app shortcut cheatsheet, opened with `k`.
+```
+
 ### Menu Bar
 
 - **File**: Open File, Open Folder, Save As
 - **Docs**: Help viewer, Keybinds, Online Docs link
 - **Settings**: Scope Inspector toggle, Status Indicator toggle
+
+### Options
+
+**File > Options** sets the render GPU adapter, debug logging, and memory-usage logging.
+
+```{image} /_images/gui/readme/12_options.png
+:width: 60%
+:alt: Options
+```
 
 (gui-preview)=
 ## Preview Controls
@@ -208,9 +226,11 @@ The z-stats panel adapts to the data:
 
 Open via **File > Save As** or press `s`.
 
-```{image} /_images/gui/readme/04_save_as_dialog.png
+```{figure} /_images/gui/readme/04_save_as_dialog.png
 :width: 80%
 :alt: Save As Dialog
+
+The filename, estimated size, and output shape update live as you change the format and the timepoint/plane selection.
 ```
 
 ### Important: Save As Does Not Change the Active Dataset
@@ -241,9 +261,11 @@ An output preview shows the filename, estimated size, and output shape before sa
 
 ### Options
 
-```{image} /_images/gui/readme/05_save_options.png
+```{figure} /_images/gui/readme/05_save_options.png
 :width: 80%
 :alt: Save Options
+
+General write options (`.tiff` shown). Format-specific sections appear below as you change the output extension.
 ```
 
 | Option | Description |
@@ -257,6 +279,11 @@ An output preview shows the filename, estimated size, and output shape before sa
 
 ### Zarr-Specific Options
 
+```{image} /_images/gui/readme/08_save_options_zarr.png
+:width: 80%
+:alt: Zarr Save Options
+```
+
 | Option | Description |
 |--------|-------------|
 | Sharding | enable zarr sharding for faster access |
@@ -264,6 +291,15 @@ An output preview shows the filename, estimated size, and output shape before sa
 | Compression Level | zstd compression level (0 = none) |
 | Pyramid | generate multi-resolution pyramid |
 | Pyramid Layers | max number of downsampled levels |
+
+### Video (.mp4) Options
+
+```{image} /_images/gui/readme/09_save_options_mp4.png
+:width: 80%
+:alt: Video Export Options
+```
+
+Exporting to `.mp4` exposes playback and rendering controls: frame rate, speed factor, contrast percentiles, temporal/spatial smoothing, gamma, colormap, quality, and codec.
 
 ### Metadata
 
@@ -284,6 +320,11 @@ The save dialog includes a metadata editor:
 
 Click the status indicator in the menu bar to open the process console.
 
+```{image} /_images/gui/readme/11_process_console.png
+:width: 70%
+:alt: Process Console
+```
+
 The status indicator is color-coded:
 - **green**: idle or completed
 - **orange**: task running (with progress percentage)
@@ -298,9 +339,11 @@ The process console shows:
 (gui-suite2p)=
 ## Suite2p Integration
 
-```{image} /_images/gui/readme/06_suite2p_settings.png
+```{figure} /_images/gui/readme/06_suite2p_settings.png
 :width: 80%
 :alt: Suite2p Processing Settings
+
+The Run tab: dataset summary, output folder, plane/timepoint slicing, scan-phase options, and the pipeline selector. **Parameters and settings > Open** reaches the full parameter dialog.
 ```
 
 Available when `suite2p` is installed. Access via the processing pipeline panel.
@@ -311,6 +354,37 @@ Suite2p always runs on the dataset currently loaded in the viewer. If you used S
 - all suite2p parameters exposed with descriptions
 - output directory selection
 - scan-phase correction options for processing
+
+### Parameters
+
+**Parameters and settings > Open** opens every Suite2p and LBM-Suite2p-Python parameter in one dialog, grouped by Registration, ROI Detection, Signal Extraction, Deconvolution, and Classification.
+
+```{figure} /_images/gui/readme/07_suite2p_parameters.png
+:width: 100%
+:alt: Suite2p Parameters
+
+Every Suite2p and LBM-Suite2p-Python parameter in one dialog. Values changed
+from the Suite2p default are tinted orange (here `tau` and the cell diameters),
+so non-default settings stand out at a glance.
+```
+
+The parameter columns are colour-coded. The **Legend** button (next to **Defaults**) explains the conventions:
+
+```{figure} /_images/gui/readme/13_suite2p_legend.png
+:width: 55%
+:alt: Suite2p parameter legend
+
+The colour/box legend, opened from the settings dialog.
+```
+
+| Style | Meaning |
+|-------|---------|
+| yellow name | Suite2p parameter |
+| teal name | LBM-Suite2p-Python parameter |
+| orange value | modified from the Suite2p default |
+| boxed label | important parameter (look at these first) |
+
+The Run tab also lists every changed value under **Modified parameters**, with a copy button that emits a paste-ready Python dict.
 
 ### Spatial Crop
 

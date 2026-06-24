@@ -157,65 +157,6 @@ class ROIFeature(ArrayFeature):
             )
             self._call_event_handlers(event)
 
-    def set_mode(self, mode: RoiMode | str) -> None:
-        """
-        Set ROI handling mode.
-
-        Parameters
-        ----------
-        mode : RoiMode | str
-            new mode
-        """
-        if isinstance(mode, str):
-            self._mode = RoiMode.from_string(mode)
-        else:
-            self._mode = mode
-
-    def iter_all(self) -> Iterator[int]:
-        """
-        Iterate over all ROI indices.
-
-        Yields
-        ------
-        int
-            ROI indices from 1 to num_rois
-        """
-        yield from range(1, self._num_rois + 1)
-
-    def select_next(self) -> int | None:
-        """
-        Select next ROI (wraps around).
-
-        Returns
-        -------
-        int | None
-            new current ROI index
-        """
-        if self._current is None:
-            self._current = 1
-        else:
-            self._current = (self._current % self._num_rois) + 1
-        return self._current
-
-    def select_previous(self) -> int | None:
-        """
-        Select previous ROI (wraps around).
-
-        Returns
-        -------
-        int | None
-            new current ROI index
-        """
-        if self._current is None:
-            self._current = self._num_rois
-        else:
-            self._current = ((self._current - 2) % self._num_rois) + 1
-        return self._current
-
-    def select_stitched(self) -> None:
-        """Select stitched (all ROIs) view."""
-        self._current = None
-
     def __repr__(self) -> str:
         if self._current is None:
             return f"ROIFeature(stitched, {self._num_rois} rois, {self._mode.value})"

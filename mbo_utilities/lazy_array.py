@@ -139,10 +139,98 @@ class LazyArray:
         return self.dimension_specs.batch_dims
 
     @property
+    def num_timepoints(self) -> int:
+        """Number of timepoints (T), name-keyed via dimension_specs."""
+        return self.dimension_specs.num_timepoints
+
+    @property
+    def num_zplanes(self) -> int:
+        """Number of z-planes (Z), name-keyed via dimension_specs."""
+        return self.dimension_specs.num_zplanes
+
+    @property
+    def num_planes(self) -> int:
+        """Z-plane count; alias of num_zplanes (picks up subclass overrides)."""
+        return self.num_zplanes
+
+    @property
+    def dx(self) -> float:
+        """Pixel size in X from metadata (1.0 if unknown)."""
+        return self.dimension_specs.dx
+
+    @property
+    def dy(self) -> float:
+        """Pixel size in Y from metadata (1.0 if unknown)."""
+        return self.dimension_specs.dy
+
+    @property
+    def dz(self) -> float | None:
+        """Z-step size from metadata (None if no Z dim)."""
+        return self.dimension_specs.dz
+
+    @property
+    def fs(self) -> float | None:
+        """Frame rate in Hz from metadata (None if unknown)."""
+        return self.dimension_specs.fs
+
+    @property
+    def finterval(self) -> float | None:
+        """Frame interval in seconds (None if unknown)."""
+        return self.dimension_specs.finterval
+
+    @property
     def slider_dims(self) -> tuple[str, ...] | None:
         from mbo_utilities.arrays.features._dim_labels import get_slider_dims
 
         return get_slider_dims(self)
+
+    def summary_stats_dim_role(self, name: str):
+        """How a scrollable dim is treated by the summary-stats tab.
+
+        Returns ``(is_series_candidate, off_role)`` where ``off_role`` is the
+        role the dim takes when it is not the chosen series axis. ``name`` is a
+        canonical axis label (``"Z"``/``"T"``/``"C"``/…). Override per array to
+        reclassify a dim (e.g. an array whose ``T`` axis holds spatial tiles
+        should return ``(False, GROUP)`` so tiles are broken out, not averaged).
+        See `mbo_utilities.arrays.features._summary_stats`.
+        """
+        from mbo_utilities.arrays.features._summary_stats import default_dim_role
+
+        return default_dim_role(name)
+
+    def summary_stats_metrics(self):
+        """Metric columns shown by the summary-stats tab (default: mean/std/SNR).
+
+        Override to add or replace metrics; each is a
+        `mbo_utilities.arrays.features._summary_stats.StatsMetric`.
+        """
+        from mbo_utilities.arrays.features._summary_stats import DEFAULT_METRICS
+
+        return DEFAULT_METRICS
+
+    def summary_stats_spec(
+        self, *, dims=None, shape=None, series_pref=None, labels=None
+    ):
+        """Resolve this array's summary-stats layout into a ``SummaryStatsSpec``.
+
+        ``dims``/``shape`` default to the array's own; the GUI passes the
+        rendered (possibly singleton-squeezed) view so axis positions match
+        what it indexes. ``series_pref`` ("z"/"t") and ``labels`` (canonical ->
+        display label) come from the GUI. The spec states exactly what the tab
+        will show via ``spec.describe()``.
+        """
+        from mbo_utilities.arrays.features._summary_stats import (
+            build_summary_stats_spec,
+        )
+
+        return build_summary_stats_spec(
+            tuple(dims) if dims is not None else tuple(self.dims),
+            tuple(shape) if shape is not None else tuple(self.shape),
+            dim_role=self.summary_stats_dim_role,
+            metrics=self.summary_stats_metrics(),
+            series_pref=series_pref,
+            labels=labels,
+        )
 
     def dim_index(self, label: str) -> int | None:
         try:

@@ -7,14 +7,8 @@ that manages its own state and events.
 
 Available features:
 - DimensionSpecs: dimension structure (names, roles, scales) + OME axes
-- VoxelSizeFeature: physical pixel/voxel dimensions
-- FrameRateFeature: temporal sampling frequency
-- DisplayRangeFeature: min/max for display scaling
-- ROIFeature: multi-ROI handling
-- DataTypeFeature: dtype with lazy conversion
+- ROIFeature / RoiFeatureMixin: multi-ROI handling
 - CompressionFeature: compression settings
-- ChunkSizeFeature: chunking configuration
-- StatsFeature: per-slice statistics (z-planes, cameras, rois, etc.)
 - PhaseCorrectionFeature: bidirectional scan correction
 """
 
@@ -25,7 +19,6 @@ from mbo_utilities.arrays.features._chunks import (
     CHUNKS_2D,
     CHUNKS_3D,
     CHUNKS_4D,
-    ChunkSizeFeature,
     estimate_chunk_memory,
     normalize_chunks,
 )
@@ -64,12 +57,6 @@ from mbo_utilities.arrays.features._dim_spec import (
     DimensionSpec,
     DimensionSpecs,
 )
-from mbo_utilities.arrays.features._display_range import (
-    DisplayRange,
-    DisplayRangeFeature,
-)
-from mbo_utilities.arrays.features._dtype import DataTypeFeature
-from mbo_utilities.arrays.features._frame_rate import FrameRateFeature, FrameRateMixin
 from mbo_utilities.arrays.features._phase_correction import (
     PhaseCorrectionFeature,
     PhaseCorrectionMixin,
@@ -80,16 +67,22 @@ from mbo_utilities.arrays.features._segmentation import (
     masks_to_stat,
     stat_to_masks,
 )
-from mbo_utilities.arrays.features._voxel_size import (
-    VoxelSizeFeature,
-    VoxelSizeMixin,
-    get_voxel_size_from_metadata,
-)
 from mbo_utilities.arrays.features._stats import (
     PlaneStats,
     SliceStats,
-    StatsFeature,
-    ZStatsFeature,
+)
+from mbo_utilities.arrays.features._summary_stats import (
+    DEFAULT_BUDGET,
+    DEFAULT_METRICS,
+    StatsDim,
+    StatsDimRole,
+    StatsMetric,
+    SubsampleBudget,
+    SummaryStatsSpec,
+    build_summary_stats_spec,
+    canonical_axis,
+    default_dim_role,
+    subsample_indices,
 )
 from mbo_utilities.arrays.features._slicing import (
     ArraySlicing,
@@ -125,14 +118,10 @@ __all__ = [
     # base
     "ArrayFeature",
     "ArrayFeatureEvent",
-    # chunks
-    "ChunkSizeFeature",
     # compression
     "Codec",
     "CompressionFeature",
     "CompressionSettings",
-    # dtype
-    "DataTypeFeature",
     # dim tags
     "DimensionTag",
     "OutputFilename",
@@ -146,35 +135,34 @@ __all__ = [
     "DimRole",
     "DimensionSpec",
     "DimensionSpecs",
-    # display range
-    "DisplayRange",
-    "DisplayRangeFeature",
-    # frame rate
-    "FrameRateFeature",
-    "FrameRateMixin",
     "PhaseCorrMethod",
     # phase correction
     "PhaseCorrectionFeature",
     "PhaseCorrectionMixin",
+    # stats
     "PlaneStats",
+    "SliceStats",
+    # summary stats
+    "DEFAULT_BUDGET",
+    "DEFAULT_METRICS",
+    "StatsDim",
+    "StatsDimRole",
+    "StatsMetric",
+    "SubsampleBudget",
+    "SummaryStatsSpec",
+    "build_summary_stats_spec",
+    "canonical_axis",
+    "default_dim_role",
+    "subsample_indices",
     # roi
     "ROIFeature",
     "RoiFeatureMixin",
-    "SliceStats",
-    # stats
-    "StatsFeature",
-    # voxel size
-    "VoxelSizeFeature",
-    "VoxelSizeMixin",
-    # backwards compat aliases
-    "ZStatsFeature",
     "estimate_chunk_memory",
     "find_slider_name",
     "get_dim_index",
     "get_dims",
     "get_num_planes",
     "get_slider_dims",
-    "get_voxel_size_from_metadata",
     "infer_dims",
     "masks_to_stat",
     "normalize_chunks",

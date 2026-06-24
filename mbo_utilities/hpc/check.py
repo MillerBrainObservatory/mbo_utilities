@@ -120,7 +120,7 @@ def run_check(cfg, mode="single"):
     from .pipeline import num_planes
 
     arr = imread(cfg.io.input)
-    nt, ly, lx = int(arr.shape[0]), int(arr.shape[-2]), int(arr.shape[-1])
+    nt, ly, lx = arr.nt, arr.ny, arr.nx
     n_planes = num_planes(arr)
 
     partition = None

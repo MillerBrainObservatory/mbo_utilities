@@ -93,6 +93,10 @@ if TYPE_CHECKING:
         detect_isoview_kind as detect_isoview_kind,
         isoview_to_ome_zarr as isoview_to_ome_zarr,
     )
+    from mbo_utilities.arrays._phasecorr_view import (
+        PhaseCorrectedView as PhaseCorrectedView,
+        with_phasecorr as with_phasecorr,
+    )
     from mbo_utilities.arrays.mp4 import MP4Array as MP4Array
     from mbo_utilities.arrays.numpy import NumpyArray as NumpyArray
     from mbo_utilities.arrays.suite2p import (
@@ -136,6 +140,9 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "compute_axial_shifts": ("._registration", "compute_axial_shifts"),
     "validate_axial_shifts": ("._registration", "validate_axial_shifts"),
     "with_axial_shifts": ("._registration", "with_axial_shifts"),
+    # phase correction (read-time wrapper)
+    "PhaseCorrectedView": ("._phasecorr_view", "PhaseCorrectedView"),
+    "with_phasecorr": ("._phasecorr_view", "with_phasecorr"),
     # features subpackage
     "features": (".features", None),
     # ROI mixin
@@ -222,4 +229,7 @@ __all__ = [
     "compute_axial_shifts",
     "validate_axial_shifts",
     "with_axial_shifts",
+    # Phase correction
+    "PhaseCorrectedView",
+    "with_phasecorr",
 ]

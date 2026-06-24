@@ -54,7 +54,6 @@ class ArrayFeature:
     def __init__(self, property_name: str, **kwargs):
         self._property_name = property_name
         self._event_handlers: list[Callable] = []
-        self._block_events = False
 
     @property
     def value(self) -> Any:
@@ -64,10 +63,6 @@ class ArrayFeature:
     def set_value(self, array, value: Any) -> None:
         """Set feature value, must be implemented in subclass."""
         raise NotImplementedError
-
-    def block_events(self, val: bool) -> None:
-        """Block or unblock event emission."""
-        self._block_events = val
 
     def add_event_handler(self, handler: Callable) -> None:
         """
@@ -87,19 +82,7 @@ class ArrayFeature:
 
         self._event_handlers.append(handler)
 
-    def remove_event_handler(self, handler: Callable) -> None:
-        """Remove a registered event handler."""
-        if handler not in self._event_handlers:
-            raise KeyError(f"event handler {handler} not registered")
-        self._event_handlers.remove(handler)
-
-    def clear_event_handlers(self) -> None:
-        """Clear all event handlers."""
-        self._event_handlers.clear()
-
     def _call_event_handlers(self, event: ArrayFeatureEvent) -> None:
-        if self._block_events:
-            return
         for func in self._event_handlers:
             try:
                 func(event)

@@ -484,18 +484,22 @@ class PreviewDataWidget(EdgeWindow):
     def _init_zstats(self):
         """Initialize z-stats tracking state.
 
-        Per-array slots are dicts keyed by channel int; compute_zstats
-        populates one key per channel for multi-channel arrays, just
-        ``{0: ...}`` for single-channel.
+        Per-array slots are dicts keyed by the breakout-combo tuple (``()``
+        when the array has no breakout dim); compute_zstats populates one
+        entry per sampled (tile, camera, …) combination. ``_zstats_spec[i]``
+        holds the `SummaryStatsSpec` used to map sliders back to a combo.
         """
         self._zstats = [{} for _ in range(self.num_graphics)]
         self._zstats_means = [{} for _ in range(self.num_graphics)]
         self._zstats_mean_scalar = [{} for _ in range(self.num_graphics)]
+        self._zstats_spec = [None] * self.num_graphics
         self._zstats_done = [False] * self.num_graphics
         self._zstats_running = [False] * self.num_graphics
         self._zstats_progress = [0.0] * self.num_graphics
         self._zstats_current_z = [0] * self.num_graphics
         self._zstats_z_indices = [None] * self.num_graphics
+        # series axis when both zplanes and timepoints exist ("z" or "t")
+        self._stats_axis_pref = "z"
 
     def _init_saveas_state(self):
         """Initialize save-as dialog state."""
@@ -966,22 +970,23 @@ class PreviewDataWidget(EdgeWindow):
 
         sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
 
-        # Pick the channel matching the currently displayed C slider so
-        # mean subtraction matches what the user sees. `_zstats_means[i]`
-        # is now `dict[c, (n_slices, Y, X)]`; fall back to channel 0 if
-        # the slider channel hasn't been computed yet.
-        c_name = find_slider_name(names, "c")
-        try:
-            c_for_mean = self.image_widget.indices[c_name] if c_name else 0
-        except (IndexError, KeyError):
-            c_for_mean = 0
+        # Pick the breakout combo matching the current sliders so mean
+        # subtraction matches what the user sees. `_zstats_means[i]` is now
+        # `dict[combo_tuple, (n_slices, Yb, Xb)]`; fall back to the
+        # no-breakout slot, then the first computed combo.
+        from mbo_utilities.gui._stats import current_breakout_key
 
         def _means_for(i):
             slot = self._zstats_means[i] if i < len(self._zstats_means) else None
             if not isinstance(slot, dict) or not slot:
                 return None
-            # `or` truthiness raises on numpy arrays; use dict.get fallback.
-            return slot.get(c_for_mean, slot.get(0))
+            key = current_breakout_key(self, i)
+            out = slot.get(key)
+            if out is None:
+                out = slot.get(())
+            if out is None:
+                out = next(iter(slot.values()))
+            return out
 
         any_mean_sub = self._mean_subtraction and any(
             self._zstats_done[i] and _means_for(i) is not None
@@ -1029,6 +1034,22 @@ class PreviewDataWidget(EdgeWindow):
         """Create a spatial function that applies mean subtraction and/or gaussian blur."""
         # precompute kernel size for opencv (6*sigma, rounded to odd)
         ksize = (int(sigma * 6) | 1) if sigma else 0
+        # zstats mean-images are spatially binned (strided) to save memory;
+        # block-upsample back to the frame grid before subtracting. cached
+        # per frame shape so it is computed once, not every frame.
+        _fitted: dict = {}
+
+        def _fit_mean(shape):
+            if mean_img.shape == shape:
+                return mean_img
+            cached = _fitted.get(shape)
+            if cached is None:
+                fy = -(-shape[0] // mean_img.shape[0])
+                fx = -(-shape[1] // mean_img.shape[1])
+                up = np.repeat(np.repeat(mean_img, fy, axis=0), fx, axis=1)
+                cached = np.ascontiguousarray(up[: shape[0], : shape[1]])
+                _fitted[shape] = cached
+            return cached
 
         def spatial_func(frame):
             # fastplotlib passes the raw data object when n_slider_dims==0,
@@ -1038,7 +1059,7 @@ class PreviewDataWidget(EdgeWindow):
             if mean_img is not None and result.ndim == 2:
                 # only subtract when frame is 2D (Y, X); skip if 3D since
                 # mean_img is z-specific and can't be applied to a full stack
-                result = result.astype(np.float32) - mean_img
+                result = result.astype(np.float32) - _fit_mean(result.shape)
             if sigma is not None and sigma > 0 and result.ndim == 2:
                 try:
                     import cv2

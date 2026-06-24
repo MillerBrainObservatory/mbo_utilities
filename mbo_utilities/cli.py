@@ -463,6 +463,105 @@ def view(data_in=None, roi=None, widget=True, metadata=False, gpu_index=None, li
     help="Output filename for binary format.",
 )
 @click.option(
+    "-c", "--channels",
+    multiple=True,
+    type=int,
+    help="Color channels to export (1-based): -c 1 -c 2",
+)
+@click.option(
+    "--order",
+    multiple=True,
+    type=int,
+    help="Reorder planes before writing (0-based indices into --planes).",
+)
+@click.option(
+    "--output-suffix",
+    type=str,
+    default=None,
+    help="Suffix appended to output filenames.",
+)
+@click.option(
+    "--dataset-name",
+    type=str,
+    default=None,
+    help="HDF5 dataset name (.h5 only). Default: mov.",
+)
+@click.option(
+    "--roi-mode",
+    type=click.Choice(["concat_y", "separate"]),
+    default=None,
+    help="Multi-ROI handling: concat_y=stitch, separate=one file per ROI.",
+)
+@click.option(
+    "--compressor",
+    type=click.Choice(["none", "gzip", "zstd", "blosc-lz4", "blosc-zstd"]),
+    default=None,
+    help="Zarr compressor (.zarr only).",
+)
+@click.option(
+    "--compression-level",
+    type=int,
+    default=None,
+    help="Zarr compression level (.zarr only).",
+)
+@click.option(
+    "--sharded/--no-sharded",
+    default=None,
+    help="Zarr v3 sharding (.zarr only).",
+)
+@click.option(
+    "--pyramid/--no-pyramid",
+    default=None,
+    help="Write multiscale pyramid (.zarr only).",
+)
+@click.option(
+    "--pyramid-max-layers",
+    type=int,
+    default=None,
+    help="Max pyramid resolution levels (.zarr only).",
+)
+@click.option(
+    "--pyramid-method",
+    type=click.Choice(["mean", "median", "mode", "gaussian", "nearest", "local_mean"]),
+    default=None,
+    help="Pyramid downsampling method (.zarr only).",
+)
+@click.option(
+    "--border",
+    type=int,
+    default=None,
+    help="Phase correction: border pixels excluded from estimation.",
+)
+@click.option(
+    "--max-offset",
+    type=int,
+    default=None,
+    help="Phase correction: max pixel offset to search.",
+)
+@click.option(
+    "--use-fft/--no-use-fft",
+    default=None,
+    help="Phase correction: FFT-based 2D correction.",
+)
+@click.option(
+    "--reg-max-frames",
+    type=int,
+    default=None,
+    help="register-z: subsample frame count (default 200).",
+)
+@click.option(
+    "--reg-chunk-frames",
+    type=int,
+    default=None,
+    help="register-z: streaming batch size (default 10).",
+)
+@click.option(
+    "--reg-max-xy",
+    type=int,
+    default=None,
+    help="register-z: search radius in pixels (default 30).",
+)
+@click.option(
     "--debug/--no-debug",
     default=False,
     help="Verbose debug logging.",
@@ -484,6 +583,23 @@ def convert(
     phasecorr_method,
     ome,
     output_name,
+    channels,
+    order,
+    output_suffix,
+    dataset_name,
+    roi_mode,
+    compressor,
+    compression_level,
+    sharded,
+    pyramid,
+    pyramid_max_layers,
+    pyramid_method,
+    border,
+    max_offset,
+    use_fft,
+    reg_max_frames,
+    reg_chunk_frames,
+    reg_max_xy,
     debug,
 ):
     r"""
@@ -525,6 +641,8 @@ def convert(
 
     parsed_planes = list(planes) if planes else None
     parsed_timepoints = list(timepoints) if timepoints else None
+    parsed_channels = list(channels) if channels else None
+    parsed_order = list(order) if order else None
 
     if num_frames and not num_timepoints:
         click.echo("--num-frames is deprecated, use --num-timepoints.")
@@ -538,6 +656,12 @@ def convert(
         imread_kwargs["fix_phase"] = fix_phase
     if phasecorr_method:
         imread_kwargs["phasecorr_method"] = phasecorr_method
+    if border is not None:
+        imread_kwargs["border"] = border
+    if max_offset is not None:
+        imread_kwargs["max_offset"] = max_offset
+    if use_fft is not None:
+        imread_kwargs["use_fft"] = use_fft
     if parsed_roi is not None and parsed_roi != 0:
         imread_kwargs["roi"] = parsed_roi
 
@@ -567,18 +691,59 @@ def convert(
         imwrite_kwargs["planes"] = parsed_planes
     if parsed_timepoints:
         imwrite_kwargs["timepoints"] = parsed_timepoints
+    if parsed_channels:
+        imwrite_kwargs["channels"] = parsed_channels
     if num_timepoints:
         imwrite_kwargs["num_timepoints"] = num_timepoints
     if num_zplanes:
         imwrite_kwargs["num_zplanes"] = num_zplanes
+
+    # ROI: any explicit --roi implies separate handling (concat_y ignores
+    # roi). --roi-mode overrides. 0=split all, N=specific, "1,3"=multiple.
+    roi_mode_kw = roi_mode
+    if roi_mode_kw is None and parsed_roi is not None:
+        roi_mode_kw = "separate"
     if parsed_roi is not None:
         imwrite_kwargs["roi"] = parsed_roi
+    if roi_mode_kw is not None:
+        imwrite_kwargs["roi_mode"] = roi_mode_kw
+
+    if parsed_order:
+        if not parsed_planes:
+            click.secho("--order requires --planes; ignoring --order.", fg="yellow")
+        else:
+            imwrite_kwargs["order"] = parsed_order
+
     if register_z:
         imwrite_kwargs["register_z"] = True
+        if reg_max_frames is not None:
+            imwrite_kwargs["max_frames"] = reg_max_frames
+        if reg_chunk_frames is not None:
+            imwrite_kwargs["chunk_frames"] = reg_chunk_frames
+        if reg_max_xy is not None:
+            imwrite_kwargs["max_reg_xy"] = reg_max_xy
+
     if output_ext.lower() == ".zarr":
         imwrite_kwargs["ome"] = ome
+        if compressor is not None:
+            imwrite_kwargs["compressor"] = compressor
+        if compression_level is not None:
+            imwrite_kwargs["compression_level"] = compression_level
+        if sharded is not None:
+            imwrite_kwargs["sharded"] = sharded
+        if pyramid is not None:
+            imwrite_kwargs["pyramid"] = pyramid
+        if pyramid_max_layers is not None:
+            imwrite_kwargs["pyramid_max_layers"] = pyramid_max_layers
+        if pyramid_method is not None:
+            imwrite_kwargs["pyramid_method"] = pyramid_method
+
+    if dataset_name and output_ext.lower() in (".h5", ".hdf5"):
+        imwrite_kwargs["dataset_name"] = dataset_name
     if output_name:
         imwrite_kwargs["output_name"] = output_name
+    if output_suffix:
+        imwrite_kwargs["output_suffix"] = output_suffix
 
     result = imwrite(data, output_path, **imwrite_kwargs)
     click.secho(f"\nDone! Output saved to: {result}", fg="green")
@@ -1002,377 +1167,6 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
     except Exception as e:
         click.secho(f"Error: {e}", fg="red")
         raise click.Abort
-
-
-@main.command("benchmark")
-@click.argument("input_path", type=click.Path(exists=True))
-@click.option(
-    "-o", "--output",
-    "output_dir",
-    type=click.Path(),
-    default=None,
-    help="Output directory for write tests and results.",
-)
-@click.option(
-    "--config",
-    "config_preset",
-    type=click.Choice(["quick", "full", "read-only", "write-only", "analysis"]),
-    default="quick",
-    help="Benchmark preset: quick, full, read-only, write-only, analysis.",
-)
-@click.option(
-    "--label",
-    type=str,
-    default=None,
-    help="Label for this benchmark run (e.g., machine name).",
-)
-@click.option(
-    "--frames",
-    "frame_counts",
-    multiple=True,
-    type=int,
-    help="Frame counts to test: --frames 10 --frames 200 --frames 1000",
-)
-@click.option(
-    "--repeats",
-    type=int,
-    default=None,
-    help="Number of timing repetitions per test.",
-)
-@click.option(
-    "--no-phase-fft",
-    is_flag=True,
-    help="Skip slow FFT phase correction test.",
-)
-@click.option(
-    "--write-formats",
-    type=str,
-    default=None,
-    help="Comma-separated write formats: zarr,tiff,h5,bin",
-)
-@click.option(
-    "--write-frames",
-    type=int,
-    default=None,
-    help="Number of frames to write in write benchmarks.",
-)
-@click.option(
-    "--write-full",
-    is_flag=True,
-    help="Write full dataset instead of subset.",
-)
-@click.option(
-    "--keep-files",
-    is_flag=True,
-    help="Keep written output files after benchmark.",
-)
-@click.option(
-    "--save/--no-save",
-    default=True,
-    help="Save results to JSON file.",
-)
-@click.option(
-    "--plot/--no-plot",
-    default=False,
-    help="Generate dark-mode visualization plot.",
-)
-@click.option(
-    "--zarr",
-    is_flag=True,
-    help="Run zarr chunking benchmark (tests shard/chunk size combinations).",
-)
-@click.option(
-    "--num-timepoints",
-    type=int,
-    default=None,
-    help="Number of timepoints to use for benchmarks (default: all).",
-)
-@click.option(
-    "--release",
-    is_flag=True,
-    help="Run release benchmark with markdown-formatted outputs.",
-)
-@click.option(
-    "--version-tag",
-    type=str,
-    default="",
-    help="Version tag for release benchmark markdown (e.g., 'v2.5.0').",
-)
-def benchmark(
-    input_path,
-    output_dir,
-    config_preset,
-    label,
-    frame_counts,
-    repeats,
-    no_phase_fft,
-    write_formats,
-    write_frames,
-    write_full,
-    keep_files,
-    save,
-    plot,
-    zarr,
-    num_timepoints,
-    release,
-    version_tag,
-):
-    r"""
-    Run performance benchmarks on ScanImageArray.
-
-    Measures initialization, indexing, phase correction, write performance,
-    throughput, access patterns, and file size comparisons.
-
-    \b
-    Presets:
-      quick      - Basic indexing + writes, minimal tests (~1-2 min)
-      full       - All tests: throughput, scaling, access patterns, writes (~10-15 min)
-      read-only  - All read tests, skip writes (~5-8 min)
-      write-only - Only write benchmarks (~3-5 min)
-      analysis   - Throughput, scaling, access patterns (no phase/writes) (~3-5 min)
-
-    \b
-    Zarr Chunking Benchmark (--zarr):
-      Tests various shard/chunk size combinations to find optimal config.
-      Measures write speed, read speed, FPS, RAM usage, and file size.
-
-    \b
-    Examples:
-      mbo benchmark /path/to/raw                        # Quick benchmark
-      mbo benchmark /path/to/raw --config full          # Full suite
-      mbo benchmark /path/to/raw --config analysis      # Performance analysis
-      mbo benchmark /path/to/raw --label laptop_v1      # With custom label
-      mbo benchmark /path/to/raw --zarr                 # Zarr chunking test
-      mbo benchmark /path/to/raw --zarr --num-timepoints 500  # Zarr with 500 timepoints
-      mbo benchmark /path/to/raw --frames 10 --frames 100   # Custom frame counts
-      mbo benchmark /path/to/raw --no-phase-fft         # Skip slow FFT test
-      mbo benchmark /path/to/raw -o ./results/          # Custom output dir
-    """
-    from mbo_utilities import imread
-
-    # generate label if not provided
-    if label is None:
-        import platform
-        label = platform.node() or "benchmark"
-
-    # release benchmark mode
-    if release:
-        from mbo_utilities.benchmarks import (
-            benchmark_release,
-            format_release_markdown,
-            print_release_summary,
-            plot_release_benchmark,
-        )
-
-        click.echo(f"Input: {input_path}")
-        click.echo("Running release benchmark...")
-        click.echo()
-
-        result = benchmark_release(
-            input_path,
-            label=label,
-            repeats=repeats if repeats else 5,
-        )
-
-        # print summary to console
-        print_release_summary(result)
-
-        # print markdown for copy-paste
-        markdown = format_release_markdown(result, version=version_tag)
-        click.echo("\n" + "=" * 60)
-        click.echo("MARKDOWN (copy-paste for release notes):")
-        click.echo("=" * 60)
-        click.echo(markdown)
-
-        # save results and/or plot
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-
-        if output_dir:
-            results_dir = Path(output_dir) / "results"
-        else:
-            results_dir = Path(input_path).parent / "benchmark_results"
-
-        if save:
-            results_dir.mkdir(parents=True, exist_ok=True)
-
-            # save json
-            json_path = results_dir / f"release_benchmark_{label}_{timestamp}.json"
-            result.save(json_path)
-            click.secho(f"\nResults saved to: {json_path}", fg="green")
-
-            # save markdown
-            md_path = results_dir / f"release_benchmark_{label}_{timestamp}.md"
-            md_path.write_text(markdown, encoding="utf-8")
-            click.secho(f"Markdown saved to: {md_path}", fg="green")
-
-        if plot:
-            results_dir.mkdir(parents=True, exist_ok=True)
-            plot_path = results_dir / f"release_benchmark_{label}_{timestamp}.png"
-            plot_release_benchmark(
-                result,
-                output_path=plot_path,
-                show=False,
-                title=f"{version_tag} Benchmarks" if version_tag else "ScanImageArray Benchmarks",
-            )
-            click.secho(f"Plot saved to: {plot_path}", fg="green")
-        elif not save:
-            # show plot interactively if not saving
-            plot_release_benchmark(
-                result,
-                show=True,
-                title=f"{version_tag} Benchmarks" if version_tag else "ScanImageArray Benchmarks",
-            )
-
-        return
-
-    # zarr-only benchmark mode
-    if zarr:
-        from mbo_utilities.benchmarks import (
-            benchmark_zarr_chunking,
-            print_zarr_benchmark,
-            plot_zarr_benchmark,
-        )
-
-        arr = imread(input_path)
-        total_timepoints = arr.shape[0]
-        test_timepoints = num_timepoints if num_timepoints else total_timepoints
-
-        click.echo(f"Input: {input_path}")
-        click.echo(f"Zarr Chunking Benchmark: {test_timepoints} timepoints (of {total_timepoints})")
-        click.echo(f"  Shape: {arr.shape}, dtype: {arr.dtype}")
-        click.echo()
-
-        zarr_results = benchmark_zarr_chunking(
-            arr,
-            output_dir=Path(output_dir) if output_dir else None,
-            num_timepoints=test_timepoints,
-            level=0,  # no compression for fair comparison
-            repeats=repeats if repeats else 2,
-            keep_files=keep_files,
-        )
-
-        print_zarr_benchmark(zarr_results)
-
-        # save results and/or plot
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-
-        if output_dir:
-            results_dir = Path(output_dir) / "results"
-        else:
-            results_dir = Path(input_path).parent / "benchmark_results"
-
-        if save:
-            import json
-            results_dir.mkdir(parents=True, exist_ok=True)
-            filename = results_dir / f"zarr_benchmark_{label}_{timestamp}.json"
-
-            with open(filename, "w") as f:
-                json.dump({"label": label, "num_timepoints": test_timepoints, "results": zarr_results}, f, indent=2)
-            click.secho(f"\nResults saved to: {filename}", fg="green")
-
-        if plot:
-            results_dir.mkdir(parents=True, exist_ok=True)
-            plot_path = results_dir / f"zarr_benchmark_{label}_{timestamp}.png"
-            plot_zarr_benchmark(
-                zarr_results,
-                output_path=plot_path,
-                show=False,
-                title=f"Zarr Chunking Benchmark ({test_timepoints} timepoints)",
-            )
-            click.secho(f"Plot saved to: {plot_path}", fg="green")
-        elif not save:
-            # show plot interactively if not saving
-            plot_zarr_benchmark(
-                zarr_results,
-                show=True,
-                title=f"Zarr Chunking Benchmark ({test_timepoints} timepoints)",
-            )
-
-        return
-
-    # standard benchmark mode
-    from mbo_utilities.benchmarks import (
-        BenchmarkConfig,
-        benchmark_mboraw,
-        print_summary,
-    )
-
-    # select preset
-    presets = {
-        "quick": BenchmarkConfig.quick,
-        "full": BenchmarkConfig.full,
-        "read-only": BenchmarkConfig.read_only,
-        "write-only": BenchmarkConfig.write_only,
-        "analysis": BenchmarkConfig.analysis,
-    }
-    config = presets[config_preset]()
-
-    # apply custom overrides
-    if frame_counts:
-        config.frame_counts = tuple(frame_counts)
-    if repeats is not None:
-        config.repeats = repeats
-    if no_phase_fft:
-        config.test_phase_fft = False
-    if write_formats is not None:
-        formats = tuple(f".{f.strip().lstrip('.')}" for f in write_formats.split(","))
-        config.write_formats = formats
-    if write_frames is not None:
-        config.write_num_frames = write_frames
-    if write_full:
-        config.write_full_dataset = True
-    if keep_files:
-        config.keep_written_files = True
-
-    click.echo(f"Input: {input_path}")
-    click.echo(f"Config: {config_preset}")
-    click.echo(f"  Frame counts: {config.frame_counts}")
-    click.echo(f"  Phase tests: no_phase={config.test_no_phase}, corr={config.test_phase_corr}, fft={config.test_phase_fft}")
-    write_info = "full dataset" if config.write_full_dataset else f"{config.write_num_frames} frames"
-    click.echo(f"  Write formats: {config.write_formats} ({write_info})")
-    click.echo(f"  Keep files: {config.keep_written_files}")
-    click.echo(f"  Repeats: {config.repeats}")
-    click.echo()
-
-    # run benchmarks
-    result = benchmark_mboraw(
-        input_path,
-        config=config,
-        output_dir=Path(output_dir) if output_dir else None,
-        label=label,
-    )
-
-    # print results
-    print_summary(result)
-
-    # save results
-    if save:
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-
-        if output_dir:
-            results_dir = Path(output_dir) / "results"
-        else:
-            results_dir = Path(input_path).parent / "benchmark_results"
-
-        results_dir.mkdir(parents=True, exist_ok=True)
-        filename = results_dir / f"benchmark_{label}_{timestamp}.json"
-        result.save(filename)
-        click.secho(f"\nResults saved to: {filename}", fg="green")
-
-        # generate plot if requested
-        if plot:
-            from mbo_utilities.benchmarks import plot_benchmark_results
-            plot_path = results_dir / f"benchmark_{label}_{timestamp}.png"
-            plot_benchmark_results(result, output_path=plot_path, show=False)
-            click.secho(f"Plot saved to: {plot_path}", fg="green")
-
-    elif plot:
-        # plot without saving json
-        from mbo_utilities.benchmarks import plot_benchmark_results
-        plot_benchmark_results(result, show=True)
 
 
 @main.command("processes")

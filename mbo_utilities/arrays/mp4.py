@@ -36,6 +36,27 @@ register_pipeline(_MP4_INFO)
 VIDEO_QUALITY_PRESETS = ("preview", "high", "visually lossless", "lossless")
 
 
+def _resolve_pixel_size_um(data) -> float | None:
+    """Canonical dx (µm/px) for a scalebar, or None.
+
+    Uses ``data.dx`` for a LazyArray, else ``get_param`` on a ``.metadata``
+    dict — both resolve every alias incl. the ScanImage pixel_resolution
+    tuple. Plain ndarrays have neither and yield None.
+    """
+    dx = getattr(data, "dx", None)
+    if dx is None:
+        md = getattr(data, "metadata", None)
+        if isinstance(md, dict):
+            from mbo_utilities.metadata import get_param
+
+            dx = get_param(md, "dx")
+    try:
+        dx = float(dx)
+    except (TypeError, ValueError):
+        return None
+    return dx if dx > 0 else None
+
+
 def _format_overlay_time(t_seconds: float) -> str:
     if t_seconds < 60:
         return f"{t_seconds:5.1f}s"
@@ -330,30 +351,11 @@ def to_video(
             f"use .mkv (or pick codec='libx264' for .mp4)."
         )
 
-    # resolve scalebar pixel size before frame reads (metadata lives on `data`).
-    # Try arr.dx, then arr.metadata['dx'], then arr.metadata['pixel_resolution'][0]
-    # (ScanImage stores it as a (dx, dy) tuple).
+    # resolve scalebar pixel size before frame reads. arr.dx (LazyArray) or
+    # get_param on a metadata dict both resolve every alias incl. the
+    # ScanImage pixel_resolution tuple.
     if scalebar and pixel_size_um is None:
-        candidates = []
-        candidates.append(getattr(data, "dx", None))
-        candidates.append(getattr(data, "dy", None))
-        md = getattr(data, "metadata", None)
-        if isinstance(md, dict):
-            candidates.append(md.get("dx"))
-            candidates.append(md.get("dy"))
-            pr = md.get("pixel_resolution")
-            if isinstance(pr, (tuple, list)) and len(pr) >= 1:
-                candidates.append(pr[0])
-            elif pr is not None:
-                candidates.append(pr)
-        for value in candidates:
-            try:
-                v = float(value)
-            except (TypeError, ValueError):
-                continue
-            if v > 0:
-                pixel_size_um = v
-                break
+        pixel_size_um = _resolve_pixel_size_um(data)
     if scalebar and (pixel_size_um is None or pixel_size_um <= 0):
         logger.warning(
             f"scalebar requested but pixel_size_um is unavailable "
@@ -736,7 +738,10 @@ class MP4Array(ReductionMixin, Shape5DMixin):
 
         s5 = arr._shape5d()
         num_planes = s5[2]
-        num_channels = getattr(arr, "num_color_channels", s5[1])
+        # C axis = num_views for IsoView (cameras), else num_color_channels
+        num_channels = getattr(arr, "num_views", None) or getattr(
+            arr, "num_color_channels", s5[1]
+        )
         nframes_total = s5[0]
 
         planes_0idx = [p - 1 for p in planes] if planes else list(range(num_planes))
@@ -749,37 +754,11 @@ class MP4Array(ReductionMixin, Shape5DMixin):
 
         suffix = output_suffix.lstrip("_") if output_suffix else "movie"
 
-        # carry dx through to to_video for the scalebar. Try several sources
-        # because not every array type inherits VoxelSizeMixin:
-        #   1. arr.dx (VoxelSizeMixin)
-        #   2. arr.metadata['dx']                       (suite2p ops style)
-        #   3. arr.metadata['pixel_resolution'][0]      (ScanImage style — (dx, dy))
+        # carry dx through to to_video for the scalebar.
         pixel_size_um = None
-        pixel_size_source = "none"
         if scalebar:
-            candidates: list[tuple[str, object]] = []
-            candidates.append(("arr.dx", getattr(arr, "dx", None)))
-            md = getattr(arr, "metadata", None)
-            if isinstance(md, dict):
-                candidates.append(("metadata['dx']", md.get("dx")))
-                pr = md.get("pixel_resolution")
-                if isinstance(pr, (tuple, list)) and len(pr) >= 1:
-                    candidates.append(("metadata['pixel_resolution'][0]", pr[0]))
-                elif pr is not None:
-                    candidates.append(("metadata['pixel_resolution']", pr))
-            for source, value in candidates:
-                try:
-                    v = float(value)
-                except (TypeError, ValueError):
-                    continue
-                if v > 0:
-                    pixel_size_um = v
-                    pixel_size_source = source
-                    break
-            logger.info(
-                f"Scalebar pixel size: candidates={[(s, v) for s, v in candidates]} "
-                f"-> pixel_size_um={pixel_size_um!r} (from {pixel_size_source})"
-            )
+            pixel_size_um = _resolve_pixel_size_um(arr)
+            logger.info(f"Scalebar pixel size: {pixel_size_um!r}")
 
         t_tag = DimensionTag.from_dim_size(TAG_REGISTRY["T"], nframes_total, frames)
 

@@ -57,6 +57,7 @@ __all__ = [
     # Visualization
     "to_video",
     "with_axial_shifts",
+    "with_phasecorr",
     "write_ops",
 ]
 
@@ -99,6 +100,11 @@ def __getattr__(name):
     if name in ("with_axial_shifts", "AxialShiftView"):
         from .arrays import with_axial_shifts, AxialShiftView
         return with_axial_shifts if name == "with_axial_shifts" else AxialShiftView
+
+    # Read-time bidirectional phase correction (non-destructive)
+    if name == "with_phasecorr":
+        from .arrays import with_phasecorr
+        return with_phasecorr
 
     # File utilities (file_io -> tifffile, zarr)
     if name in (
@@ -145,7 +151,7 @@ def __getattr__(name):
 
     # File/folder selection (widgets -> imgui, wgpu)
     if name in ("select_folder", "select_files"):
-        from .gui.simple_selector import select_folder, select_files
+        from .gui.widgets.simple_selector import select_folder, select_files
         return select_folder if name == "select_folder" else select_files
 
     # Pipeline registry (triggers array module imports to register pipelines)

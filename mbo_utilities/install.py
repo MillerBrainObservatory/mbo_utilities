@@ -215,10 +215,10 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
     try:
         import torch
         version = torch.__version__
+        pytorch_cuda = getattr(torch.version, "cuda", None)
 
-        # check cuda availability
+        # gpu present and usable now
         if torch.cuda.is_available():
-            pytorch_cuda = torch.version.cuda
             device_name = torch.cuda.get_device_name(0)
             return FeatureStatus(
                 name="PyTorch",
@@ -227,20 +227,28 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
                 message=f"CUDA {pytorch_cuda}, {device_name}",
                 gpu_ok=True
             ), pytorch_cuda
-        # pytorch installed but no cuda
-        pytorch_cuda = getattr(torch.version, "cuda", None)
+        # cuda build installed but no gpu on this host (e.g. hpc login node)
+        if pytorch_cuda:
+            return FeatureStatus(
+                name="PyTorch",
+                status=Status.OK,
+                version=version,
+                message=f"CUDA {pytorch_cuda} build, no GPU on host",
+                gpu_ok=True
+            ), pytorch_cuda
+        # cpu-only build
         return FeatureStatus(
             name="PyTorch",
             status=Status.WARN,
             version=version,
-            message="CPU only (no CUDA)",
+            message="CPU-only build (no CUDA)",
             gpu_ok=False
         ), pytorch_cuda
     except ImportError:
         return FeatureStatus(
             name="PyTorch",
             status=Status.MISSING,
-            message="not installed"
+            message="pip install 'mbo_utilities[suite2p]'"
         ), None
 
 
@@ -337,7 +345,7 @@ def _check_suite2p() -> FeatureStatus:
         return FeatureStatus(
             name="LBM-Suite2p-Python",
             status=Status.MISSING,
-            message="not installed"
+            message="pip install 'mbo_utilities[suite2p]'"
         )
     try:
         from importlib.metadata import version
@@ -350,6 +358,26 @@ def _check_suite2p() -> FeatureStatus:
         version=ver,
         message="ready"
     )
+
+
+def _check_pkg_version(
+    import_name: str, dist_name: str, display: str, hint: str = ""
+) -> FeatureStatus:
+    """Report a package's version without importing it.
+
+    Uses find_spec/metadata so packages with noisy imports (e.g. suite2p's
+    pynwb warning) are never loaded.
+    """
+    import importlib.util
+    if importlib.util.find_spec(import_name) is None:
+        msg = hint if hint else "not installed"
+        return FeatureStatus(name=display, status=Status.MISSING, message=msg)
+    try:
+        from importlib.metadata import version
+        ver = version(dist_name)
+    except Exception:
+        ver = "installed"
+    return FeatureStatus(name=display, status=Status.OK, version=ver, message="ready")
 
 
 def _check_rastermap() -> FeatureStatus:
@@ -367,7 +395,7 @@ def _check_rastermap() -> FeatureStatus:
         return FeatureStatus(
             name="Rastermap",
             status=Status.MISSING,
-            message="not installed"
+            message="pip install 'mbo_utilities[suite2p]'"
         )
 
 
@@ -386,7 +414,7 @@ def _check_napari() -> FeatureStatus:
         return FeatureStatus(
             name="Napari",
             status=Status.MISSING,
-            message="not installed (pip install napari[all])"
+            message="pip install 'mbo_utilities[napari]'"
         )
 
 
@@ -493,6 +521,9 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
     elif suite2p_status.status == Status.OK:
         suite2p_status.gpu_ok = pytorch_status.gpu_ok
     status.features.append(suite2p_status)
+    _proc_hint = "pip install 'mbo_utilities[suite2p]'"
+    status.features.append(_check_pkg_version("suite2p", "suite2p", "Suite2p", _proc_hint))
+    status.features.append(_check_pkg_version("cellpose", "cellpose", "Cellpose", _proc_hint))
 
     _update(0.85, "Checking Rastermap...")
     status.features.append(_check_rastermap())
@@ -532,6 +563,7 @@ def print_status_cli(status: InstallStatus):
 
     # features table
     click.echo("\nFeatures:")
+    click.echo(click.style("  [ -] = optional, not installed", fg="bright_black"))
     for f in status.features:
         # format version string (skip 'v' prefix if version is 'installed')
         if f.version and f.version != "installed":
@@ -556,7 +588,7 @@ def print_status_cli(status: InstallStatus):
         else:  # MISSING
             icon = click.style("[ -]", fg="bright_black")
             msg = click.style(f"{f.name}", fg="bright_black")
-            extra = " (not installed)"
+            extra = f" - {f.message}" if f.message else " (not installed)"
 
         click.echo(f"  {icon} {msg}{extra}")
 

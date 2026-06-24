@@ -44,16 +44,6 @@ class PhaseCorrMethod(str, Enum):
                 return member
         raise ValueError(f"unknown phase correction method: {value}")
 
-    @property
-    def is_3d(self) -> bool:
-        """True if method uses 3D window."""
-        return self in (
-            PhaseCorrMethod.mean,
-            PhaseCorrMethod.max,
-            PhaseCorrMethod.std,
-            PhaseCorrMethod.mean_sub,
-        )
-
 
 class PhaseCorrectionFeature(ArrayFeature):
     """
@@ -195,11 +185,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         """Set maximum offset."""
         self._max_offset = max(1, int(value))
 
-    @property
-    def is_auto_shift(self) -> bool:
-        """True if shift is auto-computed."""
-        return self._shift is None
-
     def set_value(self, array, value) -> None:
         """
         Set phase correction settings.
@@ -242,78 +227,6 @@ class PhaseCorrectionFeature(ArrayFeature):
                 info={"value": new_value, "old_value": old_value},
             )
             self._call_event_handlers(event)
-
-    def compute_shift(self, array, window_size: int = 100) -> float:
-        """
-        Compute phase shift from array data.
-
-        Parameters
-        ----------
-        array : array-like
-            the array to compute shift from
-        window_size : int
-            number of frames to use for 3D methods
-
-        Returns
-        -------
-        float
-            computed shift value
-        """
-        from mbo_utilities.analysis.phasecorr import bidir_phasecorr
-
-        # get a window of frames
-        n_frames = len(array)
-        n_sample = min(window_size, n_frames)
-        start = max(0, (n_frames - n_sample) // 2)
-
-        # 5D TCZYX: T=start:end, C=0, Z=0
-        window = array[start : start + n_sample, 0, 0]
-
-        # compute using phasecorr module
-        _corrected, shift = bidir_phasecorr(
-            window,
-            method=self._method.value
-            if self._method != PhaseCorrMethod.none
-            else "mean",
-            return_shift=True,
-            use_fft=self._use_fft,
-        )
-
-        return shift
-
-    def apply(self, frame):
-        """
-        Apply phase correction to a frame.
-
-        Parameters
-        ----------
-        frame : np.ndarray
-            2D frame to correct
-
-        Returns
-        -------
-        np.ndarray
-            corrected frame
-        """
-        if not self._enabled:
-            return frame
-
-        shift = self.effective_shift
-        if shift is None or abs(shift) < 0.01:
-            return frame
-
-        from mbo_utilities.analysis.phasecorr import _apply_offset
-
-        return _apply_offset(frame, shift, use_fft=self._use_fft)
-
-    def reset(self) -> None:
-        """Reset to defaults."""
-        self._enabled = False
-        self._method = PhaseCorrMethod.mean
-        self._shift = None
-        self._use_fft = False
-        self._border = 10
-        self._max_offset = 4
 
     def __repr__(self) -> str:
         if not self._enabled:
