@@ -248,7 +248,7 @@ def _check_pytorch() -> tuple[FeatureStatus, str | None]:
         return FeatureStatus(
             name="PyTorch",
             status=Status.MISSING,
-            message="pip install 'mbo_utilities[processing]'"
+            message="pip install 'mbo_utilities[suite2p]'"
         ), None
 
 
@@ -345,7 +345,7 @@ def _check_suite2p() -> FeatureStatus:
         return FeatureStatus(
             name="LBM-Suite2p-Python",
             status=Status.MISSING,
-            message="pip install 'mbo_utilities[processing]'"
+            message="pip install 'mbo_utilities[suite2p]'"
         )
     try:
         from importlib.metadata import version
@@ -395,7 +395,7 @@ def _check_rastermap() -> FeatureStatus:
         return FeatureStatus(
             name="Rastermap",
             status=Status.MISSING,
-            message="pip install 'mbo_utilities[rastermap]'"
+            message="pip install 'mbo_utilities[suite2p]'"
         )
 
 
@@ -521,7 +521,7 @@ def check_installation(callback: type[object] | None = None) -> InstallStatus:
     elif suite2p_status.status == Status.OK:
         suite2p_status.gpu_ok = pytorch_status.gpu_ok
     status.features.append(suite2p_status)
-    _proc_hint = "pip install 'mbo_utilities[processing]'"
+    _proc_hint = "pip install 'mbo_utilities[suite2p]'"
     status.features.append(_check_pkg_version("suite2p", "suite2p", "Suite2p", _proc_hint))
     status.features.append(_check_pkg_version("cellpose", "cellpose", "Cellpose", _proc_hint))
 

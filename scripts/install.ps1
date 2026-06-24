@@ -435,11 +435,11 @@ function Show-OptionalDependencies {
         Write-Host $GpuInfo.GpuName -ForegroundColor White
         if ($GpuInfo.DriverCudaVersion) {
             Write-Host "  Driver CUDA:  " -NoNewline -ForegroundColor Green
-            Write-Host "$($GpuInfo.DriverCudaVersion) (CUDA torch/CuPy used with the Processing extra)" -ForegroundColor White
+            Write-Host "$($GpuInfo.DriverCudaVersion) (CUDA torch/CuPy used with the Suite2p extra)" -ForegroundColor White
         }
         else {
             Write-Host "  Driver CUDA:  " -NoNewline -ForegroundColor Yellow
-            Write-Host "unknown (default CUDA build used with the Processing extra)" -ForegroundColor Yellow
+            Write-Host "unknown (default CUDA build used with the Suite2p extra)" -ForegroundColor Yellow
         }
     }
     else {
@@ -449,11 +449,11 @@ function Show-OptionalDependencies {
 
     Write-Host "  The viewer, I/O, and metadata tools are always installed." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [1] Processing - suite2p/cellpose pipeline + z-registration (pytorch)" -ForegroundColor Cyan
-    Write-Host "  [2] Rastermap  - activity sorting" -ForegroundColor Cyan
-    Write-Host "  [3] Napari     - alternate viewer" -ForegroundColor Cyan
-    Write-Host "  [4] All        - everything (Recommended)" -ForegroundColor Cyan
-    Write-Host "  [5] None       - base viewer only" -ForegroundColor Cyan
+    Write-Host "  [1] Suite2p - suite2p/cellpose pipeline + rastermap + z-registration (pytorch)" -ForegroundColor Cyan
+    Write-Host "  [2] Napari  - alternate viewer" -ForegroundColor Cyan
+    Write-Host "  [3] Isoview - light-sheet pipeline" -ForegroundColor Cyan
+    Write-Host "  [4] All     - everything (Recommended)" -ForegroundColor Cyan
+    Write-Host "  [5] None    - base viewer only" -ForegroundColor Cyan
     Write-Host ""
 
     do {
@@ -467,9 +467,9 @@ function Show-OptionalDependencies {
 
     :parseLoop foreach ($c in $choices) {
         switch ($c) {
-            "1" { $extras += "processing" }
-            "2" { $extras += "rastermap" }
-            "3" { $extras += "napari" }
+            "1" { $extras += "suite2p" }
+            "2" { $extras += "napari" }
+            "3" { $extras += "isoview" }
             "4" { $extras = @("all"); break parseLoop }
             "5" { $extras = @(); break parseLoop }
         }
@@ -1246,17 +1246,17 @@ function Main {
     # step 4: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4.5: GPU packages only matter when the processing extra is selected
+    # step 4.5: GPU packages only matter when the suite2p extra is selected
     # (it pulls torch for suite2p and uses cupy for axial registration). a
     # base/viewer install stays slim — no torch, no cupy. wheels bundle their
     # own CUDA runtime, so only an NVIDIA driver is required.
-    $wantsProcessing = ($extras -contains "processing") -or ($extras -contains "all")
-    $cupyPackages = if ($wantsProcessing) { Get-CupyPackages -GpuInfo $gpuInfo } else { @() }
+    $wantsSuite2p = ($extras -contains "suite2p") -or ($extras -contains "all")
+    $cupyPackages = if ($wantsSuite2p) { Get-CupyPackages -GpuInfo $gpuInfo } else { @() }
     if ($cupyPackages.Count -gt 0) {
         Write-Info "GPU CuPy will be installed: $($cupyPackages[0])"
     }
 
-    $pytorchIndexUrl = if ($wantsProcessing) { Get-PytorchIndexUrl -GpuInfo $gpuInfo } else { $null }
+    $pytorchIndexUrl = if ($wantsSuite2p) { Get-PytorchIndexUrl -GpuInfo $gpuInfo } else { $null }
     if ($pytorchIndexUrl) {
         Write-Info "GPU torch will be installed from $pytorchIndexUrl"
     }

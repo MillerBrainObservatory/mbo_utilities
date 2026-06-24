@@ -65,17 +65,17 @@ The base install is lightweight (no pytorch). Add an extra for the
 processing pipelines:
 
 ```bash
-# suite2p / cellpose pipeline + z-registration (pulls pytorch + Qt)
-uv pip install "mbo_utilities[processing]"
+# suite2p / cellpose pipeline + rastermap + z-registration (pulls pytorch + Qt)
+uv pip install "mbo_utilities[suite2p]"
 
 # napari viewer
 uv pip install "mbo_utilities[napari]"
 
+# isoview light-sheet pipeline
+uv pip install "mbo_utilities[isoview]"
+
 # jupyterlab + notebook rendering
 uv pip install "mbo_utilities[notebooks]"
-
-# rastermap activity sorting
-uv pip install "mbo_utilities[rastermap]"
 
 # everything
 uv pip install "mbo_utilities[all]"
@@ -85,7 +85,7 @@ uv pip install "mbo_utilities[all]"
 
 PyTorch and CuPy require CUDA-specific wheels that must be installed separately.
 
-Suite2p (from the `[processing]` extra) requires pytorch. Installation depends on your cuda version. See the pytorch [Get Started](https://pytorch.org/get-started/locally/) page for the correct install command for your OS/Cuda version.
+Suite2p (from the `[suite2p]` extra) requires pytorch. Installation depends on your cuda version. See the pytorch [Get Started](https://pytorch.org/get-started/locally/) page for the correct install command for your OS/Cuda version.
 
 ```bash
 # pytorch with CUDA 12.N (required for suite2p GPU)

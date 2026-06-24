@@ -437,9 +437,9 @@ show_optional_dependencies() {
         echo -e "  ${GREEN}GPU detected:${NC} $GPU_NAME"
         local cuda="${DRIVER_CUDA_VERSION:-$CUDA_VERSION}"
         if [[ -n "$cuda" ]]; then
-            echo -e "  ${GREEN}Driver CUDA:${NC}  $cuda (CUDA torch/CuPy used with the Processing extra)"
+            echo -e "  ${GREEN}Driver CUDA:${NC}  $cuda (CUDA torch/CuPy used with the Suite2p extra)"
         else
-            echo -e "  ${YELLOW}Driver CUDA:  unknown (default CUDA build used with the Processing extra)${NC}"
+            echo -e "  ${YELLOW}Driver CUDA:  unknown (default CUDA build used with the Suite2p extra)${NC}"
         fi
     else
         echo -e "  ${YELLOW}No NVIDIA GPU detected${NC}"
@@ -448,11 +448,11 @@ show_optional_dependencies() {
 
     echo -e "  ${GRAY}The viewer, I/O, and metadata tools are always installed.${NC}"
     echo ""
-    echo -e "  ${CYAN}[1] Processing${NC} - suite2p/cellpose pipeline + z-registration (pytorch)"
-    echo -e "  ${CYAN}[2] Rastermap${NC}  - activity sorting"
-    echo -e "  ${CYAN}[3] Napari${NC}     - alternate viewer"
-    echo -e "  ${CYAN}[4] All${NC}        - everything (Recommended)"
-    echo -e "  ${CYAN}[5] None${NC}       - base viewer only"
+    echo -e "  ${CYAN}[1] Suite2p${NC} - suite2p/cellpose pipeline + rastermap + z-registration (pytorch)"
+    echo -e "  ${CYAN}[2] Napari${NC}  - alternate viewer"
+    echo -e "  ${CYAN}[3] Isoview${NC} - light-sheet pipeline"
+    echo -e "  ${CYAN}[4] All${NC}     - everything (Recommended)"
+    echo -e "  ${CYAN}[5] None${NC}    - base viewer only"
     echo ""
 
     while true; do
@@ -469,31 +469,31 @@ show_optional_dependencies() {
     for c in "${choices[@]}"; do
         c=$(echo "$c" | tr -d ' ')
         case $c in
-            1) EXTRAS+=("processing") ;;
-            2) EXTRAS+=("rastermap") ;;
-            3) EXTRAS+=("napari") ;;
+            1) EXTRAS+=("suite2p") ;;
+            2) EXTRAS+=("napari") ;;
+            3) EXTRAS+=("isoview") ;;
             4) EXTRAS=("all"); break ;;
             5) EXTRAS=(); break ;;
         esac
     done
 }
 
-extras_have_processing() {
+extras_have_suite2p() {
     # true when the chosen extras pull torch (suite2p pipeline). a base/viewer
     # install has no torch/cupy, so the GPU wheels below are skipped for it.
     local e
     for e in "${EXTRAS[@]:-}"; do
-        [[ "$e" == "processing" || "$e" == "all" ]] && return 0
+        [[ "$e" == "suite2p" || "$e" == "all" ]] && return 0
     done
     return 1
 }
 
 get_pytorch_index_url() {
     # echo the pytorch wheel index matching the GPU driver's CUDA, or nothing
-    # when no NVIDIA GPU or no processing extra. wheels are backward-compatible,
+    # when no NVIDIA GPU or no suite2p extra. wheels are backward-compatible,
     # so pick the highest pytorch-published cuXXX <= the driver's supported CUDA.
     [[ "$GPU_AVAILABLE" == "true" ]] || return 0
-    extras_have_processing || return 0
+    extras_have_suite2p || return 0
     local cuda="${DRIVER_CUDA_VERSION:-$CUDA_VERSION}"
     if [[ -z "$cuda" ]]; then
         echo "https://download.pytorch.org/whl/cu121"
@@ -519,10 +519,10 @@ get_pytorch_index_url() {
 
 get_cupy_packages() {
     # echo cupy + matching NVRTC/runtime wheels for the GPU driver, or nothing
-    # when no NVIDIA GPU or no processing extra. the nvrtc/runtime wheels give
+    # when no NVIDIA GPU or no suite2p extra. the nvrtc/runtime wheels give
     # cupy pip-managed CUDA so its jit kernels compile without a system toolkit.
     [[ "$GPU_AVAILABLE" == "true" ]] || return 0
-    extras_have_processing || return 0
+    extras_have_suite2p || return 0
     local cuda="${DRIVER_CUDA_VERSION:-$CUDA_VERSION}"
     local major="12"
     if [[ "$cuda" =~ ^([0-9]+) ]]; then

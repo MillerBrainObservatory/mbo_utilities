@@ -73,14 +73,15 @@ Repository = "https://github.com/millerbrainobservatory/mbo_utilities"
 Issues = "https://github.com/MillerBrainObservatory/mbo_utilities/issues"
 
 [project.optional-dependencies]
-# suite2p/cellpose pipeline + z-registration. pulls torch (cu126 index below)
-# and the Qt binding the suite2p GUI needs.
-processing = [
+# suite2p/cellpose pipeline + z-registration + rastermap activity sorting.
+# pulls torch (cu126 index below) and the Qt binding the suite2p GUI needs.
+suite2p = [
     "suite2p>=1.0.0.1",
     "torch",
     "torchvision",
     "lbm_suite2p_python>=3.2.1",
     "mkl_fft>=2.0.0",
+    "rastermap",
     "pyqt6>=6.7",
     "pyqt6-sip",
     "pyqtgraph",
@@ -101,9 +102,6 @@ notebooks = [
     "ipywidgets>=8.0.0,<9",
     "jupyter_rfb>=0.5.1",
     "seaborn>=0.13.2",
-]
-rastermap = [
-    "rastermap",
 ]
 isoview = [
     "isoview>=0.4.1",
@@ -131,11 +129,11 @@ docs = [
     "myst_nb",
     "pygfx>=0.14.0",
 ]
-all = ["mbo_utilities[processing,napari,notebooks,rastermap,isoview,hpc]"]
+all = ["mbo_utilities[suite2p,napari,notebooks,isoview,hpc]"]
 
 [tool.uv]
 # repo dev env keeps the full stack so `uv run mbo` is unchanged.
-default-groups = ["dev", "isoview", "hpc", "processing", "napari", "notebooks"]
+default-groups = ["dev", "isoview", "hpc", "suite2p", "napari", "notebooks"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -217,12 +215,13 @@ exclude_lines = [
 [dependency-groups]
 # mirror the heavy optional-dependencies so the repo dev env (default-groups)
 # resolves the full stack for `uv run mbo`. pip users get these via extras.
-processing = [
+suite2p = [
     "suite2p>=1.0.0.1",
     "torch",
     "torchvision",
     "lbm_suite2p_python>=3.2.1",
     "mkl_fft>=2.0.0",
+    "rastermap",
     "pyqt6>=6.7",
     "pyqt6-sip",
     "pyqtgraph",
