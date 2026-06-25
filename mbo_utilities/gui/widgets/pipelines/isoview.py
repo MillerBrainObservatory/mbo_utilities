@@ -134,16 +134,6 @@ def _hint(text: str) -> None:
     imgui.pop_text_wrap_pos()
 
 
-def _text_disabled_wrapped(text: str) -> None:
-    """``text_disabled`` that wraps at the current content region edge.
-    Plain ``text_disabled`` doesn't wrap, so long captions like the
-    Spark JDK warning clip at narrow column widths.
-    """
-    imgui.push_text_wrap_pos(0.0)
-    imgui.text_disabled(text)
-    imgui.pop_text_wrap_pos()
-
-
 @contextmanager
 def _green_button():
     """Push the Suite2p green-Run-button color scheme (idle/hover/active)."""
@@ -178,17 +168,6 @@ _MODE_PREFIX = {
     _MODE_STITCHER: ".stitcher",
 }
 
-# VW00 orientation profiles for the BigStitcher export. A profile seeds the
-# editable rotations + flips in the Orientation box; the resulting ops are
-# forwarded to generate_bigstitcher_xml(orientation=...) and baked onto the
-# VW00 (angle-0) view only. "None" = no transform (default). Normal/Rotated
-# are starting seeds you refine in BigStitcher. Rotations are
-# (sign, axis, magnitude-degrees); flips are axes.
-_STITCHER_ORIENT_PROFILES: dict[str, dict] = {
-    "none": {"rotations": [], "flips": []},
-    "default": {"rotations": [("-", "X", 90), ("-", "Z", 90)], "flips": []},
-    "rotated": {"rotations": [("-", "X", 90)], "flips": []},
-}
 
 # Default per-camera reorientation onto CM00 for a Normal acquisition, as
 # editable rotation/flip UI state (matches isoview _CAMERA_TO_CM00_NORMAL:
@@ -447,7 +426,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         # BDV zarr store version: 2 (gzip, classic chunks) or 3 (sharded +
         # zstd, for the new BigStitcher ZarrV3 reader). Forwarded to
         # generate_bigstitcher_xml(zarr_version=...).
-        self._stitcher_zarr_version: int = 2
+        self._stitcher_zarr_version: int = 3
 
         # Per-target reorientation seeds for the BigStitcher export. Targets:
         # "VW00"/"VW90" (view-level) and "CM00".."CM03" (per-camera overrides,
@@ -600,6 +579,15 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._fuse_view_params = {
             vid: self._default_fuse_view_params() for vid in view_ids
         }
+        # Rotated mounting: the opposing camera is mirrored about the VERTICAL
+        # (Y) axis, not horizontal — the 90deg side-mount rotates the mirror
+        # axis. Verified by bead-MIP cross-correlation (flip_v +0.29 vs flip_h
+        # ~0 for the VW90 pair). The Normal default (flip_horizontal) mis-fuses
+        # VW180/VW270 onto VW00/VW90, so seed the rotated flip automatically.
+        if self._metadata_orient_profile(arr) == "rotated":
+            for _p in self._fuse_view_params.values():
+                _p["flip_horizontal"] = False
+                _p["flip_vertical"] = True
         if (
             self._fuse_active_view is None
             or self._fuse_active_view not in view_ids
@@ -1070,34 +1058,33 @@ class IsoviewPipelineWidget(PipelineWidget):
         return "default" if self._is_per_camera_export() else "none"
 
     def _apply_orient_profile_all(self, name: str) -> None:
-        """Seed every orientation target from the global profile.
+        """Seed the export orientation from the verified CM->CM00 alignment.
 
-        Per-camera export: Normal and Rotated each apply their verified
-        CM->CM00 alignment to every camera (CM00 = reference); None clears
-        them. Fused export: the profile seeds VW00 (the profiles are
-        VW00-defined); VW90 keeps its own seed.
+        ONE table for both export shapes. Per-camera seeds all four cameras
+        (0-3 = VW00/VW180/VW90/VW270); fused seeds only the two it has
+        (cameras 0 and 2 = VW00, VW90) from the SAME table — fused is the
+        per-camera alignment minus the two opposing views. CM00 (VW00) is the
+        reference and has no table entry (identity). ``none`` clears all. The
+        rotated upright Z-90 is applied at export time (views.py) for both.
         """
+        from mbo_utilities.arrays.isoview.array import camera_view_label
         self._stitcher_orient_profile = name
-        if self._is_per_camera_export():
-            from mbo_utilities.arrays.isoview.array import camera_view_label
-            table = {
-                "default": _CM_ALIGN_DEFAULT,
-                "rotated": _CM_ALIGN_DEFAULT_ROTATED,
-            }.get(name)
-            for cam in range(4):
-                seed = table.get(cam) if table else None
-                st = self._orient_target_state(camera_view_label(cam))
-                st["rotations"] = (
-                    [dict(r) for r in seed["rotations"]] if seed else []
-                )
-                st["flips"] = list(seed["flips"]) if seed else []
-        else:
-            self._load_orient_profile(name, "VW00")
-            # VW90 has no fused profile (set manually). Clear it so a prior
-            # per-camera seed (e.g. rot X-90 on camera 2) can't leak into the
-            # fused export's orientation_vw90 and tilt it out of plane.
-            vw90 = self._orient_target_state("VW90")
-            vw90["rotations"], vw90["flips"] = [], []
+        table = {
+            "default": _CM_ALIGN_DEFAULT,
+            "rotated": _CM_ALIGN_DEFAULT_ROTATED,
+        }.get(name)
+        cams = range(4) if self._is_per_camera_export() else (0, 2)
+        # reset every view first so a prior mode/profile can't leave stale state
+        for t in ("VW00", "VW90", "VW180", "VW270"):
+            st = self._orient_target_state(t)
+            st["rotations"], st["flips"] = [], []
+        for cam in cams:
+            seed = table.get(cam) if table else None
+            if not seed:
+                continue
+            st = self._orient_target_state(camera_view_label(cam))
+            st["rotations"] = [dict(r) for r in seed["rotations"]]
+            st["flips"] = list(seed["flips"])
 
     def _toggle_button_row(self, id_prefix, items, is_active, on_click) -> None:
         """Selectable toggle buttons that wrap to the box width (no clipping).
@@ -1123,21 +1110,19 @@ class IsoviewPipelineWidget(PipelineWidget):
         else:
             st["flips"].append(axis)
 
-    def _load_orient_profile(self, name: str, target: "str | None" = None) -> None:
-        """Seed the target's editable rotations + flips from a profile."""
-        prof = _STITCHER_ORIENT_PROFILES.get(name, {"rotations": [], "flips": []})
-        st = self._orient_target_state(target)
-        st["rotations"] = [
-            {"sign": s, "axis": a, "deg": int(d)} for (s, a, d) in prof["rotations"]
-        ]
-        st["flips"] = list(prof["flips"])
-
     def _compose_orientation_ops(self, target: "str | None" = None) -> list:
         """Orientation op list for one target.
 
-        Rotations (row order, innermost first) then flips. Rotation ->
-        ["rot", axis, signed degrees]; flip -> ["flip", axis].
+        An orientation committed via the Align views Apply button overrides
+        the pipeline default. Rotations (row order, innermost first) then
+        flips. Rotation -> ["rot", axis, signed degrees]; flip -> ["flip", axis].
         """
+        target = target or self._stitcher_orient_target
+        from mbo_utilities.gui import _isoview_orient_state as orient_state
+
+        applied = orient_state.applied_ops(self._get_array(), target)
+        if applied is not None:
+            return applied
         st = self._orient_target_state(target)
         ops: list = []
         for rot in st["rotations"]:
@@ -1309,16 +1294,17 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Empty: fused VW00/VW90."
             )
 
-            zarr_versions = ["v2", "v3"]
-            zv_idx = 0 if self._stitcher_zarr_version == 2 else 1
-            imgui.set_next_item_width(_input_w())
-            changed, zv_idx = imgui.combo("Zarr version", zv_idx, zarr_versions)
-            if changed:
-                self._stitcher_zarr_version = 2 if zv_idx == 0 else 3
-            set_tooltip(
-                "v2: classic chunks + gzip. v3: sharded + zstd, for the "
-                "new BigStitcher ZarrV3 reader."
-            )
+            # Zarr version is always v3 (sharded + zstd, the BigStitcher ZarrV3
+            # reader). Link references the existing .corrected v3 zarrs in place,
+            # so there's no choice to show. Generating a converted dataset is
+            # fixed at v3 too, shown disabled under a label.
+            self._stitcher_zarr_version = 3
+            if not self._stitcher_link_existing:
+                imgui.begin_disabled()
+                imgui.text("generate zarr dataset for bigstitcher")
+                imgui.set_next_item_width(_input_w())
+                imgui.combo("Zarr version", 0, ["v3"])
+                imgui.end_disabled()
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int("Workers", self._workers, 1, 2)
@@ -2017,6 +2003,19 @@ class IsoviewPipelineWidget(PipelineWidget):
                     self._tile_spm_key(arr, tps[i])
                     for i in sel if 0 <= i < len(tps)
                 ] or None
+        # per-tile in-plane orientation (rotation/flips) from the Tile Grid, so
+        # the exported tiles line up exactly as arranged there. None when the
+        # Tile Grid widget isn't present or nothing was oriented.
+        tile_orientations = None
+        for _w in getattr(self.parent, "_widgets", []) or []:
+            if type(_w).__name__ == "TileGridViewer" and hasattr(
+                _w, "export_tile_orientations"
+            ):
+                try:
+                    tile_orientations = _w.export_tile_orientations(arr) or None
+                except Exception:
+                    tile_orientations = None
+                break
         args = {
             "input_path": str(input_dir),
             "method": method,
@@ -2037,6 +2036,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             "upright": self._stitcher_upright,
             "link_existing": self._stitcher_link_existing,
             "zarr_version": self._stitcher_zarr_version,
+            "tile_orientations": tile_orientations,
             "workers": self._workers,
         }
         args.update(self._microscope_kwargs())

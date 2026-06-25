@@ -75,3 +75,33 @@ def summary(arr: Any) -> str:
     from mbo_utilities.gui.widgets._orient import ops_label
 
     return ", ".join(f"{v}: {ops_label(o)}" for v, o in sorted(ops.items()))
+
+
+# Per-view orientation explicitly committed via the Align views "Apply" button.
+# Read by the BigStitcher export to override its table default for that view.
+_APPLIED_STORE: dict[str, dict[str, dict[str, list]]] = {}
+
+
+def apply(arr: Any, view_key: str, state: dict[str, list]) -> None:
+    k = _key(arr)
+    if k is None:
+        return
+    _APPLIED_STORE.setdefault(k, {})[view_key] = {
+        "rotations": [dict(r) for r in state.get("rotations", [])],
+        "flips": list(state.get("flips", [])),
+    }
+
+
+def get_applied(arr: Any, view_key: str) -> dict | None:
+    k = _key(arr)
+    if k is None:
+        return None
+    return (_APPLIED_STORE.get(k) or {}).get(view_key)
+
+
+def applied_ops(arr: Any, view_key: str) -> list | None:
+    """Op list for a view's applied orientation, or ``None`` if never applied."""
+    s = get_applied(arr, view_key)
+    if s is None:
+        return None
+    return orientation_ops(s["rotations"], s["flips"])

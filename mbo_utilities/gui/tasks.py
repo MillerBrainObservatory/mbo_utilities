@@ -479,7 +479,7 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
     # axial registration: compute per-plane offsets and store in
     # ops["plane_shifts"]. shifts are not applied to the bin pixels —
     # downstream viewers consume the metadata to align planes at render
-    # time (see AxiallyAlignedView).
+    # time (see AxialShiftView).
     register_z = args.get("register_z", False)
 
     if register_z:
@@ -1305,6 +1305,7 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
             zarr_version=args.get("zarr_version", 2),
             upright=args.get("upright", True),
             link_existing=args.get("link_existing", False),
+            tile_orientations=args.get("tile_orientations"),
         )
         logger.info(f"  wrote: {xml_path}")
         _record_isoview_runtime(

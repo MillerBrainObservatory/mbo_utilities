@@ -90,11 +90,18 @@ def _view_shape(arr: Any) -> tuple[int, int, int] | None:
 
 
 def _view_int_from_label(label: str) -> int | None:
-    """Extract the view int from a projections-dict label."""
+    """Camera index for a projections-dict label.
+
+    ``VW{angle}`` maps the view angle back to its camera (VW00->0,
+    VW180->1, VW90->2, VW270->3); ``CM##`` and bare ints are the camera
+    index directly.
+    """
     if not isinstance(label, str):
         return None
     if label.startswith("VW") and label[2:].isdigit():
-        return int(label[2:])
+        from mbo_utilities.arrays.isoview.array import camera_from_view_label
+        cam = camera_from_view_label(label)
+        return cam if cam is not None else int(label[2:])
     if label.startswith("CM") and label[2:].isdigit():
         return int(label[2:])
     try:
@@ -390,15 +397,6 @@ def open_window(parent: Any) -> None:
     _ensure_window_state(parent)
     parent._show_iso_crop_window = True
     parent._iso_crop_cache_key = None
-
-
-def close_window(parent: Any) -> None:
-    """Hide the editor and release GPU textures."""
-    _ensure_window_state(parent)
-    parent._iso_crop_window_open = False
-    _destroy_gpu_images(parent)
-    parent._iso_crop_cache_key = None
-    parent._iso_crop_shapes = {}
 
 
 def draw_window(parent: Any) -> None:
