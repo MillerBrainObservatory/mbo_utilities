@@ -103,8 +103,14 @@ def hpc_init(data_path, config_path, output_root, overwrite):
 @click.option("--planes-per-gpu", type=int, default=None, help="Override pack factor F.")
 @click.option("--gpu", type=int, default=None,
               help="Local-run CUDA device index (nvidia-smi order); -1 = auto. Ignored under SLURM.")
+@click.option("--stream/--no-stream", "stream", default=None,
+              help="Override [pipeline] stream: feed frames through suite2p with no "
+                   "data_raw.bin/data.bin (only reg_outputs.npy persists).")
+@click.option("--stage-input/--no-stage-input", "stage_input", default=None,
+              help="Override [pipeline] stage_input: copy raw to node-local /tmp and "
+                   "stream from there (benchmark vs reading shared storage directly).")
 def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
-            partition, gres, time_, planes_per_gpu, gpu):
+            partition, gres, time_, planes_per_gpu, gpu, stream, stage_input):
     """
     Submit the pipeline described by CONFIG_PATH.
 
@@ -138,6 +144,10 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
             cfg.pipeline.planes_per_gpu = planes_per_gpu
         if gpu is not None:
             cfg.pipeline.gpu = gpu
+        if stream is not None:
+            cfg.pipeline.stream = stream
+        if stage_input is not None:
+            cfg.pipeline.stage_input = stage_input
         cfg.validate()
     except ValueError as e:  # bad TOML or failed validation
         raise click.ClickException(str(e))

@@ -91,6 +91,9 @@ def _print_plan(cfg: HpcConfig, mode: str, output_dir: Path) -> None:
     print(f"mode:    {mode}")
     print(f"input:   {cfg.io.input}")
     print(f"output:  {output_dir}")
+    if cfg.pipeline.stream:
+        src = "node-local /tmp (staged copy)" if cfg.pipeline.stage_input else "input in place"
+        print(f"stream:  on  (no data_raw.bin/data.bin; reads raw from {src})")
     ok, detail = _pipe.probe_writable(output_dir)
     print(f"writable: {detail}" if ok else
           f"WARNING: output not writable ({detail}); set [io] output to a writable "

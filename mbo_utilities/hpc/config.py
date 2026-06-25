@@ -64,6 +64,8 @@ class PipelineConfig:
     threads_per_worker: int = 0
     node_local: bool = True
     gpu: int = -1
+    stream: bool = False
+    stage_input: bool = False
 
 
 # [parameters] keys routed to lbm pipeline() top-level kwargs; everything else
@@ -174,6 +176,8 @@ HELP: dict = {
         "threads_per_worker": "BLAS/OMP threads per worker (0 = cpus // workers)",
         "node_local": "compute on node-local NVMe, copy results back",
         "gpu": "local-run CUDA device index (nvidia-smi order); -1 = auto. ignored under SLURM",
+        "stream": "stream frames through suite2p (no data_raw.bin/data.bin; only reg_outputs.npy persists)",
+        "stage_input": "stream mode: copy raw input to node-local /tmp first (benchmark vs reading shared storage)",
     },
 }
 

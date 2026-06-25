@@ -62,7 +62,7 @@ def num_tasks(n_planes: int, pack: int) -> int:
 
 
 def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
-         replot=True, passthrough=None):
+         replot=True, passthrough=None, stream=False):
     from lbm_suite2p_python import pipeline
 
     kw = dict(passthrough or {})
@@ -88,6 +88,7 @@ def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
         force_reg=force,
         force_detect=force,
         replot=replot,
+        stream=stream,
         skip_volumetric=skip_volumetric,
         workers=workers,
         threads_per_worker=threads,
@@ -97,14 +98,15 @@ def _run(arr, output_dir, ops, planes, workers, threads, skip_volumetric, force,
     return time.perf_counter() - t0
 
 
-def _aggregate(input_dir, output_dir, ops, passthrough=None):
+def _aggregate(input_dir, output_dir, ops, passthrough=None, stream=False):
     from mbo_utilities import imread
 
     arr = imread(input_dir)
     # replot=False: per-plane figures already exist from the shard runs; the
     # aggregate only needs the volumetric merge + volume plots.
     _run(arr, output_dir, ops, planes=None, workers=1, threads=cpu_quota(),
-         skip_volumetric=False, force=False, replot=False, passthrough=passthrough)
+         skip_volumetric=False, force=False, replot=False, passthrough=passthrough,
+         stream=stream)
 
 
 def _read_plane_timings(output_dir):
@@ -308,6 +310,59 @@ def assert_stage_fits(arr, work_dir, n_planes: int, keep_raw: bool = False) -> N
         )
 
 
+def _input_size_gb(src) -> float:
+    """Total size (GB) of a raw input file or directory tree."""
+    p = Path(src)
+    try:
+        if p.is_file():
+            return p.stat().st_size / 1e9
+        total = 0
+        for f in p.rglob("*"):
+            try:
+                if f.is_file():
+                    total += f.stat().st_size
+            except OSError:
+                pass
+        return total / 1e9
+    except OSError:
+        return 0.0
+
+
+def assert_input_stage_fits(src, work_base) -> None:
+    """Fail fast if node-local /tmp can't hold a copy of the raw input."""
+    need = _input_size_gb(src)
+    free = disk_free_gb(work_base)
+    print(f"input staging: ~{need:.0f} GB raw -> {work_base} ({free:.0f} GB free)",
+          flush=True)
+    if need and 0 <= free < need * 1.1:  # 10% headroom for fs overhead
+        raise RuntimeError(
+            f"node-local /tmp ({work_base}) has {free:.0f} GB free but staging the "
+            f"raw input needs ~{need:.0f} GB. Set [pipeline] stage_input = false to "
+            f"stream from the original location, or use a node with a larger /tmp."
+        )
+
+
+def stage_input_local(src, work_base, label) -> tuple[Path, float]:
+    """Copy the raw input to node-local storage; return (staged_path, seconds).
+
+    Streaming re-reads the raw on every registration/detection/extraction pass,
+    so on a cluster with slow shared storage a one-time copy to fast node-local
+    /tmp can win overall. The leaf name is preserved so ``imread`` reconstructs
+    the same array (a directory of TIFFs copies whole; a single file/zarr copies
+    as-is).
+    """
+    src = Path(src)
+    dest_dir = Path(work_base) / f"{label}_input"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / src.name
+    t0 = time.perf_counter()
+    if src.is_dir():
+        shutil.copytree(src, dest, dirs_exist_ok=True)
+    else:
+        shutil.copy2(src, dest)
+    return dest, time.perf_counter() - t0
+
+
 def write_failure_report(output_dir, role, task_id, exc) -> str | None:
     """Write a failure report to the first writable of: <output>/logs,
     ~/.mbo/hpc_logs, the temp dir. Returns the path written, or None.
@@ -359,6 +414,7 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     ops = cfg.ops()
+    stream = bool(getattr(cfg.pipeline, "stream", False))
 
     try:
         # Fail fast: confirm the destination is writable before the long
@@ -367,7 +423,8 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
 
         if role == "aggregate":
             t0 = time.perf_counter()
-            _aggregate(cfg.io.input, output_dir, ops, passthrough=cfg.pipeline_kwargs())
+            _aggregate(cfg.io.input, output_dir, ops,
+                       passthrough=cfg.pipeline_kwargs(), stream=stream)
             write_timing_report(output_dir, {"aggregate": time.perf_counter() - t0})
             return str(output_dir)
 
@@ -392,9 +449,31 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
             work_dir = Path(base) / f"{cfg.io.name}_{jid}_{task_id if task_id is not None else 0}"
             work_dir.mkdir(parents=True, exist_ok=True)
 
+        # Input staging (benchmark knob): copy the raw to node-local /tmp and
+        # stream from there instead of re-reading shared storage on every
+        # registration/detection/extraction pass. Only meaningful with stream
+        # (binary mode reads the input once); works locally and under SLURM.
+        stage_input = bool(getattr(cfg.pipeline, "stage_input", False))
+        if stage_input and not stream:
+            print("note: stage_input has no effect without stream=true (binary mode "
+                  "reads the input once); ignoring.", flush=True)
+            stage_input = False
+        input_path = cfg.io.input
+        staged_input = None
+        t_stage_in = 0.0
+        if stage_input:
+            base = os.environ.get("TMPDIR") or tempfile.gettempdir()
+            assert_input_stage_fits(cfg.io.input, base)
+            staged_input, t_stage_in = stage_input_local(
+                cfg.io.input, base,
+                f"{cfg.io.name}_{jid or 'local'}_{task_id if task_id is not None else 0}")
+            input_path = str(staged_input)
+            print(f"timing: stage_in={t_stage_in:.1f}s -> {staged_input}", flush=True)
+
+        arr = None
         try:
             t0 = time.perf_counter()
-            arr = imread(cfg.io.input)
+            arr = imread(input_path)
             t_imread = time.perf_counter() - t0
             print(f"shape={arr.shape} dims={getattr(arr, 'dims', None)}", flush=True)
             sel = cfg.pipeline_kwargs().get("planes")
@@ -422,10 +501,11 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
                 if node_local:
                     assert_stage_fits(arr, work_dir, len(this_shard), keep_raw)
                 print(f"array task {task_id}: planes {this_shard} "
-                      f"workers={workers} threads={threads}", flush=True)
+                      f"workers={workers} threads={threads}"
+                      f"{' stream' if stream else ''}", flush=True)
                 _run(arr, work_dir, ops, this_shard, workers, threads,
                      skip_volumetric=True, force=False,
-                     passthrough=cfg.pipeline_kwargs())
+                     passthrough=cfg.pipeline_kwargs(), stream=stream)
             else:  # single
                 workers, threads = resolve_workers(len(plane_indices), pack, thr)
                 _apply_thread_env(threads)
@@ -433,13 +513,27 @@ def run_job(cfg: HpcConfig | dict, output_dir, role: str = "single",
                 if node_local:
                     assert_stage_fits(arr, work_dir, len(plane_indices), keep_raw)
                 print(f"single job: {len(plane_indices)} planes "
-                      f"workers={workers} threads={threads}", flush=True)
+                      f"workers={workers} threads={threads}"
+                      f"{' stream' if stream else ''}", flush=True)
                 wall = _run(arr, work_dir, ops, plane_indices, workers, threads,
                             skip_volumetric=False, force=False,
-                            passthrough=cfg.pipeline_kwargs())
-                write_timing_report(work_dir, {"imread": t_imread, "pipeline": wall},
-                                    n_workers=workers)
+                            passthrough=cfg.pipeline_kwargs(), stream=stream)
+                write_timing_report(
+                    work_dir,
+                    {"imread": t_imread, "stage_in": t_stage_in, "pipeline": wall},
+                    n_workers=workers)
         finally:
+            # drop the node-local raw copy regardless of outcome (it's a
+            # transient benchmark stage, never a result). release the array's
+            # file handles first so the delete also succeeds on Windows (Linux
+            # unlinks open files fine).
+            if staged_input is not None:
+                try:
+                    if arr is not None and hasattr(arr, "close"):
+                        arr.close()
+                except Exception:
+                    pass
+                shutil.rmtree(Path(staged_input).parent, ignore_errors=True)
             if node_local and Path(work_dir) != output_dir:
                 pending = sys.exc_info()[1]  # compute error already unwinding, if any
                 try:
