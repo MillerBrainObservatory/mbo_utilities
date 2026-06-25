@@ -104,3 +104,46 @@ While `watch` follows a terminal: `o`/`e` switch out/err, `n`/`p` switch task lo
 | `mbo hpc check` | Memory math + structural fixes for a config vs. the partition |
 
 </details>
+
+## Shared environment (`mbo_server_configs`)
+
+Separate from the `mbo hpc` CLI above: the shared software under `/lustre/fs8/mbo/scratch/mbo_soft` (CLI tools, neovim, the `mbo` venv, repos) is exposed through `MBO_*` variables and navigation aliases. Source it once from `~/.bashrc`:
+
+```bash
+source /lustre/fs8/mbo/scratch/mbo_soft/repos/mbo_server_configs/config/hpc/mbo.sh
+```
+
+Variables (defined in `config/hpc/env.sh`):
+
+| Variable | Value | Points to |
+|----------|-------|-----------|
+| `MBO_ROOT` | `/lustre/fs8/mbo` | lab root — change this only to move filesystems |
+| `MBO_SCRATCH` | `$MBO_ROOT/scratch` | scratch root |
+| `MBO_STORE` | `$MBO_ROOT/store` | long-term store |
+| `MBO_SOFT` | `$MBO_SCRATCH/mbo_soft` | shared software root |
+| `MBO_BIN` | `$MBO_SOFT/bin` | shared bin (on `PATH`) |
+| `MBO_REPOS` | `$MBO_SOFT/repos` | shared repos |
+| `MBO_NVIM` | `$MBO_SOFT/neovim` | neovim install |
+| `MBO_ENVS` | `$MBO_SOFT/envs` | shared venvs dir |
+| `MBO_ENV` | `$MBO_ENVS/mbo` | default shared venv |
+| `MBO_DATA` | `$MBO_SCRATCH/mbo_data` | data root |
+| `MBO_LBM` | `$MBO_DATA/lbm` | LBM data |
+| `MBO_LSM` | `$MBO_DATA/lsm` | LSM data |
+| `MBO_USER` | `$MBO_SCRATCH/$USER` | your personal scratch (override: set `MBO_USER` first) |
+
+Also sets `UV_LINK_MODE=hardlink`, `UV_CACHE_DIR=$MBO_USER/.uv/cache`, `UV_PYTHON_INSTALL_DIR=$MBO_USER/.uv/python`.
+
+Navigation aliases and helpers (defined in `config/hpc/mbo.sh`):
+
+| Command | Action |
+|---------|--------|
+| `cdsoft` / `cdrepos` / `cdscratch` / `cdme` | cd to `$MBO_SOFT` / `$MBO_REPOS` / `$MBO_SCRATCH` / `$MBO_USER` |
+| `cddata` / `cdlbm` / `cdlsm` | cd to `$MBO_DATA` / `$MBO_LBM` / `$MBO_LSM` |
+| `mbo-activate [env]` | source a shared venv (default `mbo`) |
+| `mbo-run <cmd> [args]` | run an executable from the shared `mbo` venv |
+| `mbo-jobs` / `mbo-gpus` | `squeue --me` / list HPC GPU node availability |
+| `mbo-gpu [part] [time] [n]` / `mbo-cpu [part] [time]` | interactive GPU / CPU shell via `srun` |
+| `mbo-stage <path> [dest]` / `mbo-pull` / `mbo-push` | rsync data-transfer helpers |
+| `mbo-nvim-setup` / `mbo-update` | install nvim tools / pull latest configs |
+
+Verify live values after login with `env | grep '^MBO_'`.
