@@ -1054,29 +1054,29 @@ def list_formats():
     help="Display plots interactively after analysis.",
 )
 @click.option(
+    "--patch",
+    "patch_size",
+    type=int,
+    default=32,
+    help="Spatial patch size in px for the distribution map. Default: 32.",
+)
+@click.option(
     "--docs",
     is_flag=True,
     default=False,
     help="Save output to docs/_images/scanphase/ for documentation.",
 )
-def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
-    r"""
+def scanphase(input_path, output_dir, num_tifs, image_format, show, docs, patch_size):
+    """
     Scan-phase analysis for bidirectional scanning data.
 
     Analyzes phase offset to determine optimal correction parameters.
 
     \b
     OUTPUT:
-      summary.png            - dashboard with all key metrics
-      temporal.png           - per-frame offset time series and histogram
-      windows.png            - offset vs window size (convergence)
-      spatial.png            - spatial variation across FOV (heatmaps)
-      horizontal.png         - offset variation across X position
-      vertical.png           - offset variation across Y position
-      temporal_spatial.png   - 2D heatmap of drift over time and space
-      parameters.png         - offset reliability vs signal intensity
-      zplanes.png            - z-plane analysis (if multi-plane data)
-      scanphase_results.npz  - all numerical data
+      window_lengths.png        - offset vs frames averaged, with/without FFT
+      spatial_distribution.png  - offset across FOV, with/without FFT
+      scanphase_results.npz     - all numerical data
 
     \b
     Examples:
@@ -1084,8 +1084,8 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
       mbo scanphase /path/to/data.tiff       # analyze specific file
       mbo scanphase ./folder/ -n 5           # use first 5 tiffs in folder
       mbo scanphase data.tiff -o ./results/  # custom output directory
+      mbo scanphase data.tiff --patch 16     # finer spatial map
       mbo scanphase data.tiff --show         # show plots interactively
-      mbo scanphase data.tiff --docs         # save to docs/_images/scanphase/
     """
     from pathlib import Path
     from mbo_utilities import get_files
@@ -1126,6 +1126,7 @@ def scanphase(input_path, output_dir, num_tifs, image_format, show, docs):
             output_dir=output_dir,
             image_format=image_format,
             show_plots=show,
+            patch_size=patch_size,
         )
 
         if results is None:
