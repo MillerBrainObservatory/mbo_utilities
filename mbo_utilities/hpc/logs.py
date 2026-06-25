@@ -172,6 +172,34 @@ def _resolve_target(target):
     return logs_dir, output_dir, None
 
 
+def _surface_terminal_state(logs_dir, output_dir) -> bool:
+    """Print a finished run's failure report or completion, if it ended.
+
+    Local runs never produce submitit ``.out``/``.err`` (their output goes to the
+    terminal), and a SLURM job may have already ended — without this, ``watch``
+    hangs forever on a run that already failed or finished. Returns True when a
+    terminal state was found and printed (caller should stop), False when the
+    run looks pending (no logs yet — keep waiting).
+    """
+    failures = (
+        sorted(logs_dir.glob("FAILURE_*.log"))
+        if logs_dir is not None and logs_dir.is_dir()
+        else []
+    )
+    if failures:
+        for f in failures:
+            print(f"\n=== {f.name} ===")
+            print(tail_lines(f, 200))
+        print(f"\nrun FAILED — newest report: {failures[-1]}")
+        return True
+    timings = (output_dir / "timings.json") if output_dir is not None else None
+    if timings is not None and timings.exists():
+        print(f"run finished (no streamed logs — local run?). timings: {timings}\n"
+              f"  mbo hpc status {output_dir}")
+        return True
+    return False
+
+
 def watch(target="hpc.toml", stream="err", follow=True, lines=40) -> None:
     """Tail (and optionally follow) a run's .err/.out logs.
 
@@ -188,6 +216,10 @@ def watch(target="hpc.toml", stream="err", follow=True, lines=40) -> None:
     have_logs = logs_dir is not None and bool(list_logs(logs_dir, "err")
                                               or list_logs(logs_dir, "out"))
     if not have_logs:
+        # No streamed .out/.err. The run may have already failed or finished
+        # (local runs never produce them) — surface that instead of waiting.
+        if _surface_terminal_state(logs_dir, output_dir):
+            return
         # Job may be PENDING or just started — describe what we know and, when
         # following, wait for the first log line instead of erroring out.
         if logs_dir is not None:

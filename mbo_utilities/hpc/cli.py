@@ -7,6 +7,33 @@ from pathlib import Path
 import click
 
 
+def _refuse_local_on_login_node() -> None:
+    """Guard an inline ``--local`` run from a SLURM login node — running heavy
+    compute on a shared login node is prohibited on most clusters. Checks the
+    node name and username from env vars (plus the hostname) for ``login``.
+    """
+    import os
+    import socket
+
+    names = [
+        os.environ.get("SLURMD_NODENAME", ""),
+        os.environ.get("HOSTNAME", ""),
+        os.environ.get("HOST", ""),
+        os.environ.get("USER", ""),
+        os.environ.get("USERNAME", ""),
+    ]
+    try:
+        names.append(socket.gethostname())
+    except OSError:
+        pass
+    hit = next((n for n in names if "login" in n.lower()), "")
+    if hit:
+        raise click.ClickException(
+            f"--local on a login node ({hit!r}). Use a compute node "
+            "(salloc/srun) or --mode single/array."
+        )
+
+
 @click.group("hpc")
 def hpc():
     """Run the Suite2p pipeline on SLURM (or locally) from a TOML config.
@@ -154,6 +181,8 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
 
     if force_local:
         mode = "local"
+    if mode == "local":
+        _refuse_local_on_login_node()
 
     try:
         submit(cfg, mode=mode, dry_run=dry_run)
