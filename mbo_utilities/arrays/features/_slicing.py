@@ -288,43 +288,6 @@ class DimSelection:
         """number of selected indices."""
         return len(self.indices)
 
-    @property
-    def is_full(self) -> bool:
-        """True if all indices are selected."""
-        return self.count == self.dim_size
-
-    def to_slice_or_list(self):
-        """
-        convert to slice if contiguous with step=1, else return list.
-
-        returns
-        -------
-        slice | list[int]
-            slice for contiguous ranges, list otherwise
-        """
-        if not self.indices:
-            return slice(0, 0)
-
-        if len(self.indices) == 1:
-            return self.indices[0]
-
-        # check if contiguous with uniform step
-        step = self.indices[1] - self.indices[0]
-        if step <= 0:
-            return self.indices
-
-        is_uniform = all(
-            self.indices[i + 1] - self.indices[i] == step
-            for i in range(len(self.indices) - 1)
-        )
-
-        if is_uniform:
-            return slice(
-                self.indices[0], self.indices[-1] + 1, step if step > 1 else None
-            )
-
-        return self.indices
-
 
 @dataclass
 class ArraySlicing:

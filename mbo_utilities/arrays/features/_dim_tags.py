@@ -127,12 +127,6 @@ class DimensionTag:
         # range with step
         return f"{label}{self.start:0{pad}d}-{self.stop:0{pad}d}-{self.step}"
 
-    def to_slice(self) -> slice:
-        """convert to 0-based slice for array indexing."""
-        start_0 = self.start - 1
-        stop_0 = self.stop if self.stop is not None else self.start
-        return slice(start_0, stop_0, self.step if self.step != 1 else None)
-
     @classmethod
     def from_dim_size(
         cls,

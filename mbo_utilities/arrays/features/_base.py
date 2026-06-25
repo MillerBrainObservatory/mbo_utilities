@@ -43,7 +43,6 @@ class ArrayFeature:
 
     Subclasses must implement:
     - value property (getter)
-    - set_value(array, value) method
 
     Parameters
     ----------
@@ -58,10 +57,6 @@ class ArrayFeature:
     @property
     def value(self) -> Any:
         """Feature value, must be implemented in subclass."""
-        raise NotImplementedError
-
-    def set_value(self, array, value: Any) -> None:
-        """Set feature value, must be implemented in subclass."""
         raise NotImplementedError
 
     def add_event_handler(self, handler: Callable) -> None:

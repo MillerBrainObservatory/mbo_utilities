@@ -1095,8 +1095,12 @@ _PROJ_FLAT_RE = re.compile(
     r"^([^_]+)(?:_TM(\d+))?_(?:CM|VW)(\d+)(?:_(?:CHN|CH)\d+)?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
+# Capture the first token's prefix (CM|VW) so the fused view is read from the
+# leading token, matching _match_fused: new VW##_VW##_CH## names put the view
+# angle in the leading token (the later number is then CH), while legacy
+# CM##_CM##_VW## names put a camera index there (mapped via CAMERA_VIEW_ANGLE).
 _PROJ_FUSED_RE = re.compile(
-    r"^([^_]+)(?:_TM(\d+))?_(?:CM|VW)(\d+)(?:_(?:CM|VW)(\d+))?_(?:VW|CHN|CH)(\d+)(?:_(?:CHN|CH)(\d+))?\.(xy|xz|yz)Projection\.tif$",
+    r"^([^_]+)(?:_TM(\d+))?_(CM|VW)(\d+)(?:_(?:CM|VW)(\d+))?_(?:VW|CHN|CH)(\d+)(?:_(?:CHN|CH)(\d+))?\.(xy|xz|yz)Projection\.tif$",
     re.IGNORECASE,
 )
 _PROJ_VW_ONLY_RE = re.compile(
@@ -1230,10 +1234,12 @@ def _collect_fused_proj_files(
             continue
         if vw_only:
             spm_str, tm_str, vw, axis = m.groups()
+            view = f"VW{int(vw):02d}"
         else:
-            spm_str, tm_str, _cm0, _cm1, vw, _chn, axis = m.groups()
+            spm_str, tm_str, pfx, n0, _n1, _mid, _chn, axis = m.groups()
+            a0 = int(n0) if pfx.upper() == "VW" else CAMERA_VIEW_ANGLE.get(int(n0), int(n0))
+            view = f"VW{a0:02d}"
         axis = axis.lower()
-        view = f"VW{int(vw):02d}"
         # tiled projections (flat dir, no TM in name) key by the leading tile
         # token (SPM## or grid name), matching _scan_fused's per-tile slots.
         if tm_from_dir is not None:

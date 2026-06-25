@@ -14,12 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Sequence
-
-import numpy as np
-
-if TYPE_CHECKING:
-    from mbo_utilities.metadata.base import VoxelSize
 
 
 class DimRole(str, Enum):
@@ -82,8 +76,6 @@ class DimensionSpec:
     >>> spec = DimensionSpec("Z", DimRole.ITERATABLE, size=28, scale=15.0)
     >>> spec.unit
     'micrometer'
-    >>> spec.total_extent
-    420.0
     """
 
     name: str
@@ -100,11 +92,6 @@ class DimensionSpec:
             self.unit = DIM_UNITS.get(self.name)
 
     @property
-    def total_extent(self) -> float:
-        """total physical extent of this dimension."""
-        return self.size * self.scale
-
-    @property
     def is_spatial(self) -> bool:
         return self.role == DimRole.SPATIAL
 
@@ -115,55 +102,6 @@ class DimensionSpec:
     @property
     def is_batch(self) -> bool:
         return self.role == DimRole.BATCH
-
-    def with_selection(self, indices: Sequence[int]) -> DimensionSpec:
-        """
-        create new spec adjusted for a selection.
-
-        parameters
-        ----------
-        indices : sequence of int
-            0-based indices that were selected
-
-        returns
-        -------
-        DimensionSpec
-            new spec with adjusted size and scale
-        """
-        if not indices:
-            return DimensionSpec(
-                name=self.name,
-                role=self.role,
-                size=0,
-                scale=self.scale,
-                unit=self.unit,
-            )
-
-        new_size = len(indices)
-
-        # compute step factor if uniform spacing
-        step_factor = 1
-        if len(indices) > 1:
-            steps = [indices[i + 1] - indices[i] for i in range(len(indices) - 1)]
-            unique_steps = set(steps)
-            if len(unique_steps) == 1:
-                step_factor = steps[0]
-
-        new_scale = self.scale * step_factor
-
-        return DimensionSpec(
-            name=self.name,
-            role=self.role,
-            size=new_size,
-            scale=new_scale,
-            unit=self.unit,
-        )
-
-    def to_ome_axis(self) -> dict[str, Any]:
-        """convert to OME-NGFF axis dict (single builder in _dim_tags)."""
-        from mbo_utilities.arrays.features._dim_tags import dim_to_ome_axis
-
-        return dim_to_ome_axis(self.name)
 
 
 @dataclass
@@ -181,8 +119,6 @@ class DimensionSpecs:
     examples
     --------
     >>> specs = DimensionSpecs.from_array(arr)
-    >>> specs.Lx
-    512
     >>> specs.num_timepoints
     300
     >>> specs.spatial_dims
@@ -196,12 +132,6 @@ class DimensionSpecs:
         names = [s.name for s in self.specs]
         if "Y" not in names or "X" not in names:
             pass  # allow for flexibility, but log warning?
-
-    def __len__(self) -> int:
-        return len(self.specs)
-
-    def __iter__(self):
-        return iter(self.specs)
 
     def __getitem__(self, idx: int | str) -> DimensionSpec:
         if isinstance(idx, int):
@@ -289,20 +219,6 @@ class DimensionSpecs:
     # convenience properties for common dimensions
 
     @property
-    def shape(self) -> tuple[int, ...]:
-        """shape tuple from dimension sizes."""
-        return tuple(s.size for s in self.specs)
-
-    @property
-    def ndim(self) -> int:
-        return len(self.specs)
-
-    @property
-    def dims(self) -> tuple[str, ...]:
-        """dimension names as tuple."""
-        return tuple(s.name for s in self.specs)
-
-    @property
     def spatial_dims(self) -> tuple[str, ...]:
         """names of spatial dimensions."""
         return tuple(s.name for s in self.specs if s.is_spatial)
@@ -316,18 +232,6 @@ class DimensionSpecs:
     def batch_dims(self) -> tuple[str, ...]:
         """names of batch dimensions."""
         return tuple(s.name for s in self.specs if s.is_batch)
-
-    @property
-    def Lx(self) -> int:
-        """size of X dimension."""
-        spec = self.get("X")
-        return spec.size if spec else 0
-
-    @property
-    def Ly(self) -> int:
-        """size of Y dimension."""
-        spec = self.get("Y")
-        return spec.size if spec else 0
 
     @property
     def num_timepoints(self) -> int:
@@ -378,106 +282,3 @@ class DimensionSpecs:
         """frame interval in seconds (None if no T)."""
         spec = self.get("T")
         return spec.scale if spec else None
-
-    def with_selections(self, selections: dict[str, Sequence[int]]) -> DimensionSpecs:
-        """
-        create new specs adjusted for selections.
-
-        parameters
-        ----------
-        selections : dict
-            mapping of dim_name -> indices (0-based)
-
-        returns
-        -------
-        DimensionSpecs
-            new specs with adjusted sizes and scales
-        """
-        new_specs = []
-        for spec in self.specs:
-            if spec.name in selections:
-                new_specs.append(spec.with_selection(selections[spec.name]))
-            else:
-                new_specs.append(spec)
-        return DimensionSpecs(new_specs)
-
-    def to_dict(self, include_aliases: bool = True) -> dict[str, Any]:
-        """
-        export as metadata dict.
-
-        parameters
-        ----------
-        include_aliases : bool
-            if True, includes all standard aliases
-
-        returns
-        -------
-        dict
-            metadata dictionary with reactive values
-        """
-        result = {
-            "shape": self.shape,
-            "dims": self.dims,
-            "ndim": self.ndim,
-        }
-
-        # spatial dimensions
-        result["Lx"] = self.Lx
-        result["Ly"] = self.Ly
-        result["dx"] = self.dx
-        result["dy"] = self.dy
-
-        # z dimension
-        if self.get("Z"):
-            result["dz"] = self.dz
-            result["num_zplanes"] = self.num_zplanes
-            if include_aliases:
-                result["nplanes"] = self.num_zplanes
-                result["num_planes"] = self.num_zplanes
-                result["n_planes"] = self.num_zplanes
-                result["Z"] = self.num_zplanes
-                result["nz"] = self.num_zplanes
-                result["slices"] = self.num_zplanes
-                result["z_step"] = self.dz
-                result["PhysicalSizeZ"] = self.dz
-
-        # time dimension
-        if self.get("T"):
-            result["num_timepoints"] = self.num_timepoints
-            if self.fs:
-                result["fs"] = self.fs
-                result["finterval"] = self.finterval
-            if include_aliases:
-                result["nframes"] = self.num_timepoints
-                result["num_frames"] = self.num_timepoints
-                result["n_frames"] = self.num_timepoints
-                result["T"] = self.num_timepoints
-                result["nt"] = self.num_timepoints
-                result["timepoints"] = self.num_timepoints
-                if self.fs:
-                    result["frame_rate"] = self.fs
-
-        # channel dimension
-        if self.get("C"):
-            result["num_channels"] = self.num_channels
-            if include_aliases:
-                result["nchannels"] = self.num_channels
-                result["C"] = self.num_channels
-
-        # resolution aliases
-        if include_aliases:
-            result["PhysicalSizeX"] = self.dx
-            result["PhysicalSizeY"] = self.dy
-            result["pixel_resolution"] = (self.dx, self.dy)
-            if self.dz:
-                result["voxel_size"] = (self.dx, self.dy, self.dz)
-
-        return result
-
-    def to_ome_axes(self) -> list[dict[str, Any]]:
-        """convert to OME-NGFF axes list."""
-        return [spec.to_ome_axis() for spec in self.specs]
-
-    def to_ome_scale(self) -> list[float]:
-        """get scale values in dimension order for OME-NGFF."""
-        return [spec.scale for spec in self.specs]
