@@ -890,12 +890,21 @@ class TileGridViewer(Widget):
         if rot:
             for ti in self._tile_xyz:
                 self._tile_rot[(c, ti)] = rot
-        # VW90 / VW270 (single-camera) and the fused VW90 view are H-flipped on
-        # EVERY tile to mirror them onto VW00 so the tiles stitch (verified by
-        # the v13 BigStitcher export); VW00 gets no default flip.
-        if self._camera_default_hflip(c) or self._fused_view(c) == "VW90":
-            for ti in self._tile_xyz:
-                self._tile_flips.setdefault((c, ti), set()).add("X")
+        # VW90 / VW270 (single-camera) and the fused VW90 view get a default
+        # H-flip to mirror them onto VW00 so the tiles stitch; VW00 gets none.
+        if not (self._camera_default_hflip(c) or self._fused_view(c) == "VW90"):
+            return
+        if self._is_rotated:
+            # rotated mount: flip EVERY VW90 tile (verified by the v13 export).
+            tiles = list(self._tile_xyz)
+        else:
+            # normal mount: flip only the parity column (original behavior).
+            #   single-camera VW90/VW270 (columns mirrored): tile_y == 0
+            #   fused VW90_VW270 (not mirrored, opposite parity): tile_y == 1
+            flip_col = 0 if self._camera_default_hflip(c) else 1
+            tiles = [ti for ti, xyz in self._tile_xyz.items() if xyz[1] == flip_col]
+        for ti in tiles:
+            self._tile_flips.setdefault((c, ti), set()).add("X")
 
     @staticmethod
     def _export_view_label(name) -> str | None:
