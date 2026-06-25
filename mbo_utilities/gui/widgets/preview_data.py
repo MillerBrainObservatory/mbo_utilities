@@ -182,6 +182,7 @@ class PreviewDataWidget(EdgeWindow):
             | (imgui.WindowFlags_.no_move if not movable else 0)
             | (imgui.WindowFlags_.no_resize if not resizable else 0)
             | (imgui.WindowFlags_.no_scrollbar if not scrollable else 0)
+            | (imgui.WindowFlags_.no_scroll_with_mouse if not scrollable else 0)
             | (imgui.WindowFlags_.always_auto_resize if auto_resize else 0)
             | (window_flags or 0)
         )
@@ -292,7 +293,6 @@ class PreviewDataWidget(EdgeWindow):
         self._s2p = None
         self._s2p_db = None
         self._s2p_extras = None
-        self._s2p_dir = ""
         self._s2p_savepath_flash_start = None
         self._s2p_savepath_flash_count = 0
         self._s2p_show_savepath_popup = False
@@ -368,6 +368,22 @@ class PreviewDataWidget(EdgeWindow):
             )
         else:
             self._bold_font = None
+        # imgui >=1.92 rasterizes glyphs on first use and grows the atlas
+        # texture at that moment. When a secondary font's first use is inside
+        # an implot plot (the summary-stats plots push _bold_font), the new
+        # atlas texture isn't registered with the wgpu backend yet and drawing
+        # raises `KeyError: 0`. Baking the printable-ASCII range here grows the
+        # atlas once, during init, so later use is an in-place texture update
+        # on an already-registered id.
+        for _font in (self._default_imgui_font, self._bold_font):
+            if _font is None:
+                continue
+            try:
+                _baked = _font.get_font_baked(_font.legacy_size)
+                for _cp in range(0x20, 0x7F):
+                    _baked.find_glyph(_cp)
+            except Exception:
+                self.logger.debug("font prebake skipped", exc_info=True)
         imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
 
     def _init_state(self):
@@ -644,23 +660,6 @@ class PreviewDataWidget(EdgeWindow):
     # === Properties ===
 
     @property
-    def s2p_dir(self):
-        return self._s2p_dir
-
-    @s2p_dir.setter
-    def s2p_dir(self, value):
-        self.logger.debug(f"Setting Suite2p directory to {value}")
-        self._s2p_dir = value
-
-    @property
-    def register_z(self):
-        return self._register_z
-
-    @register_z.setter
-    def register_z(self, value):
-        self._register_z = value
-
-    @property
     def processors(self) -> list:
         """Access to underlying NDImageProcessor instances."""
         return self.image_widget._image_processors
@@ -726,14 +725,6 @@ class PreviewDataWidget(EdgeWindow):
             if hasattr(arr, "phase_correction") and isinstance(arr.phase_correction, PhaseCorrectionFeature):
                 return True
             if hasattr(arr, "fix_phase") and hasattr(arr, "use_fft"):
-                return True
-        return False
-
-    @property
-    def has_frame_averaging_support(self) -> bool:
-        """Check if any data array supports frame averaging."""
-        for arr in self._get_data_arrays():
-            if hasattr(arr, "frames_per_slice") and hasattr(arr, "can_average"):
                 return True
         return False
 
@@ -813,16 +804,6 @@ class PreviewDataWidget(EdgeWindow):
             if hasattr(arr, "max_offset"):
                 arr.max_offset = value
         self._refresh_image_widget()
-
-    @property
-    def selected_array(self) -> int:
-        return self._selected_array
-
-    @selected_array.setter
-    def selected_array(self, value: int):
-        if value < 0 or value >= self.num_graphics:
-            raise ValueError(f"Invalid array index: {value}")
-        self._selected_array = value
 
     @property
     def gaussian_sigma(self) -> float:
@@ -1242,30 +1223,8 @@ class PreviewDataWidget(EdgeWindow):
     def draw_preview_section(self):
         """Draw preview section using modular UI widgets."""
         imgui.dummy(imgui.ImVec2(0, 5))
-        cflags = imgui.ChildFlags_.auto_resize_y | imgui.ChildFlags_.always_auto_resize
-        with imgui_ctx.begin_child("##PreviewChild", imgui.ImVec2(0, 0), cflags):
+        with imgui_ctx.begin_child("##PreviewChild", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
             draw_all_widgets(self, self._widgets)
-
-    def get_raw_frame(self) -> tuple[ndarray, ...]:
-        """Get raw frame data at current indices."""
-        from mbo_utilities.arrays.features import find_slider_name
-        idx = self.image_widget.indices
-        names = self.image_widget._slider_dim_names or ()
-        t_name = find_slider_name(names, "t")
-        z_name = find_slider_name(names, "z")
-        t = idx[t_name] if t_name else 0
-        z = idx[z_name] if z_name else 0
-
-        def _ndim_to_frame(arr, t=0, z=0):
-            if arr.ndim == 4:
-                return arr[t, z]
-            if arr.ndim == 3:
-                return arr[t]
-            if arr.ndim == 2:
-                return arr
-            raise ValueError(f"Unsupported data shape: {arr.shape}")
-
-        return tuple(_ndim_to_frame(arr, t, z) for arr in self.image_widget.data)
 
     def compute_zstats(self):
         """Compute z-stats for all graphics."""
