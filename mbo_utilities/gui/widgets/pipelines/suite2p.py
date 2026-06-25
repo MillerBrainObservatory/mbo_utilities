@@ -139,9 +139,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         """Draw suite2p configuration ui."""
         from mbo_utilities.gui.widgets.pipelines.settings import draw_section_suite2p
 
-        # load results disabled for now (commented out)
-        # self._draw_diagnostics_button()
-        # imgui.separator()
         imgui.spacing()
 
         # sync widget state to parent before drawing
@@ -188,73 +185,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         # Draw popup windows (managed separately from config)
         self._draw_diagnostics_popup()
         self._draw_grid_search_popup()
-
-    def _draw_diagnostics_button(self):
-        """Draw buttons to load diagnostics and grid search results."""
-        if imgui.button("Load stat.npy"):
-            default_dir = str(get_last_dir("suite2p_stat") or Path.home())
-            self._file_dialog = pfd.open_file(
-                "Select stat.npy file",
-                default_dir,
-                ["stat.npy files", "stat.npy"],
-            )
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Load a stat.npy file to view ROI diagnostics.")
-
-        # gui choice radio buttons
-        imgui.same_line()
-        imgui.text("Open in:")
-        imgui.same_line()
-
-        # suite2p option
-        suite2p_available = self._check_suite2p_gui()
-        if not suite2p_available:
-            imgui.begin_disabled()
-        if imgui.radio_button("suite2p", self._gui_choice == 0):
-            self._gui_choice = 0
-        if not suite2p_available:
-            imgui.end_disabled()
-            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-                imgui.set_tooltip("suite2p GUI requires rastermap.\nInstall with: uv pip install rastermap")
-
-        imgui.same_line()
-
-        # cellpose option
-        cellpose_available = self._check_cellpose_gui()
-        if not cellpose_available:
-            imgui.begin_disabled()
-        if imgui.radio_button("cellpose", self._gui_choice == 1):
-            self._gui_choice = 1
-        if not cellpose_available:
-            imgui.end_disabled()
-            if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-                imgui.set_tooltip("cellpose GUI not available.\nInstall with: uv pip install cellpose[gui]")
-
-        imgui.same_line()
-
-        # disable button if dialog is already open
-        dialog_pending = self._grid_search_dialog is not None
-        if dialog_pending:
-            imgui.begin_disabled()
-
-        if imgui.button("Grid Search...") and self._grid_search_dialog is None:
-            default_dir = str(get_last_dir("grid_search") or Path.home())
-            self._grid_search_dialog = pfd.select_folder(
-                "Select grid search results folder", default_dir
-            )
-
-        if dialog_pending:
-            imgui.end_disabled()
-
-        if imgui.is_item_hovered():
-            if dialog_pending:
-                imgui.set_tooltip("Waiting for folder selection...")
-            else:
-                imgui.set_tooltip(
-                    "Load grid search results to compare parameter combinations.\n"
-                    "Select a folder containing subfolders for each parameter set,\n"
-                    "each with suite2p/plane0/ containing the results."
-                )
 
     def _poll_suite2p_selection(self):
         """Poll suite2p window for selection changes."""
@@ -546,18 +476,6 @@ class Suite2pPipelineWidget(PipelineWidget):
         except Exception:
             # Silently fail - window positioning is not critical
             pass
-
-    @property
-    def suite2p_window(self):
-        """Access to the suite2p GUI window if open."""
-        if self._external_gui_type == "suite2p":
-            return self._external_gui_window
-        return None
-
-    @property
-    def external_gui_window(self):
-        """Access to the external GUI window (suite2p or cellpose) if open."""
-        return self._external_gui_window
 
     def _draw_grid_search_popup(self):
         """Draw the grid search viewer popup window if open."""

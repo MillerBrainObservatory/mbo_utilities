@@ -20,7 +20,7 @@ import mbo_utilities as mbo
 from mbo_utilities.arrays import NumpyArray
 
 # Import helpers from conftest - pytest makes these available
-from tests.conftest import compare_arrays, compute_frame_correlation, find_output_file
+from tests.conftest import compare_arrays, find_output_file
 
 
 def wrap_array(data):

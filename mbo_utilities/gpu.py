@@ -215,21 +215,6 @@ def gpu_processes() -> list[dict[str, Any]]:
     return _gpu_processes_nvsmi()
 
 
-def torch_cuda_memory() -> dict[str, Any] | None:
-    """In-process torch CUDA allocator stats (MB), or None if unavailable."""
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            return None
-        return {
-            "allocated_mb": torch.cuda.memory_allocated() / (1024 * 1024),
-            "reserved_mb": torch.cuda.memory_reserved() / (1024 * 1024),
-            "max_allocated_mb": torch.cuda.max_memory_allocated() / (1024 * 1024),
-        }
-    except Exception:
-        return None
-
-
 def _adapter_summary(adapter: Any) -> str:
     """Short label for a wgpu adapter, e.g. 'NVIDIA RTX A4000 [DiscreteGPU] via Vulkan'."""
     summary = getattr(adapter, "summary", None)

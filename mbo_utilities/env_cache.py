@@ -72,18 +72,6 @@ def clear_cache() -> bool:
     return False
 
 
-def clear_all_caches() -> int:
-    """delete all environment caches. returns count of deleted files."""
-    cache_dir = get_cache_dir()
-    count = 0
-    for f in cache_dir.glob("*.json"):
-        try:
-            f.unlink()
-            count += 1
-        except Exception:
-            pass
-    return count
-
 _CUPY_DIST_VARIANTS = ("cupy-cuda13x", "cupy-cuda12x", "cupy-cuda11x", "cupy")
 
 
@@ -183,13 +171,6 @@ def get_cached_pypi_version(max_age_hours: int = 1) -> str | None:
     except Exception:
         pass
     return None
-
-
-def update_cache(key: str, value: Any) -> None:
-    """update a single key in the cache."""
-    cache = load_cache() or {}
-    cache[key] = value
-    save_cache(cache)
 
 
 def update_pypi_cache(latest_version: str) -> None:

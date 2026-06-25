@@ -8,8 +8,6 @@ bug we shipped between the 5D refactor and now.
 Coverage:
 - `_SqueezeSingletonDims`: leak-proof against numpy protocol calls
   (`np.asarray`, `astype`), correct shape across all 8 singleton patterns
-- `_load_subsampled`: canonicalizes any input rank/dim combo to
-  `(T_sub, Z, Y, X)` so the stats loop can iterate axis 1 safely
 - Window/Spatial widget feature gating across rank patterns
 """
 
@@ -18,7 +16,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mbo_utilities.gui._stats import _load_subsampled
 from mbo_utilities.gui.run_gui import _SqueezeSingletonDims
 from mbo_utilities.gui.widgets.window_functions import (
     SpatialFunctionsWidget,
@@ -130,46 +127,6 @@ class TestSqueezeWrapperNumpyLeak:
         # the wrapper must not pretend to have arbitrary dunders
         with pytest.raises(AttributeError):
             w.__array_interface__
-
-
-# ============================================================
-# _load_subsampled: canonicalization across rank patterns
-# ============================================================
-
-CANONICAL_CASES = [
-    # (input_shape, dims, expected_canonical_shape, label)
-    ((64, 48),         ("Y", "X"),                 (1, 1, 64, 48),  "2D YX"),
-    ((100, 64, 48),    ("T", "Y", "X"),            (10, 1, 64, 48), "3D TYX"),
-    ((37, 64, 48),     ("Z", "Y", "X"),            (1, 37, 64, 48), "3D ZYX (mosquito-stylet bug)"),
-    ((20, 5, 64, 48),  ("T", "Z", "Y", "X"),       (2, 5, 64, 48),  "4D TZYX"),
-    ((1, 14, 64, 48),  ("C", "Z", "Y", "X"),       (1, 14, 64, 48), "4D CZYX (post-T-squeeze pollen)"),
-    ((20, 2, 5, 64, 48), ("T", "C", "Z", "Y", "X"),(2, 5, 64, 48),  "5D TCZYX"),
-]
-
-
-class TestLoadSubsampledCanonicalization:
-    """`_load_subsampled` returns `(T_sub, Z, Y, X)` regardless of input
-    rank or dim labels. Regression for the (Z, Y, X) crash where the
-    code blindly strode axis 0 as if it were T.
-    """
-
-    @pytest.mark.parametrize("shape,dims,expected,label", CANONICAL_CASES)
-    def test_canonical_shape(self, shape, dims, expected, label):
-        f = FakeArr(shape, dims)
-        sub = _load_subsampled(f, subsample=10)
-        assert sub.shape == expected, f"{label}: {sub.shape} vs {expected}"
-
-    @pytest.mark.parametrize("shape,dims,expected,label", CANONICAL_CASES)
-    def test_stats_loop_doesnt_crash(self, shape, dims, expected, label):
-        """The downstream stats loop iterates axis 1 from 0 to nz-1.
-        Canonicalization must produce an axis 1 large enough to support that.
-        """
-        f = FakeArr(shape, dims)
-        sub = _load_subsampled(f, subsample=10)
-        nz = sub.shape[1]
-        for s in range(nz):
-            stack = sub[:, s, :, :].astype(np.float32)
-            assert stack.ndim == 3  # (T_sub, Y, X)
 
 
 # ============================================================

@@ -53,12 +53,6 @@ _WHITE = (1.0, 1.0, 1.0, 1.0)
 _MAX_GPU_CACHE = 16
 
 
-def _timepoints_for(group: dict, axis: str, view: str) -> list[int]:
-    return sorted(
-        {t for (a, v, t) in group["files"] if a == axis and v == view}
-    )
-
-
 def _timepoints_for_axis(group: dict, axis: str) -> list[int]:
     """Union of tiles/timepoints across all views for ``axis``.
 

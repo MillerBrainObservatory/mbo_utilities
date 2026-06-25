@@ -155,13 +155,6 @@ class PollenCalibrationViewer(BaseViewer):
             return self.parent.image_widget.data if self.parent.image_widget else None
         return self.image_widget.data if self.image_widget else None
 
-    def get_metadata(self) -> dict:
-        """Get metadata, using stored original if in manual mode."""
-        if self._original_metadata:
-            return self._original_metadata
-        arr = self._get_array()
-        return getattr(arr, "metadata", {}) if arr is not None else {}
-
     @property
     def logger(self):
         """Access the GUI logger."""
@@ -251,13 +244,6 @@ class PollenCalibrationViewer(BaseViewer):
         if arr.ndim == 4:
             return arr.shape[1]
         return 1
-
-    @property
-    def num_z_planes(self) -> int:
-        arr = self._get_array()
-        if arr is None:
-            return 0
-        return getattr(arr, "num_zplanes", arr.shape[0])
 
     def draw(self) -> None:
         """Draw the pollen calibration UI."""

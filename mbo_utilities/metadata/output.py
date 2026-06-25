@@ -240,11 +240,6 @@ class OutputMetadata:
         return self._is_contiguous
 
     @property
-    def frame_step(self) -> int:
-        """step between selected frames (1 if contiguous)."""
-        return self._frame_step
-
-    @property
     def z_step_factor(self) -> int:
         """multiplication factor for z-step (step between selected planes)."""
         return self._z_step_factor
@@ -362,17 +357,6 @@ class OutputMetadata:
         if fs is None or fs <= 0:
             return None
         return 1.0 / fs
-
-    @property
-    def total_duration(self) -> float | None:
-        """total duration in seconds (only for contiguous frames)."""
-        if not self._is_contiguous:
-            return None
-        fs = self.fs
-        n_frames = self.num_frames
-        if fs is None or n_frames is None:
-            return None
-        return n_frames / fs
 
     def to_imagej(self, shape: tuple) -> tuple[dict, tuple]:
         """

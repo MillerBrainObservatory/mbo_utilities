@@ -21,16 +21,3 @@ DEFAULT_COLORMAPS: tuple[str, ...] = (
 )
 
 DEFAULT_COLORMAP: str = "viridis"
-
-
-def with_active(active: str | None, base: tuple[str, ...] = DEFAULT_COLORMAPS) -> list[str]:
-    """Return the base list with `active` prepended if it's not already in it.
-
-    Mirrors the pattern used by summary_image and the video dialog: keep a
-    small curated list, but always include whatever cmap is currently active.
-    """
-    if not active:
-        return list(base)
-    if active in base:
-        return list(base)
-    return [active, *base]

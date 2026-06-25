@@ -3,9 +3,6 @@ mbo_utilities - Miller Brain Observatory data processing utilities.
 
 This package uses lazy imports to minimize startup time. Heavy dependencies
 like numpy, dask, and tifffile are only loaded when actually needed.
-
-For fastest CLI startup, avoid importing from this module directly -
-use `from mbo_utilities.gui.run_gui import _cli_entry`.
 """
 
 import warnings
