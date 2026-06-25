@@ -9,28 +9,28 @@ import click
 
 def _refuse_local_on_login_node() -> None:
     """Guard an inline ``--local`` run from a SLURM login node — running heavy
-    compute on a shared login node is prohibited on most clusters. Checks the
-    node name and username from env vars (plus the hostname) for ``login``.
+    compute on a shared login node is prohibited on most clusters and will OOM.
+
+    Matches on the HOSTNAME only (a username is never a node-type signal), allows
+    it when inside a SLURM allocation (``SLURM_JOB_ID`` set — you are on a compute
+    node via salloc/srun), and honors ``MBO_ALLOW_LOGIN_LOCAL=1`` as an override.
     """
     import os
     import socket
 
-    names = [
-        os.environ.get("SLURMD_NODENAME", ""),
-        os.environ.get("HOSTNAME", ""),
-        os.environ.get("HOST", ""),
-        os.environ.get("USER", ""),
-        os.environ.get("USERNAME", ""),
-    ]
-    try:
-        names.append(socket.gethostname())
-    except OSError:
-        pass
-    hit = next((n for n in names if "login" in n.lower()), "")
-    if hit:
+    if os.environ.get("SLURM_JOB_ID") or os.environ.get("MBO_ALLOW_LOGIN_LOCAL"):
+        return
+    host = os.environ.get("SLURMD_NODENAME") or os.environ.get("HOSTNAME") or ""
+    if not host:
+        try:
+            host = socket.gethostname()
+        except OSError:
+            host = ""
+    if "login" in host.lower():
         raise click.ClickException(
-            f"--local on a login node ({hit!r}). Use a compute node "
-            "(salloc/srun) or --mode single/array."
+            f"--local on a login node ({host!r}). Use a compute node "
+            "(salloc/srun, then --local) or --mode single/array. Override with "
+            "MBO_ALLOW_LOGIN_LOCAL=1 if you know the node can take it."
         )
 
 
@@ -208,6 +208,13 @@ def hpc_status(target):
 
     from mbo_utilities.hpc import slurm
 
+    if not target:
+        # no target -> the last run you launched (registry), else your queue.
+        from mbo_utilities.hpc.history import last_run_target
+        target = last_run_target()
+        if target:
+            click.echo(f"(last run: {target})")
+
     if target and slurm.is_job_id(target):
         click.echo(slurm.job_report(target))
         return
@@ -247,7 +254,7 @@ def hpc_status(target):
 
 
 @hpc.command("watch", short_help="Follow a run's .err/.out logs, from a job id, config, or output dir.")
-@click.argument("target", required=False, default="hpc.toml", type=click.Path())
+@click.argument("target", required=False, default=None, type=click.Path())
 @click.option("-o", "--out", "stream_out", is_flag=True,
               help="Start on stdout (.out); default is stderr (.err).")
 @click.option("--no-follow", is_flag=True, help="Print the tail once and exit.")
@@ -258,17 +265,23 @@ def hpc_watch(target, stream_out, no_follow, lines):
 
     \b
     Examples:
+      mbo hpc watch                       # the last run you launched
       mbo hpc watch 5162141               # by SLURM job id (prints state first)
-      mbo hpc watch                       # newest run from hpc.toml, follow .err
       mbo hpc watch hpc.toml -o           # follow .out instead
       mbo hpc watch /data/results/2025_07_27_mk355
       mbo hpc watch --no-follow           # tail once, don't stream
 
-    A job id resolves exact log paths via scontrol and shows job state before any
-    logs exist. While following (terminal): o/e switch out/err, n/p switch task
-    logs, q quit.
+    With no argument it follows the most recent run from the registry
+    (~/.mbo/hpc/runs), falling back to ./hpc.toml. A job id resolves exact log
+    paths via scontrol and shows job state before any logs exist. While
+    following (terminal): o/e switch out/err, n/p switch task logs, q quit.
     """
     from mbo_utilities.hpc.logs import watch
+
+    if not target:
+        from mbo_utilities.hpc.history import last_run_target
+        target = last_run_target() or "hpc.toml"
+        click.echo(f"(watching last run: {target})")
 
     try:
         watch(target, stream="out" if stream_out else "err",

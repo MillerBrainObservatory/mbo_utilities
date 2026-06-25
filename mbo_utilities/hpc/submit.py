@@ -138,7 +138,10 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
     _pipe.assert_output_writable(output_dir)
     cfg_dict = cfg.to_dict()
 
+    from mbo_utilities.hpc.history import record_run
+
     if mode == "local":
+        record_run(mode="local", output_dir=str(output_dir))
         result = _pipe.run_job(cfg, output_dir, role="single")
         return {"mode": "local", "output_dir": result}
 
@@ -150,6 +153,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         print(f"submitted single job {job.job_id} -> {output_dir}")
         print(f"logs:   {log_folder}")
         _next_steps(job.job_id)
+        record_run(mode="single", job_id=job.job_id, output_dir=str(output_dir))
         return {"mode": "single", "job_id": job.job_id, "output_dir": str(output_dir)}
 
     if mode == "array":
@@ -175,6 +179,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         print(f"submitted aggregate job {agg_job.job_id} (after {array_id} succeeds)")
         print(f"logs:   {log_folder}")
         _next_steps(array_id)
+        record_run(mode="array", job_id=array_id, output_dir=str(output_dir))
         return {
             "mode": "array",
             "array_id": array_id,

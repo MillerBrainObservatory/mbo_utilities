@@ -364,11 +364,12 @@ def stage_input_local(src, work_base, label) -> tuple[Path, float]:
 
 
 def write_failure_report(output_dir, role, task_id, exc) -> str | None:
-    """Write a failure report to the first writable of: <output>/logs,
-    ~/.mbo/hpc_logs, the temp dir. Returns the path written, or None.
+    """Write a failure report co-located with the run and to the central log dir.
 
-    Guarantees a debug breadcrumb survives even when the output dir is the
-    thing that failed (e.g. a full quota that broke the result copy).
+    Co-located (<output>/logs) is the primary breadcrumb; a copy always goes to
+    the rotated central history (~/.mbo/logs, capped via prune_dir) so failures
+    survive even when the output dir is the thing that failed (full quota, etc.).
+    Returns the co-located path, else the central/tmp path, else None.
     """
     import traceback
 
@@ -386,9 +387,19 @@ def write_failure_report(output_dir, role, task_id, exc) -> str | None:
     ]
     text = "\n".join(lines)
     name = f"FAILURE_{role}_{task_id}_{os.getpid()}.log"
-    for base in (Path(output_dir) / "logs",
-                 Path.home() / ".mbo" / "hpc_logs",
-                 Path(tempfile.gettempdir())):
+
+    # always keep a rotated copy in the central history (best-effort).
+    try:
+        from mbo_utilities.hpc.history import logs_dir, prune_dir, MAX_LOGS
+        central = logs_dir()
+        (central / name).write_text(text, encoding="utf-8")
+        prune_dir(central, MAX_LOGS, "FAILURE_*.log")
+    except Exception:
+        central = None
+
+    for base in (Path(output_dir) / "logs", central, Path(tempfile.gettempdir())):
+        if base is None:
+            continue
         try:
             base.mkdir(parents=True, exist_ok=True)
             dest = base / name
