@@ -1901,6 +1901,51 @@ class IsoviewPipelineWidget(PipelineWidget):
         except (TypeError, ValueError):
             return ti
 
+    @staticmethod
+    def _ops_to_inplane(ops):
+        """Reduce an Align-views op list to ``[rot, fx, fy]`` (Z-rotation 90deg
+        steps + X/Y flips). Out-of-plane (X/Y rotation) and Z-flip components are
+        dropped — they aren't part of the in-plane tile recipe."""
+        rot = fx = fy = 0
+        for op in (ops or []):
+            kind, axis = str(op[0]).lower(), str(op[1]).upper()
+            if kind == "rot" and axis == "Z":
+                rot = (rot + int(op[2]) // 90) % 4
+            elif kind == "flip" and axis == "X":
+                fx ^= 1
+            elif kind == "flip" and axis == "Y":
+                fy ^= 1
+        return [rot, fx, fy]
+
+    def _overlay_align_views(self, tile_orientations, arr):
+        """Compose the Align views per-view orientation onto every tile entry in
+        ``tile_orientations`` (rotations add -> position, flips XOR -> pose,
+        matching how the export splits them), so view-level corrections drive the
+        export too. Returns the original when Align views has nothing applied."""
+        from mbo_utilities.gui import _isoview_orient_state as orient_state
+
+        applied = orient_state.get_all_applied(arr)
+        if not applied:
+            return tile_orientations
+        view_ip = {}
+        for view in applied:
+            ip = self._ops_to_inplane(orient_state.applied_ops(arr, view))
+            if ip != [0, 0, 0]:
+                view_ip[view] = ip
+        if not view_ip:
+            return tile_orientations
+        out = {
+            gk: {v: list(t) for v, t in views.items()}
+            for gk, views in (tile_orientations or {}).items()
+        }
+        for views in out.values():
+            for view, ip in view_ip.items():
+                base = views.get(view, [0, 0, 0])
+                views[view] = [
+                    (base[0] + ip[0]) % 4, base[1] ^ ip[1], base[2] ^ ip[2]
+                ]
+        return out or None
+
     def _submit_stitcher(self, arr: Any) -> None:
         """Spawn ``generate_bigstitcher_xml`` against the loaded tree.
 
@@ -2016,6 +2061,9 @@ class IsoviewPipelineWidget(PipelineWidget):
                 except Exception:
                     tile_orientations = None
                 break
+        # compose any Align views per-view orientation on top, so view-level
+        # corrections drive the export too (single source of truth).
+        tile_orientations = self._overlay_align_views(tile_orientations, arr)
         args = {
             "input_path": str(input_dir),
             "method": method,

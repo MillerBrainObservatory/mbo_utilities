@@ -105,3 +105,12 @@ def applied_ops(arr: Any, view_key: str) -> list | None:
     if s is None:
         return None
     return orientation_ops(s["rotations"], s["flips"])
+
+
+def get_all_applied(arr: Any) -> dict:
+    """``{view_key: {rotations, flips}}`` for every view the Align views widget
+    has committed an orientation for (empty when none)."""
+    k = _key(arr)
+    if k is None:
+        return {}
+    return dict(_APPLIED_STORE.get(k) or {})
