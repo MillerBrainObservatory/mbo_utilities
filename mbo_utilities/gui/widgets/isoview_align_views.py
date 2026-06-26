@@ -30,6 +30,7 @@ from mbo_utilities.gui.widgets._orient import (
     apply_plan,
     compose_R,
     draw_orient_row,
+    ops_label,
     orient_2d_plan,
     orientation_ops,
 )
@@ -237,6 +238,20 @@ class IsoviewAlignViews(Widget):
         st = _seed_for_view(cam, self._is_rotated)
         return orientation_ops(st["rotations"], st["flips"])
 
+    def _summary_text(self, arr) -> str:
+        """Effective per-view orientation the export will bake: the Apply
+        override when present, else the seed default. ``"(none)"`` only when
+        every view resolves to identity."""
+        parts = []
+        for v in self._views_list:
+            ops = orient_state.applied_ops(arr, v["view_label"])
+            if ops is None:
+                st = _seed_for_view(v["cam"], self._is_rotated)
+                ops = orientation_ops(st["rotations"], st["flips"])
+            if ops:
+                parts.append(f"{v['view_label']}: {ops_label(ops)}")
+        return ", ".join(parts) if parts else "(none)"
+
     def _slot_for_tile(self, arr):
         if self._slots:
             return self._slots[min(self._tile, len(self._slots) - 1)]
@@ -367,7 +382,7 @@ class IsoviewAlignViews(Widget):
         try:
             if imgui.button("Open##alignviews_open"):
                 self._popup_open = True
-            imgui.text_colored(_WHITE, orient_state.summary(arr))
+            imgui.text_colored(_WHITE, self._summary_text(arr))
         finally:
             imgui.unindent(8)
         if self._popup_open:

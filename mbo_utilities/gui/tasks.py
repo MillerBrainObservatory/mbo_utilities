@@ -1303,7 +1303,6 @@ def task_generate_bigstitcher(args: dict, logger: logging.Logger) -> None:
             orient_to_cm00=args.get("orient_to_cm00", True),
             reverse_z=args.get("reverse_z", False),
             zarr_version=args.get("zarr_version", 2),
-            upright=args.get("upright", True),
             link_existing=args.get("link_existing", False),
             tile_orientations=args.get("tile_orientations"),
         )

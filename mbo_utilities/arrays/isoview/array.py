@@ -2194,11 +2194,10 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
 
         Tiled datasets fold spatial tiles into the T axis, so T is
         labeled ``"Tile"``; timepoint datasets label it ``"Timepoint"``.
-        The C axis is ``"View"`` for fused trees (VW##) and ``"Cam"``
-        otherwise (CM##).
+        The C axis is ``"View"`` (VW##) for every kind.
         """
         t_label = "Tile" if self._is_tiled else "Timepoint"
-        c_label = "View" if self.kind == "fused" else "Cam"
+        c_label = "View"
         labels: list[str] = []
         if len(self._timepoints) > 1:
             labels.append(t_label)
