@@ -152,6 +152,47 @@ def find_tiff_plane_files(directory: Path) -> list[Path]:
     return sorted(plane_files, key=sort_key)
 
 
+def _group_plane_files(files: list[Path]) -> list[list[Path]]:
+    """Group ``planeNN``-named files into one sorted list per plane number."""
+    groups: dict[int, list[Path]] = {}
+    for p in files:
+        pnum = _extract_tiff_plane_number(p.name)
+        if pnum is not None:
+            groups.setdefault(pnum, []).append(p)
+    return [sorted(groups[k]) for k in sorted(groups)]
+
+
+def _imagej_layout(meta: dict, path: Path) -> tuple[int, ...] | None:
+    """(frames, slices, channels) when a single file is a multi-frame ImageJ
+    hyperstack — timeseries, z-stack, or both — else None.
+
+    Prefers the counts already deposited by ``get_metadata_single``; reads them
+    straight from the file only when caller-supplied metadata omits them.
+    """
+    counts = tuple(meta.get(k) for k in ("frames", "slices", "channels"))
+    if any(c is not None for c in counts):
+        frames, slices, channels = (int(c or 1) for c in counts)
+    else:
+        from mbo_utilities.metadata.io import imagej_hyperstack_counts
+
+        with TiffFile(path) as tf:
+            if not tf.is_imagej:
+                return None
+            frames, slices, channels = imagej_hyperstack_counts(tf)
+    return (frames, slices, channels) if frames * slices * channels > 1 else None
+
+
+def _shape_layout(meta: dict) -> tuple[int, ...] | None:
+    """(frames, planes[, channels]) from a TZCYX ``shape`` for shaped/legacy
+    metadata that predates the ImageJ count keys, else None."""
+    shape = meta.get("shape")
+    if shape and len(shape) == 5 and shape[1] > 1 and shape[2] > 1:
+        return shape[0], shape[1], shape[2]
+    if shape and len(shape) == 4 and shape[1] > 1:
+        return shape[0], shape[1]
+    return None
+
+
 class _InterleavedTiffReader:
     """Internal reader for ImageJ-style interleaved TZCYX hyperstacks."""
 
@@ -216,10 +257,8 @@ class _InterleavedTiffReader:
         lead = self._zstore.shape[:-2]
         total = int(np.prod(lead)) if lead else 1
         if flat_idx >= total:
-            # keep the page-path error contract (IndexError, not numpy's
-            # ValueError from unravel_index) and fail loudly rather than
-            # returning frame 0 when a truncated/corrupt file collapses the
-            # series to a single 2-D plane (lead == ()).
+            # fail loudly (matching the page path's IndexError) instead of
+            # returning frame 0 when a corrupt file collapses to a single plane
             raise IndexError(
                 f"frame {flat_idx} out of range ({total} frames) in {self._path}"
             )
@@ -506,22 +545,17 @@ class TiffArray(TiffReaderMixin, ReductionMixin, Shape5DMixin):
         else:
             self._metadata = _read_tiff_metadata(file_list[0])
 
-        # STEP 2: check metadata for shape to determine dimensionality
-        shape = self._metadata.get("shape")
-
-        if shape is not None and len(shape) == 5 and shape[1] > 1 and shape[2] > 1:
-            # metadata indicates 5D TZCYX with Z > 1 and C > 1
-            n_frames, n_planes, n_channels = shape[0], shape[1], shape[2]
-            # TODO: multi-file interleaved not yet supported, uses first file only
-            self._init_interleaved(file_list[0], n_frames, n_planes, n_channels)
-        elif shape is not None and len(shape) == 4 and shape[1] > 1:
-            # metadata indicates 4D TZYX with Z > 1
-            n_frames, n_planes = shape[0], shape[1]
-            # TODO: multi-file interleaved not yet supported, uses first file only
-            self._init_interleaved(file_list[0], n_frames, n_planes)
-        else:
-            # STEP 3: fall back to file structure heuristics
-            self._init_from_file_structure(file_list)
+        # STEP 2: a single file carrying a hyperstack layout reads as one
+        # interleaved file; multi-file / plane-per-file inputs fall to the
+        # structure heuristics. ImageJ counts win over a legacy TZCYX shape.
+        if len(file_list) == 1:
+            layout = _imagej_layout(self._metadata, file_list[0]) or _shape_layout(
+                self._metadata
+            )
+            if layout:
+                self._init_interleaved(file_list[0], *layout)
+                return
+        self._init_from_file_structure(file_list)
 
 
     def _init_volume_from_groups(self, plane_groups: list[list[Path]]):
@@ -591,72 +625,17 @@ class TiffArray(TiffReaderMixin, ReductionMixin, Shape5DMixin):
         self.num_rois = 1
 
     def _init_from_file_structure(self, files: list[Path]):
-        """fall back to determining structure from file organization.
+        """Route plane-per-file volumes vs. single/multi-file timeseries.
 
-        used when metadata doesn't contain shape info. checks:
-        1. plane number patterns in filenames
-        2. imagej tags for frames/slices
-        3. defaults to single-plane timeseries
+        Single ImageJ hyperstacks are handled earlier in ``__init__``; this is
+        the fallback for plane-numbered file sets and plain (non-hyperstack)
+        single or multi-file inputs.
         """
-        # check for plane number patterns in filenames
-        plane_groups = {}
-        for p in files:
-            pnum = _extract_tiff_plane_number(p.name)
-            if pnum is not None:
-                plane_groups.setdefault(pnum, []).append(p)
-
+        plane_groups = _group_plane_files(files)
         if len(plane_groups) > 1:
-            # multiple planes from filenames
-            sorted_pnums = sorted(plane_groups.keys())
-            plane_files_list = [sorted(plane_groups[pnum]) for pnum in sorted_pnums]
-            self._init_volume_from_groups(plane_files_list)
-        elif len(files) == 1:
-            # single file - check imagej tags as last resort
-            ij_info = self._check_imagej_tags(files[0])
-            if ij_info is not None:
-                n_frames, n_planes, n_channels = ij_info
-                self._init_interleaved(files[0], n_frames, n_planes, n_channels)
-            else:
-                # truly single plane timeseries
-                self._init_single_plane(files)
+            self._init_volume_from_groups(plane_groups)
         else:
-            # multiple files, no plane numbers - treat as time series
             self._init_single_plane(files)
-
-    def _check_imagej_tags(self, path: Path) -> tuple[int, int, int] | None:
-        """check imagej tags for frames/slices/channels. last resort fallback."""
-        try:
-            with TiffFile(path) as tf:
-                if not tf.is_imagej:
-                    return None
-                ij_meta = tf.imagej_metadata or {}
-                n_planes = ij_meta.get("slices", 1)
-                n_channels = ij_meta.get("channels", 1)
-                if n_planes <= 1:
-                    return None
-
-                # try to get shape from our JSON metadata in Info field
-                n_frames = None
-                try:
-                    info_str = ij_meta.get("Info", "")
-                    if info_str:
-                        meta = json.loads(info_str)
-                        if "shape" in meta and len(meta["shape"]) == 5:
-                            n_frames = meta["shape"][0]
-                            n_planes = meta["shape"][1]
-                            n_channels = meta["shape"][2]
-                        elif "shape" in meta and len(meta["shape"]) == 4:
-                            n_frames = meta["shape"][0]
-                            n_planes = meta["shape"][1]
-                except Exception:
-                    pass
-
-                if n_frames is None:
-                    n_frames = ij_meta.get("frames", 1)
-
-                return (n_frames, n_planes, n_channels)
-        except Exception:
-            return None
 
     def _init_interleaved(self, path: Path, n_frames: int, n_planes: int, n_channels: int = 1):
         """initialize as interleaved TZCYX from single file."""

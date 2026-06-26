@@ -26,6 +26,7 @@ __all__ = [
     "get_metadata",
     "get_metadata_batch",
     "get_metadata_single",
+    "imagej_hyperstack_counts",
     # file I/O functions
     "is_raw_scanimage",
     "query_tiff_pages",
@@ -257,6 +258,12 @@ def _read_ij_tag_50839(tiff_file) -> dict | None:
     return None
 
 
+def imagej_hyperstack_counts(tiff_file) -> tuple[int, int, int]:
+    """(frames, slices, channels) from ImageJ metadata, each defaulting to 1."""
+    ij = tiff_file.imagej_metadata or {}
+    return tuple(int(ij.get(k, 1) or 1) for k in ("frames", "slices", "channels"))
+
+
 def _imagej_to_metadata(tiff_file) -> dict:
     """Deposit ImageJ/Fiji hyperstack source tags for canonical resolution.
 
@@ -268,12 +275,9 @@ def _imagej_to_metadata(tiff_file) -> dict:
     """
     ij = dict(tiff_file.imagej_metadata or {})
     page0 = tiff_file.pages.first
+    frames, slices, channels = imagej_hyperstack_counts(tiff_file)
 
-    md: dict = {
-        "frames": int(ij.get("frames", 1) or 1),
-        "slices": int(ij.get("slices", 1) or 1),
-        "channels": int(ij.get("channels", 1) or 1),
-    }
+    md: dict = {"frames": frames, "slices": slices, "channels": channels}
     if page0 is not None:
         md["Ly"] = int(page0.shape[-2])
         md["Lx"] = int(page0.shape[-1])
@@ -372,7 +376,12 @@ def get_metadata_single(file: Path):
         if getattr(tiff_file, "is_imagej", False):
             meta = _imagej_to_metadata(tiff_file)
             if isinstance(tag_meta, dict):
+                # Info JSON supplements, but the ImageJ page-layout counts
+                # (written from the actual array shape) stay authoritative — a
+                # stale source `channels`/`slices` must not redefine the layout.
+                layout = {k: meta[k] for k in ("frames", "slices", "channels")}
                 meta.update(tag_meta)
+                meta.update(layout)
             return meta
 
         if isinstance(tag_meta, dict):
