@@ -1,7 +1,7 @@
 # HPC pipeline runner
 
-Submit the `lbm_suite2p_python` pipeline to SLURM from a TOML config — no shell
-scripts to edit. Backed by [submitit](https://github.com/facebookincubator/submitit).
+Submit the `lbm_suite2p_python` pipeline to SLURM from a TOML config. Backed by
+[submitit](https://github.com/facebookincubator/submitit).
 
 ## Install
 
@@ -18,8 +18,8 @@ mbo hpc check hpc.toml               # does the request fit the data + partition
 mbo hpc run hpc.toml --dry-run       # preview the jobs, submit nothing
 mbo hpc run hpc.toml                 # single GPU job, all planes
 mbo hpc run hpc.toml --mode array    # one array task per plane shard + dependent merge
-mbo hpc run hpc.toml --local         # run inline on this machine (no SLURM)
-mbo hpc status <output_dir>          # per-stage timings; no arg -> squeue
+mbo hpc run hpc.toml --local         # run inline on this machine, off the scheduler
+mbo hpc status <output_dir>          # per-stage timings; no arg -> last run
 ```
 
 `mbo hpc info` shows whether `--mode array` can spread (NODES > 1) and how much

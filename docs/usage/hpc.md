@@ -2,7 +2,7 @@
 
 # HPC / SLURM
 
-Run the LBM-Suite2p pipeline on a SLURM cluster (or locally) from a TOML config. Built on [submitit](https://github.com/facebookincubator/submitit); no `.sh` editing, no environment variables.
+Run the LBM-Suite2p pipeline on a SLURM cluster (or locally) from a TOML config. Built on [submitit](https://github.com/facebookincubator/submitit).
 
 | Command | Description |
 |---------|-------------|
@@ -65,14 +65,12 @@ mbo hpc run hpc.toml --dry-run        # print the job layout, submit nothing
 |------|--------------|----------|
 | `single` (default) | One GPU job over all planes (F packed per GPU), volumetric merge inline | The dataset fits one job's wall-time limit |
 | `array` | One array task per F-plane shard, then a dependent aggregate that merges the volume | Spreading shards across **multiple** nodes cuts wall time |
-| `local` | Runs the compute inline in this process; no SLURM, no submitit | Testing, or a workstation with a GPU |
+| `local` | Runs the compute inline in this process, off the scheduler | Testing, or a workstation with a GPU |
 
-**`--mode array` only helps across multiple nodes.** On a single-node partition all tasks pile onto one node, where `cpus_per_task × tasks` must fit the node's CPUs and they share its GPUs — no faster than `single`. Use `mbo hpc info` to see a partition's `NODES` count, and `mbo hpc check --mode array` to catch the single-node case before submitting.
-
-Concurrency is scheduler-managed: array tasks run under SLURM (capped by `array_parallelism`), each in its own cgroup; within a job the worker pool is bounded to the granted CPUs. There is no manual backgrounding to oversubscribe.
+**`--mode array` only helps across multiple nodes.** On a single-node partition all tasks pile onto one node, where `cpus_per_task × tasks` must fit the node's CPUs and they share its GPUs — the same wall time as `single`. Use `mbo hpc info` to see a partition's `NODES` count, and `mbo hpc check --mode array` to catch the single-node case before submitting.
 
 <details>
-<summary><b>run overrides (no need to edit the config)</b></summary>
+<summary><b>run overrides (set config fields on the command line)</b></summary>
 
 | Option | Description |
 |--------|-------------|
@@ -89,9 +87,10 @@ Concurrency is scheduler-managed: array tasks run under SLURM (capped by `array_
 ```bash
 mbo hpc status 5162141                # job state, exit code, failure diagnosis
 mbo hpc status /data/results/2025_..  # timings.json summary for an output dir
-mbo hpc status                        # squeue -u $USER
+mbo hpc status                        # the last run you launched
+mbo hpc watch                         # follow the last run's logs
 mbo hpc watch 5162141                 # follow logs by job id (shows state first)
-mbo hpc watch hpc.toml -o             # follow the newest run's .out instead of .err
+mbo hpc watch hpc.toml -o             # follow a run's .out instead of .err
 ```
 
 While `watch` follows a terminal: `o`/`e` switch out/err, `n`/`p` switch task logs, `q` quits.
