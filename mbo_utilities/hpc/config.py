@@ -64,6 +64,8 @@ class PipelineConfig:
     threads_per_worker: int = 0
     node_local: bool = True
     gpu: int = -1
+    stream: bool = False
+    stage_input: bool = False
 
 
 # [parameters] keys routed to lbm pipeline() top-level kwargs; everything else
@@ -95,13 +97,18 @@ DEFAULT_PIPELINE_PARAMS: dict = {
 
 # inline comments for the keys shown in the generated template.
 PARAM_HELP: dict = {
-    "algorithm": "detection: cellpose | sourcery | sparsery",
-    "img": "cellpose image: max_proj | meanImg | 'max_proj / meanImg'",
-    "do_regmetrics": "registration PCA metrics, computationally intensive",
-    "keep_reg": "keep registered data.bin (false will delete after processing)",
-    "keep_raw": "keep raw pre-registration data_raw.bin",
-    "fix_phase": "bidirectional scan-phase correction",
-    "use_fft": "FFT phase correction (vs integer)",
+    "algorithm": "ROI detection: cellpose (anatomical, GPU; recommended) | sparsery | sourcery",
+    "img": "image cellpose segments: max_proj (recommended) | meanImg | 'max_proj / meanImg'",
+    "diameter": "expected cell diameter in PIXELS for cellpose; 0 = auto-estimate. tune to your cells",
+    "cellprob_threshold": "cellpose: lower keeps more/smaller ROIs (~ -6..6); -4 is permissive",
+    "flow_threshold": "cellpose shape-quality cutoff; 0 = keep all, raise to drop irregular masks",
+    "do_registration": "1 = motion-correct (recommended) | 0 = skip registration",
+    "two_step_registration": "refine reference + re-register; 0 = off (slow, rarely needed; NOT supported with stream)",
+    "do_regmetrics": "registration-quality PCA metrics; false = off (computationally expensive)",
+    "keep_reg": "keep registered data.bin after the run; false deletes it (saves disk)",
+    "keep_raw": "keep raw pre-registration data_raw.bin; false deletes it",
+    "fix_phase": "bidirectional scan-phase correction (on for raw ScanImage)",
+    "use_fft": "subpixel (FFT) phase shift vs integer-pixel",
 }
 
 # keys written into the generated [parameters] block. The rest of DEFAULT_OPS /
@@ -153,27 +160,31 @@ def split_parameters(params: dict) -> tuple[dict, dict]:
 # Comment shown next to each key in the generated template.
 HELP: dict = {
     "io": {
-        "input": "directory of ScanImage TIFFs",
-        "output": "WRITABLE results root; final folder is <output>/<date>_<name>",
-        "name": "label for the dated output subfolder",
-        "dated_subfolder": "false to write straight into <output>",
+        "input": "raw ScanImage TIFF dir (or assembled .zarr/.tiff). REQUIRED",
+        "output": "writable results root - use scratch, NOT home. final = <output>/<date>_<name>",
+        "name": "label for the output subfolder",
+        "dated_subfolder": "true: <output>/<YYYY_MM_DD>_<name>; false: write straight into <output>",
     },
     "slurm": {
-        "partition": "scheduler partition (sinfo -s)",
-        "gres": "GPUs per job, e.g. gpu:1 or gpu:a100:1 (sinfo -o '%P %G')",
-        "cpus_per_task": "CPUs per job; workers derive from this and F",
-        "mem_gb": "memory per job in GB",
-        "time": "wall-time limit HH:MM:SS or D-HH:MM:SS",
-        "exclusive": "reserve the whole node (uniform timing)",
-        "array_parallelism": "max concurrent array tasks (0 = scheduler default)",
-        "account": "SLURM account (blank = default)",
-        "qos": "SLURM QOS (blank = default)",
+        "partition": "partition to submit to; list options with `mbo hpc info`",
+        "gres": "GPU request; one job = one GPU. e.g. gpu:a100:1 or gpu:1",
+        "cpus_per_task": "CPUs per job (workers share these); 16 is a sane start",
+        "mem_gb": "RAM per job (GB). must hold planes_per_gpu movies at once or it OOMs; 128 typical",
+        "time": "wall-clock cap HH:MM:SS - job is KILLED at the limit, so be generous",
+        "exclusive": "reserve the whole node: steadier timing, wastes idle cores. false unless benchmarking",
+        "array_parallelism": "--mode array only: max tasks running at once (0 = no cap)",
+        "account": "SLURM account; blank = your default (set only if jobs are rejected)",
+        "qos": "SLURM QOS; blank = your default",
     },
     "pipeline": {
-        "planes_per_gpu": "pack factor F: most planes that fit one GPU before OOM",
-        "threads_per_worker": "BLAS/OMP threads per worker (0 = cpus // workers)",
-        "node_local": "compute on node-local NVMe, copy results back",
-        "gpu": "local-run CUDA device index (nvidia-smi order); -1 = auto. ignored under SLURM",
+        "planes_per_gpu": "F: planes packed on one GPU. peak RAM ~= F x per-plane movie; start 4, lower if OOM",
+        "threads_per_worker": "BLAS/OMP threads per worker. 0 = auto (cpus_per_task // workers); leave 0",
+        "node_local": "compute on the node's fast local disk, copy results back. keep true on a cluster",
+        "gpu": "ONLY for --local: GPU index (nvidia-smi order), -1 = auto. ignored under SLURM",
+        "stream": "skip data_raw.bin/data.bin; recompute registered frames from saved shifts. "
+                  "saves disk but re-reads raw ~3x (usually SLOWER for raw TIFFs). false = normal",
+        "stage_input": "stream only: copy raw to node-local /tmp first, then stream (benchmark knob). "
+                       "false = read the input in place",
     },
 }
 
@@ -305,9 +316,12 @@ def render_template(input_path: str = "", output_path: str = "") -> str:
         defaults.io.output = str(output_path)
 
     lines = [
-        "# mbo hpc config",
-        "# edit, then submit with:  mbo hpc run <this-file>",
-        "# preview without submitting:  mbo hpc run <this-file> --dry-run",
+        "# mbo hpc config - Suite2p pipeline on SLURM (or --local).",
+        "#   edit below, then:    mbo hpc run <this-file>",
+        "#   preview (no submit): mbo hpc run <this-file> --dry-run",
+        "#   size the request:    mbo hpc info   |   mbo hpc check <this-file>",
+        "# sections: [io]=paths  [slurm]=scheduler  [pipeline]=runner/GPU  "
+        "[parameters]=suite2p + detection",
         "",
     ]
     for name, klass in _SECTIONS.items():

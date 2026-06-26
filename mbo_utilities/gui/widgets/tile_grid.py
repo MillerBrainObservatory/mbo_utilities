@@ -810,7 +810,7 @@ class TileGridViewer(Widget):
                 self._layout.pop((self._c_index, self._zblock), None)
                 self._pick = None
             if imgui.is_item_hovered():
-                imgui.set_tooltip("restore tile positions (this camera)")
+                imgui.set_tooltip("restore tile positions (this view)")
 
         def _reset_flips():
             if imgui.small_button("Reset flips"):
@@ -843,12 +843,28 @@ class TileGridViewer(Widget):
         from mbo_utilities.arrays.isoview.array import camera_from_view_label
         return camera_from_view_label(name)
 
+    def _fused_view(self, c: int):
+        """``"VW00"`` / ``"VW90"`` for a fused-pair channel (e.g.
+        ``VW90_VW270_CH00_fused``), else ``None``."""
+        try:
+            name = str(self._channel_names[c])
+        except (IndexError, TypeError):
+            return None
+        if not name.endswith("_fused"):
+            return None
+        if name.startswith("VW00"):
+            return "VW00"
+        if name.startswith("VW90"):
+            return "VW90"
+        return None
+
     def _camera_is_mirrored(self, c: int) -> bool:
-        """Columns mirrored left-right for this camera (verified per-camera
-        convention for the 4-camera IsoView). VW00 mirrors the opposing
-        camera CM01; VW90 mirrors CM02 (not CM03). Non-single-camera views
-        (fused) aren't mirrored.
-        """
+        """The single (un-fused) opposing-side views are column-mirrored in the
+        display — they image the sample from the opposite side. FUSED views
+        already combined the opposing pair, so they are NOT mirrored (mirroring a
+        fused view double-flips it vs the export)."""
+        if self._fused_view(c) is not None:
+            return False
         return self._camera_number(c) in (1, 2)
 
     def _camera_default_hflip(self, c: int) -> bool:
@@ -875,18 +891,87 @@ class TileGridViewer(Widget):
         if rot:
             for ti in self._tile_xyz:
                 self._tile_rot[(c, ti)] = rot
-        if not self._camera_default_hflip(c):
+        # The single VW90 / VW270 views and the fused VW90 view get a default
+        # H-flip to mirror them onto VW00 so the tiles stitch; VW00 gets none.
+        is_fused_vw90 = self._fused_view(c) == "VW90"
+        if not (self._camera_default_hflip(c) or is_fused_vw90):
             return
-        for ti, xyz in self._tile_xyz.items():
-            if xyz[1] == 0:  # tile_y == 0
-                self._tile_flips.setdefault((c, ti), set()).add("X")
+        if self._is_rotated and is_fused_vw90:
+            # fused VW90 (rotated): flip EVERY tile (verified by the v13 export).
+            # Fused views are NOT column-mirrored, so the display matches.
+            tiles = list(self._tile_xyz)
+        else:
+            # single opposing view, or Normal: flip only the parity column (the
+            # display column-mirror puts those tiles where they belong).
+            #   single VW90/VW270 views (columns mirrored): tile_y == 0
+            #   fused VW90_VW270 view (not mirrored, opposite parity): tile_y == 1
+            flip_col = 0 if self._camera_default_hflip(c) else 1
+            tiles = [ti for ti, xyz in self._tile_xyz.items() if xyz[1] == flip_col]
+        for ti in tiles:
+            self._tile_flips.setdefault((c, ti), set()).add("X")
+
+    @staticmethod
+    def _export_view_label(name) -> str | None:
+        """VW label for a channel name, matching the BigStitcher export's
+        per-setup ``VW{angle}`` label (so per-tile orientation keys line up)."""
+        s = str(name)
+        if "fused" in s:
+            return "VW00" if "VW00" in s else ("VW90" if "VW90" in s else None)
+        from mbo_utilities.arrays.isoview.array import (
+            camera_from_view_label,
+            camera_view_label,
+        )
+
+        cam = camera_from_view_label(s)
+        return camera_view_label(cam) if cam is not None else None
+
+    def export_tile_orientations(self, arr) -> dict:
+        """``{"tx_ty_tz": {view_label: [rot, fx, fy]}}`` per-tile in-plane
+        orientation for the BigStitcher export (only non-identity entries).
+
+        ``rot`` = CCW 90deg steps, ``fx``/``fy`` = lateral mirrors — the same
+        ops this widget applies to each tile's MIP, so the exported tiles match
+        what is shown here. The export bakes them into the per-tile pose as an
+        in-plane (rotation axis = world Z) transform.
+        """
+        try:
+            self._ensure_grid(arr)
+        except Exception:
+            pass
+        names = list(getattr(arr, "channel_names", []) or [])
+        # seed EVERY channel's defaults, not just the currently-viewed one —
+        # otherwise views the user never switched to (e.g. VW90) export as native
+        # and the tiles mis-stitch.
+        for c in range(len(names)):
+            try:
+                self._seed_camera_defaults(c)
+            except Exception:
+                pass
+        out: dict = {}
+        for (c, ti) in set(self._tile_rot) | set(self._tile_flips):
+            rot = self._tile_rot.get((c, ti), 0) % 4
+            tf = self._tile_flips.get((c, ti), set())
+            fx, fy = "X" in tf, "Y" in tf
+            if not rot and not fx and not fy:
+                continue
+            xyz = self._tile_xyz.get(ti)
+            if xyz is None or not (0 <= c < len(names)):
+                continue
+            vlabel = self._export_view_label(names[c])
+            if vlabel is None:
+                continue
+            gridkey = f"{int(xyz[0])}_{int(xyz[1])}_{int(xyz[2])}"
+            out.setdefault(gridkey, {})[vlabel] = [int(rot), int(fx), int(fy)]
+        return out
 
     def _get_layout(self, g) -> dict:
-        """Editable ``{(ri, ci): ti}`` for the current (camera, z-block).
+        """Editable ``{(ri, ci): ti}`` for the current (camera, z-block), from
+        the stage-derived placement. Keyed per camera so each camera keeps its
+        own arrangement and manual moves don't leak across cameras.
 
-        Lazily seeded from the stage-derived placement, mirrored left-right for
-        odd (opposing) cameras. Keyed per camera so each camera keeps its own
-        arrangement and manual moves don't leak across cameras.
+        The single (un-fused) opposing-side views are column-mirrored; fused
+        views are NOT (see ``_camera_is_mirrored``), so a fused view renders with
+        only its per-tile rot/flips, WYSIWYG with the export.
         """
         c = self._c_index
         z = self._zblock

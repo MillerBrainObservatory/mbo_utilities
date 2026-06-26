@@ -379,15 +379,6 @@ def _entry_for(mbo_field: str) -> tuple[dict, tuple, int | None] | None:
     return None
 
 
-def get_param_info(mbo_field: str) -> dict | None:
-    """Return the upstream parameter spec for a mbo field, or None if mbo-only."""
-    entry = _entry_for(mbo_field)
-    if entry is None:
-        return None
-    root, path, _ = entry
-    return _resolve(root, path)
-
-
 _MBO_DEFAULTS: dict[str, Any] | None = None
 
 
@@ -524,45 +515,6 @@ def is_default(mbo_field: str, value: Any) -> bool:
         except Exception:
             return False
     return False
-
-
-def _format_type(t: Any) -> str:
-    if t is None:
-        return "?"
-    return getattr(t, "__name__", str(t))
-
-
-def format_tooltip(mbo_field: str, extra: str = "") -> str:
-    """Build a tooltip string from upstream parameter metadata.
-
-    Layout:
-        <description>
-
-        Default: <default>
-        Type:    <type>
-        Range:   [<min>, <max>]      (omitted if both are None)
-        <extra>                      (optional caller-provided notes)
-    """
-    info = get_param_info(mbo_field)
-    if info is None:
-        # mbo-only field — caller can still pass `extra` and it's all we have
-        return extra
-    parts: list[str] = []
-    desc = info.get("description")
-    if desc:
-        parts.append(desc.strip())
-    # mbo dataclass default — the value the GUI starts from (matches the
-    # modified-box / tint / Reset baseline), not necessarily suite2p's.
-    default = get_default(mbo_field)
-    parts.append(f"Default: {default!r}")
-    parts.append(f"Type:    {_format_type(info.get('type'))}")
-    mn, mx = info.get("min"), info.get("max")
-    if mn is not None or mx is not None:
-        parts.append(f"Range:   [{mn}, {mx}]")
-    if extra:
-        parts.append("")
-        parts.append(extra.strip())
-    return "\n".join(parts)
 
 
 def all_mapped_fields() -> list[str]:

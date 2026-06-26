@@ -91,6 +91,9 @@ def _print_plan(cfg: HpcConfig, mode: str, output_dir: Path) -> None:
     print(f"mode:    {mode}")
     print(f"input:   {cfg.io.input}")
     print(f"output:  {output_dir}")
+    if cfg.pipeline.stream:
+        src = "node-local /tmp (staged copy)" if cfg.pipeline.stage_input else "input in place"
+        print(f"stream:  on  (no data_raw.bin/data.bin; reads raw from {src})")
     ok, detail = _pipe.probe_writable(output_dir)
     print(f"writable: {detail}" if ok else
           f"WARNING: output not writable ({detail}); set [io] output to a writable "
@@ -135,7 +138,10 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
     _pipe.assert_output_writable(output_dir)
     cfg_dict = cfg.to_dict()
 
+    from mbo_utilities.hpc.history import record_run
+
     if mode == "local":
+        record_run(mode="local", output_dir=str(output_dir))
         result = _pipe.run_job(cfg, output_dir, role="single")
         return {"mode": "local", "output_dir": result}
 
@@ -147,6 +153,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         print(f"submitted single job {job.job_id} -> {output_dir}")
         print(f"logs:   {log_folder}")
         _next_steps(job.job_id)
+        record_run(mode="single", job_id=job.job_id, output_dir=str(output_dir))
         return {"mode": "single", "job_id": job.job_id, "output_dir": str(output_dir)}
 
     if mode == "array":
@@ -172,6 +179,7 @@ def submit(cfg: HpcConfig, mode: str = "single", dry_run: bool = False):
         print(f"submitted aggregate job {agg_job.job_id} (after {array_id} succeeds)")
         print(f"logs:   {log_folder}")
         _next_steps(array_id)
+        record_run(mode="array", job_id=array_id, output_dir=str(output_dir))
         return {
             "mode": "array",
             "array_id": array_id,

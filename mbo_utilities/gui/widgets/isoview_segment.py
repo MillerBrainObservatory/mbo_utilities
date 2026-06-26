@@ -58,24 +58,19 @@ def _camera_view_map(arr: Any) -> dict[int, int]:
     return dict(_DEFAULT_CAMERA_VIEW_MAP)
 
 
-def _channel_to_view(arr: Any) -> dict[int, int]:
-    cv = _camera_view_map(arr)
-    out: dict[int, int] = {}
-    for ci, vk in enumerate(getattr(arr, "views", []) or []):
-        if isinstance(vk, tuple) and len(vk) == 3:
-            out[ci] = int(vk[2])
-        elif isinstance(vk, tuple) and len(vk) >= 1:
-            out[ci] = cv.get(int(vk[0]), int(vk[0]))
-        else:
-            out[ci] = cv.get(int(vk), int(vk))
-    return out
-
-
 def _view_int_from_label(label: str) -> int | None:
+    """Camera index for a projections-dict label.
+
+    ``VW{angle}`` maps the view angle back to its camera (VW00->0,
+    VW180->1, VW90->2, VW270->3); ``CM##`` and bare ints are the camera
+    index directly.
+    """
     if not isinstance(label, str):
         return None
     if label.startswith("VW") and label[2:].isdigit():
-        return int(label[2:])
+        from mbo_utilities.arrays.isoview.array import camera_from_view_label
+        cam = camera_from_view_label(label)
+        return cam if cam is not None else int(label[2:])
     if label.startswith("CM") and label[2:].isdigit():
         return int(label[2:])
     try:
@@ -501,14 +496,6 @@ def open_window(parent: Any) -> None:
     parent._show_iso_seg_window = True
 
 
-def close_window(parent: Any) -> None:
-    _ensure_state(parent)
-    parent._iso_seg_window_open = False
-    _destroy_gpu(parent)
-    parent._iso_seg_cache_key = None
-    parent._iso_seg_proj_index = {}
-
-
 def _restore_snapshot(parent: Any) -> None:
     snap = getattr(parent, "_iso_seg_snapshot", None)
     if not snap:
@@ -774,13 +761,9 @@ def _draw_view_previews(parent: Any, iso: Any) -> None:
 
 
 def _draw_one_view(parent: Any, iso: Any, view: int, cell_w: float, raw_mode: bool = False) -> None:
-    if raw_mode:
-        from mbo_utilities.arrays.isoview.array import camera_view_label
-        color = _CAMERA_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
-        label_text = camera_view_label(view)
-    else:
-        color = _VIEW_COLORS.get(view, (0.6, 0.8, 1.0, 1.0))
-        label_text = f"VW{view:02d}"
+    from mbo_utilities.arrays.isoview.array import camera_view_label
+    color = _CAMERA_COLORS.get(view, _VIEW_COLORS.get(view, (0.6, 0.8, 1.0, 1.0)))
+    label_text = camera_view_label(view)
     imgui.text_colored(imgui.ImVec4(*color), label_text)
 
     tp = parent._iso_seg_current_tp

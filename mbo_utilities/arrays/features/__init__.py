@@ -7,8 +7,7 @@ that manages its own state and events.
 
 Available features:
 - DimensionSpecs: dimension structure (names, roles, scales) + OME axes
-- ROIFeature / RoiFeatureMixin: multi-ROI handling
-- CompressionFeature: compression settings
+- RoiFeatureMixin: multi-ROI handling
 - PhaseCorrectionFeature: bidirectional scan correction
 """
 
@@ -21,11 +20,6 @@ from mbo_utilities.arrays.features._chunks import (
     CHUNKS_4D,
     estimate_chunk_memory,
     normalize_chunks,
-)
-from mbo_utilities.arrays.features._compression import (
-    Codec,
-    CompressionFeature,
-    CompressionSettings,
 )
 from mbo_utilities.arrays.features._dim_labels import (
     DEFAULT_DIMS,
@@ -62,7 +56,7 @@ from mbo_utilities.arrays.features._phase_correction import (
     PhaseCorrectionMixin,
     PhaseCorrMethod,
 )
-from mbo_utilities.arrays.features._roi import ROIFeature, RoiFeatureMixin
+from mbo_utilities.arrays.features._roi import RoiFeatureMixin
 from mbo_utilities.arrays.features._segmentation import (
     masks_to_stat,
     stat_to_masks,
@@ -98,11 +92,8 @@ from mbo_utilities.arrays.features._pyramid import (
     DownsampleMethod,
     PyramidConfig,
     PyramidLevel,
-    build_multiscales_metadata,
-    build_napari_scale_attrs,
     compute_pyramid_shapes,
     downsample_block,
-    generate_pyramid,
 )
 
 __all__ = [
@@ -118,10 +109,6 @@ __all__ = [
     # base
     "ArrayFeature",
     "ArrayFeatureEvent",
-    # compression
-    "Codec",
-    "CompressionFeature",
-    "CompressionSettings",
     # dim tags
     "DimensionTag",
     "OutputFilename",
@@ -155,7 +142,6 @@ __all__ = [
     "default_dim_role",
     "subsample_indices",
     # roi
-    "ROIFeature",
     "RoiFeatureMixin",
     "estimate_chunk_memory",
     "find_slider_name",
@@ -181,9 +167,6 @@ __all__ = [
     "DownsampleMethod",
     "PyramidConfig",
     "PyramidLevel",
-    "build_multiscales_metadata",
-    "build_napari_scale_attrs",
     "compute_pyramid_shapes",
     "downsample_block",
-    "generate_pyramid",
 ]

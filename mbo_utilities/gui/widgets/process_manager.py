@@ -187,32 +187,6 @@ class ProcessInfo:
             logger.warning(f"Failed to kill process {self.pid}: {e}")
             return False
 
-    def get_last_log_line(self) -> str | None:
-        """Read the last non-empty line from the log file."""
-        if not self.output_path:
-            return None
-        p = Path(self.output_path)
-        if not p.is_file():
-            return None
-        try:
-            with open(p, "rb") as f:
-                f.seek(0, os.SEEK_END)
-                pos = f.tell()
-                if pos == 0:
-                    return None
-                # Read backwards to find a newline
-                buffer = 4096
-                data = b""
-                while pos > 0 and (len(data) < 2 or b"\n" not in data[1:]):
-                    read_size = min(pos, buffer)
-                    pos -= read_size
-                    f.seek(pos)
-                    data = f.read(read_size) + data
-                lines = data.decode("utf-8", errors="replace").splitlines()
-                return lines[-1] if lines else None
-        except Exception:
-            return None
-
     def tail_log(self, n: int = 50) -> list[str]:
         """Read the last n lines from the log file."""
         if not self.output_path:
@@ -511,10 +485,6 @@ class ProcessManager:
             if self.kill(pid):
                 killed += 1
         return killed
-
-    def has_running(self) -> bool:
-        """Check if any tracked processes are still running."""
-        return len(self.get_running()) > 0
 
 
 def _env_int(name: str, default: int) -> int:

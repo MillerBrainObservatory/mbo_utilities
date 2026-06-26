@@ -1,22 +1,17 @@
-"""Per-camera alignment preview for the BigStitcher export.
+"""Align views widget for IsoView raw / corrected / fused stacks.
 
-The BigStitcher export sends every camera reoriented onto CM00 (the
-reference). This widget previews that mapping: CM00 is shown by default and
-a selectable second camera (CM01/CM02/CM03) is rotated / flipped with the
-same Rotate X/Y/Z + Flip X/Y/Z toolbar as the Tile Grid, made isotropic, and
-overlaid on CM00 so you can dial in the orientation that registers it onto
-CM00 (e.g. rotate CM02 90 about X, flip Z or not).
+Overlays any two views in the VW00 reference frame so you can verify and tune
+the orientation that maps a target view onto VW00 (the BigStitcher export
+reference). The reference view is oriented by its export default; the target
+view's rotations / flips are editable, seed from the same default, are made
+isotropic, and overlaid on the reference. Apply commits the target's
+orientation for the export to bake (see
+:mod:`mbo_utilities.gui._isoview_orient_state`).
 
-Preview only — nothing is saved. Each camera seeds from the export's default
-CM->CM00 alignment (``pipelines.isoview._CM_ALIGN_DEFAULT``), so the overlay
-opens at what the export would bake.
-
-Activates for raw / corrected IsoviewArrays carrying >=2 single-camera
-channels (CM##).
+Replaces the former View Align + Camera Align widgets.
 """
 from __future__ import annotations
 
-import re
 from collections import OrderedDict
 from typing import Any
 
@@ -28,6 +23,7 @@ from mbo_utilities.arrays.isoview.array import (
     camera_from_view_label,
     camera_view_label,
 )
+from mbo_utilities.gui import _isoview_orient_state as orient_state
 from mbo_utilities.gui._imgui_helpers import draw_toolbar_row
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui.widgets._orient import (
@@ -35,7 +31,6 @@ from mbo_utilities.gui.widgets._orient import (
     compose_R,
     draw_orient_row,
     orient_2d_plan,
-    ops_label,
     orientation_ops,
 )
 from mbo_utilities.gui.widgets.summary_image import (
@@ -48,7 +43,7 @@ from mbo_utilities.gui.widgets.summary_image import (
 _WHITE = imgui.ImVec4(0.85, 0.85, 0.85, 1.0)
 _THUMB_MAX = 256
 _AXES = ("xy", "xz", "yz")
-# 0 reference (CM00 alone), 1 target (the camera alone), 2 overlay (both)
+# 0 reference alone, 1 target alone, 2 overlay (default).
 _TOGGLE_LABELS = ("Reference", "Target", "Overlay")
 
 # pre-multiplier that picks which oriented axis is projected (down its Z):
@@ -89,14 +84,15 @@ def _resize_to(a: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
         return a[np.ix_(ys, xs)]
 
 
-def _seed_for_camera(cam: int, rotated: bool = False) -> dict:
-    """Editable rotations/flips seeded from the export's CM->CM00 default,
-    picking the Normal or Rotated table per the acquisition mounting."""
+def _seed_for_view(cam: int, rotated: bool = False) -> dict:
+    """Editable rotations/flips that map a view's camera onto VW00, from the
+    export's CM->CM00 default, picking the Normal or Rotated mounting table."""
     try:
         from mbo_utilities.gui.widgets.pipelines.isoview import (
             _CM_ALIGN_DEFAULT,
             _CM_ALIGN_DEFAULT_ROTATED,
         )
+
         table = _CM_ALIGN_DEFAULT_ROTATED if rotated else _CM_ALIGN_DEFAULT
         seed = table.get(cam)
     except Exception:
@@ -109,11 +105,11 @@ def _seed_for_camera(cam: int, rotated: bool = False) -> dict:
     }
 
 
-class IsoviewCameraAlign(Widget):
-    """Overlay a selectable camera (reoriented) onto CM00 to align them."""
+class IsoviewAlignViews(Widget):
+    """Overlay any reference + target view in the VW00 frame to align them."""
 
-    name = "Camera Align"
-    priority = 67  # right after Tile Grid (66)
+    name = "Align views"
+    priority = 64
 
     def __init__(self, parent: Any):
         super().__init__(parent)
@@ -121,14 +117,12 @@ class IsoviewCameraAlign(Widget):
         self._axis_idx = 0
         self._tile = 0
         self._toggle = 2  # 0 reference, 1 target, 2 overlay (default)
-        self._cam_idx = 0  # index into self._adj_cams
+        self._ref_idx = 0
+        self._target_idx = 1
         self._sig: str | None = None
-        self._ref_c: int = 0
-        self._ref_label: str = "VW00"
-        self._adj_cams: list[int] = []  # selectable camera ints (excludes ref)
-        self._cam_c: dict[int, int] = {}  # camera int -> C-axis index
-        self._orient: dict[int, dict] = {}  # camera int -> {rotations, flips}
-        self._is_rotated: bool = False  # acquisition camera_orientation
+        self._views_list: list[dict] = []  # {view_label, c, cam}, sorted by cam
+        self._orient: dict[str, dict] = {}  # view_label -> editable {rotations, flips}
+        self._is_rotated: bool = False
         self._projections: dict | None = None
         self._slots: list = []
         self._mip_cache: OrderedDict[tuple, dict] = OrderedDict()
@@ -140,28 +134,53 @@ class IsoviewCameraAlign(Widget):
         return cls._find(parent) is not None
 
     @staticmethod
-    def _cameras(arr) -> dict[int, int]:
-        """``{camera_int: C-axis index}`` for single-camera views (``VW{angle}``).
+    def _views(arr) -> list[dict]:
+        """Available views as ``{view_label, c, cam}``, sorted by camera.
 
-        First channel index wins per camera. Fused pairs (``..._fused``) are
-        skipped.
+        Raw / corrected: each single-camera channel (``VW{angle}``). Fused: the
+        ``VW00`` / ``VW90`` fused volumes. ``c`` is the C-axis index; ``cam`` is
+        the underlying camera int that keys the CM->VW00 alignment table.
         """
-        cams: dict[int, int] = {}
-        for c, name in enumerate(getattr(arr, "channel_names", []) or []):
-            if str(name).endswith("_fused"):
-                continue
-            cam = camera_from_view_label(name)
-            if cam is not None:
-                cams.setdefault(cam, c)
-        return cams
+        kind = str(getattr(arr, "kind", "") or "").lower()
+        names = list(getattr(arr, "channel_names", []) or [])
+        out: list[dict] = []
+        seen: set[str] = set()
+        if kind == "fused":
+            for c, nm in enumerate(names):
+                label = "VW00" if "VW00" in nm else ("VW90" if "VW90" in nm else None)
+                if label is None or label in seen:
+                    continue
+                cam = camera_from_view_label(label)
+                if cam is None:
+                    continue
+                seen.add(label)
+                out.append({"view_label": label, "c": c, "cam": cam})
+        else:
+            for c, nm in enumerate(names):
+                if str(nm).endswith("_fused"):
+                    continue
+                cam = camera_from_view_label(nm)
+                if cam is None:
+                    continue
+                label = camera_view_label(cam)
+                if label in seen:
+                    continue
+                seen.add(label)
+                out.append({"view_label": label, "c": c, "cam": cam})
+        out.sort(key=lambda v: v["cam"])
+        return out
 
     @classmethod
     def _find(cls, parent: Any):
         for raw in parent._get_data_arrays():
             arr = _unwrap(raw)
-            if str(getattr(arr, "kind", "") or "").lower() not in ("raw", "corrected"):
+            if str(getattr(arr, "kind", "") or "").lower() not in (
+                "raw",
+                "corrected",
+                "fused",
+            ):
                 continue
-            if len(cls._cameras(arr)) >= 2:
+            if len(cls._views(arr)) >= 2:
                 return arr
         return None
 
@@ -176,26 +195,29 @@ class IsoviewCameraAlign(Widget):
 
     def _ensure(self, arr) -> bool:
         sig = f"{id(arr)}:{getattr(arr, 'scan_root', '')}"
-        if self._sig == sig and self._adj_cams:
+        if self._sig == sig and self._views_list:
             return True
         self._sig = sig
         self._reset_caches()
         self._orient = {}
-        self._is_rotated = str(
-            (getattr(arr, "metadata", {}) or {}).get("camera_orientation", "")
-        ).strip().lower() == "rotated"
-        cams = self._cameras(arr)
-        if len(cams) < 2:
-            self._adj_cams = []
+        self._is_rotated = (
+            str((getattr(arr, "metadata", {}) or {}).get("camera_orientation", ""))
+            .strip()
+            .lower()
+            == "rotated"
+        )
+        views = self._views(arr)
+        if len(views) < 2:
+            self._views_list = []
             return False
-        self._cam_c = cams
-        ref = 0 if 0 in cams else min(cams)
-        self._ref_c = cams[ref]
-        self._ref_label = camera_view_label(ref)
-        self._adj_cams = sorted(c for c in cams if c != ref)
-        self._cam_idx = min(self._cam_idx, len(self._adj_cams) - 1)
+        self._views_list = views
+        n = len(views)
+        self._ref_idx = next((i for i, v in enumerate(views) if v["cam"] == 0), 0)
+        self._target_idx = next((i for i in range(n) if i != self._ref_idx), 0)
         try:
-            self._projections = arr.projections() if hasattr(arr, "projections") else None
+            self._projections = (
+                arr.projections() if hasattr(arr, "projections") else None
+            )
         except Exception:
             self._projections = None
         slots = {k[2] for k in (self._projections or {}).get("files", {})}
@@ -204,12 +226,16 @@ class IsoviewCameraAlign(Widget):
         self._tile = min(self._tile, max(0, nt - 1))
         return True
 
-    def _cam_state(self, cam: int) -> dict:
-        st = self._orient.get(cam)
+    def _target_state(self, view_label: str, cam: int) -> dict:
+        st = self._orient.get(view_label)
         if st is None:
-            st = _seed_for_camera(cam, self._is_rotated)
-            self._orient[cam] = st
+            st = _seed_for_view(cam, self._is_rotated)
+            self._orient[view_label] = st
         return st
+
+    def _ref_ops(self, cam: int) -> list:
+        st = _seed_for_view(cam, self._is_rotated)
+        return orientation_ops(st["rotations"], st["flips"])
 
     def _slot_for_tile(self, arr):
         if self._slots:
@@ -225,8 +251,8 @@ class IsoviewCameraAlign(Widget):
         self._mip_cache.clear()
 
     def _mip_params(self, arr) -> tuple[int, int]:
-        """``(xy_stride, z_stride)`` so a decimated Z pixel spans about the
-        same physical distance as a decimated Y/X pixel (isotropic thumbs)."""
+        """``(xy_stride, z_stride)`` so a decimated Z pixel spans about the same
+        physical distance as a decimated Y/X pixel (isotropic thumbs)."""
         ny, nx = int(arr.shape[3]), int(arr.shape[4])
         s = max(1, -(-max(ny, nx) // _THUMB_MAX))  # ceil
         dxy = float(getattr(arr, "dx", 0.0) or 0.0)
@@ -234,21 +260,19 @@ class IsoviewCameraAlign(Widget):
         sz = max(1, int(round(s * dxy / dz))) if dxy > 0 and dz > 0 else 1
         return s, sz
 
-    def _load_mips(self, arr, cam_label: str, c: int, slot) -> dict | None:
-        """Three isotropic MIPs for one camera, keyed by ``(cam_label, slot)``.
+    def _load_mips(self, arr, view_label: str, c: int, slot) -> dict | None:
+        """Three isotropic MIPs for one view, keyed by ``(view_label, slot)``.
 
         Loads the pipeline's precomputed xy/xz/yz projection TIFs (fast),
-        falling back to reading + projecting the volume. The Z axis of the
-        xz/yz MIPs is strided to match the lateral pixel pitch so a camera
-        rotated into Z isn't squashed.
+        falling back to reading + projecting the volume.
         """
-        key = (id(arr), cam_label, slot)
+        key = (id(arr), view_label, slot)
         cached = self._mip_cache.get(key)
         if cached is not None:
             self._mip_cache.move_to_end(key)
             return cached
         s, sz = self._mip_params(arr)
-        mips = self._load_proj_mips(cam_label, slot, s, sz)
+        mips = self._load_proj_mips(view_label, slot, s, sz)
         if mips is None:
             mips = self._load_volume_mips(arr, c, s, sz)
         if mips is None:
@@ -258,13 +282,13 @@ class IsoviewCameraAlign(Widget):
             self._mip_cache.popitem(last=False)
         return mips
 
-    def _load_proj_mips(self, cam_label: str, slot, s: int, sz: int) -> dict | None:
+    def _load_proj_mips(self, view_label: str, slot, s: int, sz: int) -> dict | None:
         files = (self._projections or {}).get("files", {})
         if not files:
             return None
         mips: dict = {}
         for axis in _AXES:
-            p = files.get((axis, cam_label, slot))
+            p = files.get((axis, view_label, slot))
             if p is None:
                 return None
             try:
@@ -302,15 +326,17 @@ class IsoviewCameraAlign(Widget):
         span = max(hi - lo, 1e-9)
         return np.clip((a.astype(np.float32) - lo) / span, 0.0, 1.0)
 
-    def _composite(self, ref: np.ndarray, adj: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    def _composite(
+        self, ref: np.ndarray, adj: np.ndarray, lo: float, hi: float
+    ) -> np.ndarray:
         adj = _resize_to(adj, ref.shape)
         r = self._norm(ref, lo, hi)
         a = self._norm(adj, lo, hi)
-        if self._toggle == 0:        # reference only (gray)
+        if self._toggle == 0:  # reference only (gray)
             rgb = np.stack([r, r, r], axis=-1)
-        elif self._toggle == 1:      # target only (gray)
+        elif self._toggle == 1:  # target only (gray)
             rgb = np.stack([a, a, a], axis=-1)
-        else:                         # overlay: reference cyan, target red
+        else:  # overlay: reference cyan, target red
             rgb = np.stack([a, r, r], axis=-1)
         return np.ascontiguousarray((rgb * 255).astype(np.uint8))
 
@@ -336,84 +362,105 @@ class IsoviewCameraAlign(Widget):
         arr = self._active_array()
         if arr is None or not self._ensure(arr):
             return
-        draw_section_header("Camera Align")
+        draw_section_header("Align views")
         imgui.indent(8)
         try:
-            if imgui.button("Open##camalign_open"):
+            if imgui.button("Open##alignviews_open"):
                 self._popup_open = True
-            cam = self._adj_cams[self._cam_idx]
-            st = self._cam_state(cam)
-            label = ops_label(orientation_ops(st["rotations"], st["flips"]))
-            imgui.text_colored(_WHITE, f"{camera_view_label(cam)}: {label}")
+            imgui.text_colored(_WHITE, orient_state.summary(arr))
         finally:
             imgui.unindent(8)
         if self._popup_open:
             self._draw_popup(arr)
 
     def _draw_toolbar(self, arr) -> None:
-        cam_labels = [camera_view_label(c) for c in self._adj_cams]
+        labels = [v["view_label"] for v in self._views_list]
+        n = len(labels)
 
-        def _camera():
-            ch, v = imgui.combo("##camalign_cam", self._cam_idx, cam_labels)
+        def _ref():
+            ch, v = imgui.combo("##alignviews_ref", self._ref_idx, labels)
             if ch:
-                self._cam_idx = v
+                self._ref_idx = v
+                if self._target_idx == v:
+                    self._target_idx = next((i for i in range(n) if i != v), v)
+
+        def _target():
+            ch, v = imgui.combo("##alignviews_target", self._target_idx, labels)
+            if ch:
+                self._target_idx = v
+                if self._ref_idx == v:
+                    self._ref_idx = next((i for i in range(n) if i != v), v)
 
         def _axis():
-            ch, v = imgui.combo("##camalign_axis", self._axis_idx, list(_AXES))
+            ch, v = imgui.combo("##alignviews_axis", self._axis_idx, list(_AXES))
             if ch:
                 self._axis_idx = v
 
         def _show():
-            ch, v = imgui.combo("##camalign_show", self._toggle, list(_TOGGLE_LABELS))
+            ch, v = imgui.combo("##alignviews_show", self._toggle, list(_TOGGLE_LABELS))
             if ch:
                 self._toggle = v
 
-        items = [("Camera", 90.0, _camera), ("Axis", 90.0, _axis)]
+        items = [
+            ("Reference", 90.0, _ref),
+            ("Target", 90.0, _target),
+            ("Axis", 90.0, _axis),
+        ]
         nt = int(arr.shape[0])
         if nt > 1:
+
             def _tile():
-                ch, v = imgui.slider_int("##camalign_tile", self._tile, 0, nt - 1)
+                ch, v = imgui.slider_int("##alignviews_tile", self._tile, 0, nt - 1)
                 if ch:
                     self._tile = int(v)
+
             items.append(("Tile", 160.0, _tile))
         items.append(("Show", 120.0, _show))
         draw_toolbar_row(items)
-        imgui.text_colored(
-            _WHITE, f"overlay: {self._ref_label} (ref) = cyan, target = red"
-        )
+        ref_label = self._views_list[self._ref_idx]["view_label"]
+        imgui.text_colored(_WHITE, f"overlay: {ref_label} (ref) = cyan, target = red")
 
-    def _draw_overlay(self, arr, cam: int, cell: float) -> None:
+    def _draw_overlay(self, arr, cell: float) -> None:
         axis = _AXES[self._axis_idx]
         slot = self._slot_for_tile(arr)
-        adj_c = self._cam_c[cam]
-        adj_label = camera_view_label(cam)
-        st = self._cam_state(cam)
+        ref = self._views_list[self._ref_idx]
+        tgt = self._views_list[self._target_idx]
+        st = self._target_state(tgt["view_label"], tgt["cam"])
         rotations, flips = st["rotations"], st["flips"]
 
         imgui.text_colored(
-            _WHITE, f"{self._ref_label} (ref)  <-  {adj_label} (target)"
+            _WHITE, f"{ref['view_label']} (ref)  <-  {tgt['view_label']} (target)"
         )
-        draw_orient_row(rotations, flips, key="camalign")
+        draw_orient_row(rotations, flips, key="alignviews")
         imgui.same_line()
-        if imgui.small_button("Default##camalign_default"):
-            self._orient[cam] = _seed_for_camera(cam, self._is_rotated)
-            st = self._orient[cam]
+        if imgui.small_button("Default##alignviews_default"):
+            self._orient[tgt["view_label"]] = _seed_for_view(
+                tgt["cam"], self._is_rotated
+            )
+            st = self._orient[tgt["view_label"]]
             rotations, flips = st["rotations"], st["flips"]
+        imgui.same_line()
+        if imgui.small_button("Apply##alignviews_apply"):
+            orient_state.apply(arr, tgt["view_label"], st)
 
+        ref_ops = self._ref_ops(ref["cam"])
         ops = orientation_ops(rotations, flips)
-        ops_sig = tuple(tuple(o) for o in ops)
-        key = (cam, axis, slot, self._toggle, ops_sig)
+        ops_sig = (
+            tuple(tuple(o) for o in ref_ops),
+            tuple(tuple(o) for o in ops),
+        )
+        key = (ref["view_label"], tgt["view_label"], axis, slot, self._toggle, ops_sig)
         rgba = self._rgba_cache.get(key)
         if rgba is None:
-            ref_mips = self._load_mips(arr, self._ref_label, self._ref_c, slot)
-            adj_mips = self._load_mips(arr, adj_label, adj_c, slot)
-            if ref_mips is None or adj_mips is None:
+            ref_mips = self._load_mips(arr, ref["view_label"], ref["c"], slot)
+            tgt_mips = self._load_mips(arr, tgt["view_label"], tgt["c"], slot)
+            if ref_mips is None or tgt_mips is None:
                 imgui.text_colored(_WHITE, "(projection unavailable)")
                 return
-            ref = self._oriented(ref_mips, [], axis)
-            adj = self._oriented(adj_mips, ops, axis)
-            lo, hi = _auto_range(np.concatenate([ref.ravel(), adj.ravel()]))
-            rgba = self._composite(ref, adj, lo, hi)
+            ref_img = self._oriented(ref_mips, ref_ops, axis)
+            tgt_img = self._oriented(tgt_mips, ops, axis)
+            lo, hi = _auto_range(np.concatenate([ref_img.ravel(), tgt_img.ravel()]))
+            rgba = self._composite(ref_img, tgt_img, lo, hi)
             self._rgba_cache[key] = rgba
             while len(self._rgba_cache) > 24:
                 self._rgba_cache.popitem(last=False)
@@ -432,7 +479,7 @@ class IsoviewCameraAlign(Widget):
     def _draw_popup(self, arr) -> None:
         center_popup_on_open(default_em=(50.0, 48.0), min_em=(34.0, 26.0))
         opened, self._popup_open = imgui.begin(
-            "Camera Align###camalign_popup",
+            "Align views###alignviews_popup",
             self._popup_open,
             flags=imgui.WindowFlags_.no_saved_settings,
         )
@@ -441,12 +488,11 @@ class IsoviewCameraAlign(Widget):
             return
         self._draw_toolbar(arr)
         imgui.separator()
-        cam = self._adj_cams[self._cam_idx]
         avail = imgui.get_content_region_avail()
         cell = max(150.0, min(avail.x - 16.0, avail.y - 64.0))
-        imgui.begin_child("##camalign_body", imgui.ImVec2(0, 0), child_flags=0)
+        imgui.begin_child("##alignviews_body", imgui.ImVec2(0, 0), child_flags=0)
         try:
-            self._draw_overlay(arr, cam, cell)
+            self._draw_overlay(arr, cell)
         finally:
             imgui.end_child()
         imgui.end()

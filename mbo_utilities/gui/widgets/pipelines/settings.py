@@ -185,42 +185,6 @@ _IMPORTANT_FIELDS: set[str] = {
 
 
 @contextmanager
-def _hi(field: str, value):
-    """Push _MODIFIED_COLOR for widget text iff `value` differs from upstream
-    default for `field`. No-op for mbo-only fields (they have no default to
-    compare against). Use as a context manager around any imgui widget call:
-
-        imgui.set_next_item_width(INPUT_WIDTH)
-        with _hi("tau", self.s2p.tau):
-            _, self.s2p.tau = imgui.input_float("Tau (s)", self.s2p.tau)
-        set_tooltip(...)
-
-    Wrap only the widget — keep set_next_item_width above and set_tooltip
-    below the `with` so the (?) marker stays at the default color.
-    """
-    pushed = not _is_default(field, value)
-    if pushed:
-        imgui.push_style_color(imgui.Col_.text, _MODIFIED_COLOR)
-    try:
-        yield
-    finally:
-        if pushed:
-            imgui.pop_style_color()
-
-
-@contextmanager
-def _mbo():
-    """
-    Push _MBO_ONLY_COLOR around a widget.
-    """
-    imgui.push_style_color(imgui.Col_.text, _MBO_ONLY_COLOR)
-    try:
-        yield
-    finally:
-        imgui.pop_style_color()
-
-
-@contextmanager
 def _ghost_button():
     """
     Ghost button: a faint white surface tint at rest with a slightly stronger overlay on hover/active.
@@ -939,64 +903,6 @@ class Suite2pSettings:
             },
         }
 
-    def to_file(self, filepath):
-        """Save settings to settings.npy (upstream-shaped nested dict)."""
-        np.save(filepath, _convert_paths_to_strings(self.to_dict()), allow_pickle=True)
-
-    def update_from_ops(self, ops) -> list[str]:
-        """Merge values from a flat ops.npy dict OR structured settings.npy dict
-        OR a path to either, into this Suite2pSettings instance.
-
-        Auto-detects flat vs structured via _s2p_schema.from_ops. Only writes
-        to fields that already exist on the dataclass. Returns the names of
-        fields whose value actually changed.
-        """
-        from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
-            from_ops as _decode_ops,
-            from_npy_file as _decode_file,
-        )
-        if isinstance(ops, (str, pathlib.Path)):
-            mapping = _decode_file(ops)
-        else:
-            mapping = _decode_ops(ops)
-        changed: list[str] = []
-        for field, value in mapping.items():
-            if not hasattr(self, field):
-                continue
-            current = getattr(self, field)
-            # coerce numeric types to match the field's current type — keeps
-            # imgui input_int / input_float widgets happy when an old ops.npy
-            # contains loose types (e.g. lam_percentile written as int when
-            # the current dataclass field is float, or vice versa).
-            if value is not None and current is not None:
-                ct = type(current)
-                try:
-                    if ct is bool and not isinstance(value, bool):
-                        value = bool(value)
-                    elif ct is int and isinstance(value, bool):
-                        # bool → int (handles upstream bools being assigned
-                        # to mbo's tri-state ints, e.g. do_detection)
-                        value = int(value)
-                    elif ct is int and isinstance(value, float):
-                        value = int(value)
-                    elif ct is float and isinstance(value, int) and not isinstance(value, bool):
-                        value = float(value)
-                except (TypeError, ValueError, OverflowError):
-                    continue
-            if current != value:
-                setattr(self, field, value)
-                changed.append(field)
-        return changed
-
-    @classmethod
-    def from_ops(cls, ops) -> "Suite2pSettings":
-        """Build a fresh Suite2pSettings populated from a flat ops.npy /
-        structured settings.npy / path to either. Unmentioned fields keep
-        their dataclass defaults."""
-        instance = cls()
-        instance.update_from_ops(ops)
-        return instance
-
 
 @dataclass
 class Suite2pDB:
@@ -1052,10 +958,6 @@ class Suite2pDB:
             "force_sktiff": self.force_sktiff,
             "bruker_bidirectional": self.bruker_bidirectional,
         }
-
-    def to_file(self, filepath):
-        """Save db to db.npy (upstream-shaped flat dict)."""
-        np.save(filepath, _convert_paths_to_strings(self.to_dict()), allow_pickle=True)
 
 
 @dataclass
@@ -1191,25 +1093,6 @@ class MboSuite2pExtras:
             field.name: getattr(self, field.name)
             for field in self.__dataclass_fields__.values()  # type: ignore
         }
-
-
-def draw_tab_process(self):
-    """Draws the pipeline selection and configuration section."""
-    if not hasattr(self, "_current_pipeline"):
-        self._current_pipeline = USER_PIPELINES[0]
-    if not hasattr(self, "_install_error"):
-        self._install_error = False
-    if not hasattr(self, "_show_red_text"):
-        self._show_red_text = False
-    if not hasattr(self, "_show_green_text"):
-        self._show_green_text = False
-    if not hasattr(self, "_show_install_button"):
-        self._show_install_button = False
-
-    if self._current_pipeline == "suite2p":
-        draw_section_suite2p(self)
-    elif self._current_pipeline == "masknmf":
-        imgui.text("MaskNMF pipeline not yet implemented.")
 
 
 def _init_s2p_selection_state(self):

@@ -99,18 +99,6 @@ class PhaseCorrectionFeature(ArrayFeature):
         self._max_offset = max_offset
 
     @property
-    def value(self) -> dict:
-        """Phase correction settings as dict."""
-        return {
-            "enabled": self._enabled,
-            "method": self._method.value,
-            "shift": self.effective_shift,
-            "use_fft": self._use_fft,
-            "border": self._border,
-            "max_offset": self._max_offset,
-        }
-
-    @property
     def enabled(self) -> bool:
         """Whether correction is enabled."""
         return self._enabled
@@ -184,49 +172,6 @@ class PhaseCorrectionFeature(ArrayFeature):
     def max_offset(self, value: int) -> None:
         """Set maximum offset."""
         self._max_offset = max(1, int(value))
-
-    def set_value(self, array, value) -> None:
-        """
-        Set phase correction settings.
-
-        Parameters
-        ----------
-        array : array-like
-            the array this feature belongs to
-        value : dict | bool
-            settings dict or bool to enable/disable
-        """
-        old_value = self.value
-
-        if isinstance(value, bool):
-            self._enabled = value
-        elif isinstance(value, dict):
-            if "enabled" in value:
-                self._enabled = bool(value["enabled"])
-            if "method" in value:
-                method = value["method"]
-                if isinstance(method, str):
-                    self._method = PhaseCorrMethod.from_string(method)
-                else:
-                    self._method = method
-            if "shift" in value:
-                self._shift = value["shift"]
-            if "use_fft" in value:
-                self._use_fft = bool(value["use_fft"])
-            if "border" in value:
-                self._border = max(0, int(value["border"]))
-            if "max_offset" in value:
-                self._max_offset = max(1, int(value["max_offset"]))
-        else:
-            raise TypeError(f"expected dict or bool, got {type(value)}")
-
-        new_value = self.value
-        if old_value != new_value:
-            event = ArrayFeatureEvent(
-                type=self._property_name,
-                info={"value": new_value, "old_value": old_value},
-            )
-            self._call_event_handlers(event)
 
     def __repr__(self) -> str:
         if not self._enabled:

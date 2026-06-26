@@ -8,12 +8,9 @@ ome-ngff v0.5 specification and napari-ome-zarr plugin.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 DownsampleMethod = Literal[
@@ -29,11 +26,6 @@ class PyramidLevel:
     shape: tuple[int, ...]
     scale: tuple[float, ...]  # physical scale per axis
     path: str  # zarr path (e.g., "0", "1", "2")
-
-    @property
-    def scale_factor(self) -> int:
-        """Downsampling factor relative to level 0."""
-        return 2**self.level
 
 
 @dataclass
@@ -324,125 +316,3 @@ def _downsample_local_mean(data: np.ndarray, factors: tuple[int, ...]) -> np.nda
         return _downsample_mean(data, factors)
 
 
-def generate_pyramid(
-    data: np.ndarray,
-    config: PyramidConfig | None = None,
-) -> Iterator[tuple[int, np.ndarray]]:
-    """
-    Generate pyramid levels from full-resolution data.
-
-    yields (level_index, downsampled_data) tuples.
-    level 0 is the original data.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        full-resolution data.
-    config : PyramidConfig, optional
-        pyramid configuration.
-
-    Yields
-    ------
-    tuple[int, np.ndarray]
-        (level_index, data_at_level)
-    """
-    if config is None:
-        config = PyramidConfig()
-
-    levels = compute_pyramid_shapes(data.shape, config)
-    scale_factors = config.get_scale_factors_for_ndim(data.ndim)
-
-    current = data
-    for level_info in levels:
-        if level_info.level == 0:
-            yield 0, data
-        else:
-            current = downsample_block(current, scale_factors, config.method)
-            yield level_info.level, current
-
-
-def build_multiscales_metadata(
-    levels: list[PyramidLevel],
-    base_scale: tuple[float, ...],
-    axes: list[dict],
-    name: str = "",
-    downsample_type: str = "mean",
-) -> dict:
-    """
-    Build ome-ngff v0.5 multiscales metadata for a pyramid.
-
-    Parameters
-    ----------
-    levels : list[PyramidLevel]
-        pyramid levels from compute_pyramid_shapes().
-    base_scale : tuple[float, ...]
-        physical scale at level 0 (e.g., (1/fs, dz, dy, dx) in seconds/micrometers).
-    axes : list[dict]
-        ome-ngff axes specification (e.g., [{"name": "t", "type": "time", ...}]).
-    name : str, optional
-        name for the multiscale image.
-    downsample_type : str
-        downsampling method used (for metadata).
-
-    Returns
-    -------
-    dict
-        ome-ngff v0.5 "multiscales" metadata ready for zarr attrs.
-    """
-    datasets = []
-    for level in levels:
-        # compute physical scale for this level
-        physical_scale = [
-            base_scale[i] * level.scale[i] for i in range(len(base_scale))
-        ]
-
-        datasets.append(
-            {
-                "path": level.path,
-                "coordinateTransformations": [
-                    {"type": "scale", "scale": physical_scale}
-                ],
-            }
-        )
-
-    multiscale = {
-        "version": "0.5",
-        "axes": axes,
-        "datasets": datasets,
-        "type": downsample_type,
-    }
-
-    if name:
-        multiscale["name"] = name
-
-    return [multiscale]
-
-
-def build_napari_scale_attrs(
-    levels: list[PyramidLevel],
-    base_scale: tuple[float, ...],
-) -> list[list[float]]:
-    """
-    Build napari-compatible scale attributes for each pyramid level.
-
-    napari reads the 'scale' attr from each array for proper display.
-
-    Parameters
-    ----------
-    levels : list[PyramidLevel]
-        pyramid levels.
-    base_scale : tuple[float, ...]
-        physical scale at level 0.
-
-    Returns
-    -------
-    list[list[float]]
-        scale arrays for each level, ordered by level index.
-    """
-    scales = []
-    for level in levels:
-        physical_scale = [
-            base_scale[i] * level.scale[i] for i in range(len(base_scale))
-        ]
-        scales.append(physical_scale)
-    return scales

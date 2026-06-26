@@ -11,7 +11,6 @@ public api:
     validate_axial_shifts(metadata) -> bool           # metadata-only check
     with_axial_shifts(arr, plane_shifts=None)         # apply shifts on read (5D)
     AxialShiftView(source, plane_shifts)              # lazy 5D padded-canvas view
-    AxiallyAlignedView(planes, shifts)                # lazy 4D padded-canvas view
 
 backend is auto-detected: cupy if a cuda runtime is reachable, else numpy.
 pass use_gpu=True or use_gpu=False to override.
@@ -389,117 +388,6 @@ def validate_axial_shifts(metadata: dict | None, num_planes: int | None = None) 
     if num_planes is not None and len(arr) != num_planes:
         return False
     return True
-
-
-class AxiallyAlignedView:
-    """4D lazy view that aligns per-plane bins via stored plane_shifts.
-
-    Each plane's bin file stays at raw (H0, W0) on disk; the canvas-padded
-    aligned frame is materialized only on read. Companion to
-    `imwrite(register_z=True)`, which records `plane_shifts` in metadata so
-    viewers can align planes at render time.
-
-    Parameters
-    ----------
-    plane_arrays : sequence of array-like
-        One 3D `(T, Y, X)` array per plane. Memmaps, numpy arrays, or any
-        object supporting `__getitem__(t)` and `.shape` works.
-    plane_shifts : array-like (nz, 2)
-        Cumulative per-plane (dy, dx) shifts relative to plane 0, as
-        produced by `compute_axial_shifts`. Pass the subset matching
-        `plane_arrays` if you wrote a strided plane selection.
-
-    Attributes
-    ----------
-    shape : tuple
-        `(Z, T, H_canvas, W_canvas)`.
-    dtype : np.dtype
-        Inherited from the first plane.
-
-    Examples
-    --------
-    >>> # after running imwrite(arr, out, ext=".bin", register_z=True)
-    >>> view = AxiallyAlignedView(plane_memmaps, ops["plane_shifts"])
-    >>> view.shape
-    (7, 6979, 575, 452)
-    >>> volume_t0 = view.get_volume(0)             # aligned (Z, H, W)
-    >>> mean_img  = view.time_mean(slice(0, 100))  # aligned per-plane mean
-    """
-
-    def __init__(self, plane_arrays, plane_shifts):
-        self._planes = list(plane_arrays)
-        self._shifts = np.asarray(plane_shifts, dtype=int)
-        if len(self._planes) != len(self._shifts):
-            raise ValueError(
-                f"need one shift per plane, got {len(self._planes)} planes "
-                f"and {len(self._shifts)} shifts"
-            )
-
-        H0, W0 = self._planes[0].shape[-2:]
-        for p in self._planes[1:]:
-            if p.shape[-2:] != (H0, W0):
-                raise ValueError(
-                    f"inconsistent plane sizes: {p.shape[-2:]} vs {(H0, W0)}"
-                )
-
-        dy, dx = self._shifts[:, 0], self._shifts[:, 1]
-        self._pt = max(0, -int(dy.min()))
-        self._pb = max(0,  int(dy.max()))
-        self._pl = max(0, -int(dx.min()))
-        self._pr = max(0,  int(dx.max()))
-        self._H = H0 + self._pt + self._pb
-        self._W = W0 + self._pl + self._pr
-        self._H0, self._W0 = H0, W0
-
-        T = self._planes[0].shape[0]
-        self.shape = (len(self._planes), T, self._H, self._W)
-        self.dtype = self._planes[0].dtype
-
-    @property
-    def padding(self) -> tuple[int, int, int, int]:
-        """(pt, pb, pl, pr) canvas padding."""
-        return (self._pt, self._pb, self._pl, self._pr)
-
-    def get_frame(self, z: int, t: int) -> np.ndarray:
-        """aligned (H_canvas, W_canvas) frame for plane z at time t."""
-        iy, ix = int(self._shifts[z, 0]), int(self._shifts[z, 1])
-        out = np.zeros((self._H, self._W), dtype=self.dtype)
-        out[
-            self._pt + iy : self._pt + iy + self._H0,
-            self._pl + ix : self._pl + ix + self._W0,
-        ] = np.asarray(self._planes[z][t])
-        return out
-
-    def get_volume(self, t: int) -> np.ndarray:
-        """aligned (Z, H_canvas, W_canvas) volume at time t."""
-        vol = np.zeros((self.shape[0], self._H, self._W), dtype=self.dtype)
-        for z in range(self.shape[0]):
-            vol[z] = self.get_frame(z, t)
-        return vol
-
-    def time_mean(self, t_slice=slice(None)) -> np.ndarray:
-        """aligned (Z, H_canvas, W_canvas) time-mean over t_slice.
-
-        averages raw plane data first (dense, vectorized), then places
-        each mean into the canvas — much faster than averaging frames
-        from `get_frame` in a loop.
-        """
-        out = np.zeros((self.shape[0], self._H, self._W), dtype=np.float32)
-        for z, parr in enumerate(self._planes):
-            iy, ix = int(self._shifts[z, 0]), int(self._shifts[z, 1])
-            mean_raw = np.asarray(parr[t_slice], dtype=np.float32).mean(axis=0)
-            out[
-                z,
-                self._pt + iy : self._pt + iy + self._H0,
-                self._pl + ix : self._pl + ix + self._W0,
-            ] = mean_raw
-        return out
-
-    def __repr__(self) -> str:
-        return (
-            f"AxiallyAlignedView(shape={self.shape}, dtype={self.dtype}, "
-            f"pad=T{self._pt}/B{self._pb}/L{self._pl}/R{self._pr})"
-        )
 
 
 _TCZYX = ("T", "C", "Z", "Y", "X")

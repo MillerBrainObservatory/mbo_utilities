@@ -170,17 +170,6 @@ def output_dir(request, test_data_root):
 
 
 @pytest.fixture
-def temp_array(source_data_subset):
-    """
-    Fresh copy of test data subset for modification.
-
-    Use this when the test might modify the data.
-    """
-    subset, shape_info = source_data_subset
-    return subset.copy(), shape_info
-
-
-@pytest.fixture
 def synthetic_3d_data():
     """
     Synthetic 3D test data (T, Y, X) - single z-plane.
@@ -257,12 +246,6 @@ def array_compare():
     return compare_arrays
 
 
-@pytest.fixture
-def correlation_check():
-    """Fixture to access compute_frame_correlation helper."""
-    return compute_frame_correlation
-
-
 def compare_arrays(arr1, arr2, rtol=1e-5, atol=0.5):
     """
     Compare two arrays, handling lazy arrays and different shapes.
@@ -301,50 +284,6 @@ def compare_arrays(arr1, arr2, rtol=1e-5, atol=0.5):
             result["has_zero_frames"] = len(zero_frames) > 0
 
     return result
-
-
-def compute_frame_correlation(arr1, arr2, num_frames=10):
-    """
-    Compute per-frame correlation between two arrays.
-
-    Returns dict with correlation statistics.
-    """
-    from scipy.stats import pearsonr
-
-    arr1 = np.asarray(arr1).astype(np.float32)
-    arr2 = np.asarray(arr2).astype(np.float32)
-
-    if arr1.shape != arr2.shape:
-        return {"error": f"Shape mismatch: {arr1.shape} vs {arr2.shape}"}
-
-    # Select frames to test
-    n_frames = min(num_frames, arr1.shape[0])
-    indices = np.linspace(0, arr1.shape[0] - 1, n_frames, dtype=int)
-
-    correlations = []
-    for idx in indices:
-        if arr1.ndim == 4:
-            # Test middle z-plane
-            z = arr1.shape[1] // 2
-            f1 = arr1[idx, z].flatten()
-            f2 = arr2[idx, z].flatten()
-        else:
-            f1 = arr1[idx].flatten()
-            f2 = arr2[idx].flatten()
-
-        corr, _ = pearsonr(f1, f2)
-        correlations.append(corr)
-
-    correlations = np.array(correlations)
-
-    return {
-        "mean": float(correlations.mean()),
-        "min": float(correlations.min()),
-        "max": float(correlations.max()),
-        "all_above_99": bool(correlations.min() > 0.99),
-        "all_above_999": bool(correlations.min() > 0.999),
-        "num_tested": n_frames,
-    }
 
 
 def find_output_file(output_dir, ext):
@@ -403,34 +342,3 @@ def find_output_file(output_dir, ext):
     return None, []
 
 
-# Make find_output_file available as a fixture too
-@pytest.fixture
-def find_output():
-    """Fixture to access find_output_file helper."""
-    return find_output_file
-
-
-_test_results = []
-
-
-def pytest_sessionfinish(session, exitstatus):
-    """Print summary after all tests complete."""
-    if _test_results:
-        print("\n" + "=" * 70)
-        print("TEST SUMMARY")
-        print("=" * 70)
-
-        passed = sum(1 for r in _test_results if r.get("passed", False))
-        failed = len(_test_results) - passed
-
-        print(f"Total tests with results: {len(_test_results)}")
-        print(f"  Passed: {passed}")
-        print(f"  Failed: {failed}")
-
-        if failed > 0:
-            print("\nFailed tests:")
-            for r in _test_results:
-                if not r.get("passed", False):
-                    print(f"  - {r.get('name', 'unknown')}: {r.get('error', 'unknown error')}")
-
-        print("=" * 70)

@@ -10,6 +10,7 @@ All preferences are stored in ~/.mbo/settings/ as JSON files.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,12 +24,35 @@ logger = log.get("preferences")
 MAX_RECENT_FILES = 20
 
 
-def get_mbo_dirs() -> dict:
-    """Ensure ~/.mbo and its subdirectories exist.
+def _mbo_base_dir() -> Path:
+    """Root for all mbo state (logs, run registry, cache, preferences).
 
-    Returns a dict with paths to the root, settings, and cache directories.
+    Defaults to ``~/.mbo``. Overridable only when defined — e.g. to keep HPC
+    logs/registry off a small home quota, set one of these in your
+    ``mbo_server_configs``:
+
+      MBO_DIR   -> used as the .mbo directory directly (full path)
+      MBO_USER  -> <MBO_USER>/.mbo
+
+    Neither set -> ``~/.mbo`` (unchanged default).
     """
-    base = Path.home().joinpath(".mbo")
+    explicit = os.environ.get("MBO_DIR")
+    if explicit:
+        return Path(explicit).expanduser()
+    user_root = os.environ.get("MBO_USER")
+    if user_root:
+        return Path(user_root).expanduser() / ".mbo"
+    return Path.home() / ".mbo"
+
+
+def get_mbo_dirs() -> dict:
+    """Ensure the mbo state dir and its subdirectories exist.
+
+    Root is ``~/.mbo`` unless overridden via ``MBO_DIR`` / ``MBO_USER``
+    (see ``_mbo_base_dir``). Returns a dict of the root, settings, and cache
+    directories.
+    """
+    base = _mbo_base_dir()
     imgui = base.joinpath("imgui")
     cache = base.joinpath("cache")
     logs = base.joinpath("logs")
@@ -42,8 +66,10 @@ def get_mbo_dirs() -> dict:
     # user preferences json (preferences.json, last_savedir.json)
     user_settings = base.joinpath("settings")
 
+    # parents=True so a relocated base (MBO_DIR/MBO_USER) whose parent dirs
+    # don't exist yet is created cleanly.
     for d in (base, imgui, cache, logs, assets, data, tests, templates, user_settings):
-        d.mkdir(exist_ok=True)
+        d.mkdir(parents=True, exist_ok=True)
 
     return {
         "base": base,

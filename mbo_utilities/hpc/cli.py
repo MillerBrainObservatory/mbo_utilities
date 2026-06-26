@@ -7,6 +7,33 @@ from pathlib import Path
 import click
 
 
+def _refuse_local_on_login_node() -> None:
+    """Guard an inline ``--local`` run from a SLURM login node — running heavy
+    compute on a shared login node is prohibited on most clusters and will OOM.
+
+    Matches on the HOSTNAME only (a username is never a node-type signal), allows
+    it when inside a SLURM allocation (``SLURM_JOB_ID`` set — you are on a compute
+    node via salloc/srun), and honors ``MBO_ALLOW_LOGIN_LOCAL=1`` as an override.
+    """
+    import os
+    import socket
+
+    if os.environ.get("SLURM_JOB_ID") or os.environ.get("MBO_ALLOW_LOGIN_LOCAL"):
+        return
+    host = os.environ.get("SLURMD_NODENAME") or os.environ.get("HOSTNAME") or ""
+    if not host:
+        try:
+            host = socket.gethostname()
+        except OSError:
+            host = ""
+    if "login" in host.lower():
+        raise click.ClickException(
+            f"--local on a login node ({host!r}). Use a compute node "
+            "(salloc/srun, then --local) or --mode single/array. Override with "
+            "MBO_ALLOW_LOGIN_LOCAL=1 if you know the node can take it."
+        )
+
+
 @click.group("hpc")
 def hpc():
     """Run the Suite2p pipeline on SLURM (or locally) from a TOML config.
@@ -103,8 +130,14 @@ def hpc_init(data_path, config_path, output_root, overwrite):
 @click.option("--planes-per-gpu", type=int, default=None, help="Override pack factor F.")
 @click.option("--gpu", type=int, default=None,
               help="Local-run CUDA device index (nvidia-smi order); -1 = auto. Ignored under SLURM.")
+@click.option("--stream/--no-stream", "stream", default=None,
+              help="Override [pipeline] stream: feed frames through suite2p with no "
+                   "data_raw.bin/data.bin (only reg_outputs.npy persists).")
+@click.option("--stage-input/--no-stage-input", "stage_input", default=None,
+              help="Override [pipeline] stage_input: copy raw to node-local /tmp and "
+                   "stream from there (benchmark vs reading shared storage directly).")
 def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
-            partition, gres, time_, planes_per_gpu, gpu):
+            partition, gres, time_, planes_per_gpu, gpu, stream, stage_input):
     """
     Submit the pipeline described by CONFIG_PATH.
 
@@ -138,12 +171,18 @@ def hpc_run(config_path, mode, dry_run, force_local, input_, output, name,
             cfg.pipeline.planes_per_gpu = planes_per_gpu
         if gpu is not None:
             cfg.pipeline.gpu = gpu
+        if stream is not None:
+            cfg.pipeline.stream = stream
+        if stage_input is not None:
+            cfg.pipeline.stage_input = stage_input
         cfg.validate()
     except ValueError as e:  # bad TOML or failed validation
         raise click.ClickException(str(e))
 
     if force_local:
         mode = "local"
+    if mode == "local":
+        _refuse_local_on_login_node()
 
     try:
         submit(cfg, mode=mode, dry_run=dry_run)
@@ -168,6 +207,13 @@ def hpc_status(target):
     import subprocess
 
     from mbo_utilities.hpc import slurm
+
+    if not target:
+        # no target -> the last run you launched (registry), else your queue.
+        from mbo_utilities.hpc.history import last_run_target
+        target = last_run_target()
+        if target:
+            click.echo(f"(last run: {target})")
 
     if target and slurm.is_job_id(target):
         click.echo(slurm.job_report(target))
@@ -208,7 +254,7 @@ def hpc_status(target):
 
 
 @hpc.command("watch", short_help="Follow a run's .err/.out logs, from a job id, config, or output dir.")
-@click.argument("target", required=False, default="hpc.toml", type=click.Path())
+@click.argument("target", required=False, default=None, type=click.Path())
 @click.option("-o", "--out", "stream_out", is_flag=True,
               help="Start on stdout (.out); default is stderr (.err).")
 @click.option("--no-follow", is_flag=True, help="Print the tail once and exit.")
@@ -219,17 +265,23 @@ def hpc_watch(target, stream_out, no_follow, lines):
 
     \b
     Examples:
+      mbo hpc watch                       # the last run you launched
       mbo hpc watch 5162141               # by SLURM job id (prints state first)
-      mbo hpc watch                       # newest run from hpc.toml, follow .err
       mbo hpc watch hpc.toml -o           # follow .out instead
       mbo hpc watch /data/results/2025_07_27_mk355
       mbo hpc watch --no-follow           # tail once, don't stream
 
-    A job id resolves exact log paths via scontrol and shows job state before any
-    logs exist. While following (terminal): o/e switch out/err, n/p switch task
-    logs, q quit.
+    With no argument it follows the most recent run from the registry
+    (~/.mbo/hpc/runs), falling back to ./hpc.toml. A job id resolves exact log
+    paths via scontrol and shows job state before any logs exist. While
+    following (terminal): o/e switch out/err, n/p switch task logs, q quit.
     """
     from mbo_utilities.hpc.logs import watch
+
+    if not target:
+        from mbo_utilities.hpc.history import last_run_target
+        target = last_run_target() or "hpc.toml"
+        click.echo(f"(watching last run: {target})")
 
     try:
         watch(target, stream="out" if stream_out else "err",

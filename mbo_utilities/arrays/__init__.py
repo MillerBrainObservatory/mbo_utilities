@@ -79,7 +79,6 @@ def files_to_dask(files: list[str | Path], astype=None, chunk_t=250):
 
 if TYPE_CHECKING:
     from mbo_utilities.arrays._registration import (
-        AxiallyAlignedView as AxiallyAlignedView,
         AxialShiftView as AxialShiftView,
         compute_axial_shifts as compute_axial_shifts,
         validate_axial_shifts as validate_axial_shifts,
@@ -135,7 +134,6 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "isoview_to_ome_zarr": (".isoview", "isoview_to_ome_zarr"),
     "_extract_tiff_plane_number": (".tiff", "_extract_tiff_plane_number"),
     # registration
-    "AxiallyAlignedView": ("._registration", "AxiallyAlignedView"),
     "AxialShiftView": ("._registration", "AxialShiftView"),
     "compute_axial_shifts": ("._registration", "compute_axial_shifts"),
     "validate_axial_shifts": ("._registration", "validate_axial_shifts"),
@@ -224,7 +222,6 @@ __all__ = [
     # Helpers
     "supports_roi",
     # Registration
-    "AxiallyAlignedView",
     "AxialShiftView",
     "compute_axial_shifts",
     "validate_axial_shifts",

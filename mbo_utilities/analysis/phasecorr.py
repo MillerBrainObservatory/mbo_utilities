@@ -115,12 +115,3 @@ def bidir_phasecorr(
             for f, s in zip(arr, offs, strict=False)
         ])
     return out, offs
-
-
-def apply_scan_phase_offsets(arr, offs):
-    out = np.asarray(arr).copy()
-    if np.isscalar(offs):
-        return _apply_offset(out, offs, use_fft=True)
-    for k, off in enumerate(offs):
-        out[k] = _apply_offset(out[k], off, use_fft=True)
-    return out

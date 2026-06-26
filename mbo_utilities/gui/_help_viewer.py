@@ -42,11 +42,6 @@ def load_doc(filename: str) -> str:
     return _doc_cache[filename]
 
 
-def clear_doc_cache() -> None:
-    """clear cached docs (useful for dev/reload)."""
-    _doc_cache.clear()
-
-
 def draw_help_popup(parent: Any) -> None:
     """draw help viewer popup with markdown rendering."""
     if not hasattr(parent, "_show_help_popup"):
