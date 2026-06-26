@@ -167,6 +167,13 @@ class _InterleavedTiffReader:
         self._page_shape = page0.shape
         self._dtype = page0.dtype
 
+        # ImageJ hyperstacks are frequently stored contiguously: a single
+        # physical IFD page holds every frame's data back-to-back. tifffile
+        # then reports len(pages) == 1, so per-frame `pages[i]` reads raise
+        # IndexError. _frame() detects that on first failure and switches to
+        # the series' zarr store, which reads one frame per chunk (lazy).
+        self._zstore = None
+
     @property
     def nframes(self) -> int:
         return self._n_frames
@@ -192,6 +199,35 @@ class _InterleavedTiffReader:
         from mbo_utilities.arrays._base import get_dtype
         return get_dtype(self._dtype)
 
+    def _frame(self, flat_idx: int) -> np.ndarray:
+        """Read a single (Y, X) frame by flat storage index.
+
+        Uses physical pages when they cover the index; falls back to the
+        series' zarr store for contiguous ImageJ hyperstacks, where every
+        frame lives in one physical page and `pages[i]` raises IndexError.
+        """
+        if self._zstore is None:
+            try:
+                return self._tiff.pages[flat_idx].asarray()
+            except IndexError:
+                import zarr
+
+                self._zstore = zarr.open(self._tiff.series[0].aszarr(), mode="r")
+        lead = self._zstore.shape[:-2]
+        total = int(np.prod(lead)) if lead else 1
+        if flat_idx >= total:
+            # keep the page-path error contract (IndexError, not numpy's
+            # ValueError from unravel_index) and fail loudly rather than
+            # returning frame 0 when a truncated/corrupt file collapses the
+            # series to a single 2-D plane (lead == ()).
+            raise IndexError(
+                f"frame {flat_idx} out of range ({total} frames) in {self._path}"
+            )
+        if not lead:
+            return np.asarray(self._zstore)
+        midx = tuple(int(i) for i in np.unravel_index(flat_idx, lead))
+        return np.asarray(self._zstore[midx])
+
     def read_tzyx(self, t_indices: list[int], z_indices: list[int], c_indices: list[int] | None = None) -> np.ndarray:
         """Read frames for given T, Z, and optional C indices.
 
@@ -210,7 +246,7 @@ class _InterleavedTiffReader:
                     for ci, c_idx in enumerate(c_indices):
                         for zi, z_idx in enumerate(z_indices):
                             page_idx = t_idx * (self._n_planes * self._n_channels) + z_idx * self._n_channels + c_idx
-                            buf[ti, ci, zi] = self._tiff.pages[page_idx].asarray()
+                            buf[ti, ci, zi] = self._frame(page_idx)
             return buf
         else:
             # 4D: return TZYX (backward compatible)
@@ -222,7 +258,7 @@ class _InterleavedTiffReader:
                 for ti, t_idx in enumerate(t_indices):
                     for zi, z_idx in enumerate(z_indices):
                         page_idx = t_idx * self._n_planes + z_idx
-                        buf[ti, zi] = self._tiff.pages[page_idx].asarray()
+                        buf[ti, zi] = self._frame(page_idx)
             return buf
 
     def close(self):
