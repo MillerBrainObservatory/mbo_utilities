@@ -44,6 +44,7 @@ dependencies = [
 	"imgui-bundle==1.92.5",
 	"wgpu>=0.28.1,<0.29",
 	"submitit>=1.5.0",
+	"imagecodecs>=2026.6.6",
 ]
 
 [project.scripts]
