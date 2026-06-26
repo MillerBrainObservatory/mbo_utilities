@@ -228,6 +228,83 @@ def get_metadata(
     raise ValueError(f"Path does not exist or is not accessible: {file_path}")
 
 
+def _read_ij_tag_50839(tiff_file) -> dict | None:
+    """Parse the IJMetadata tag (50839).
+
+    mbo writes its full metadata JSON here under the ``Info`` key; Fiji writes
+    slice ``Labels``. Returns the embedded mbo dict when present, otherwise the
+    raw tag dict, or ``None`` when the tag is absent/unparseable.
+    """
+    try:
+        page0 = tiff_file.pages.first
+        if not page0 or 50839 not in page0.tags:
+            return None
+        tag_value = page0.tags[50839].value
+        if isinstance(tag_value, bytes):
+            return json.loads(tag_value.rstrip(b"\x00").decode("utf-8"))
+        if isinstance(tag_value, str):
+            return json.loads(tag_value)
+        if isinstance(tag_value, dict):
+            info = tag_value.get("Info")
+            if isinstance(info, str):
+                try:
+                    return json.loads(info)
+                except (json.JSONDecodeError, TypeError):
+                    return {k: v for k, v in tag_value.items() if k != "Info"}
+            return tag_value
+    except (json.JSONDecodeError, TypeError, AttributeError, KeyError):
+        return None
+    return None
+
+
+def _imagej_to_metadata(tiff_file) -> dict:
+    """Deposit ImageJ/Fiji hyperstack source tags for canonical resolution.
+
+    Reads the hyperstack dimension counts (``frames``/``slices``/``channels``),
+    voxel spacing (``spacing`` -> ``dz``), frame interval (``finterval`` ->
+    ``fs``) and pixel resolution (``XResolution``/``YResolution`` -> ``dx``/
+    ``dy``) as raw source keys. The metadata registry resolves them downstream,
+    so values are not pre-normalized here.
+    """
+    ij = dict(tiff_file.imagej_metadata or {})
+    page0 = tiff_file.pages.first
+
+    md: dict = {
+        "frames": int(ij.get("frames", 1) or 1),
+        "slices": int(ij.get("slices", 1) or 1),
+        "channels": int(ij.get("channels", 1) or 1),
+    }
+    if page0 is not None:
+        md["Ly"] = int(page0.shape[-2])
+        md["Lx"] = int(page0.shape[-1])
+        md["dtype"] = str(page0.dtype)
+
+    spacing = ij.get("spacing")
+    if spacing:
+        md["spacing"] = float(spacing)  # -> dz (registry rename alias)
+    finterval = ij.get("finterval")
+    if finterval:
+        md["finterval"] = float(finterval)  # -> fs (registry transform alias)
+    unit = ij.get("unit")
+    if unit:
+        md["unit"] = unit
+
+    # X/Y resolution tags are pixels-per-unit; the registry maps them to the
+    # reciprocal (µm/px). Require an explicit micron unit (ImageJ always writes
+    # one when calibrated), so an uncalibrated or inch/cm-scanned image doesn't
+    # yield a bogus dx/dy. Accept both the micro sign (U+00B5) and Greek mu
+    # (U+03BC) spellings of "µm".
+    micron_units = {"micron", "microns", "um", "µm", "μm", "micrometer", "micrometers"}
+    if page0 is not None and unit and str(unit).lower() in micron_units:
+        for tag in ("XResolution", "YResolution"):
+            value = getattr(page0.tags.get(tag), "value", None)
+            if isinstance(value, (tuple, list)) and len(value) == 2 and value[1]:
+                md[tag] = value[0] / value[1]
+            elif isinstance(value, (int, float)) and value:
+                md[tag] = float(value)
+    return md
+
+
 def get_metadata_single(file: Path):
     """
     Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.
@@ -285,43 +362,27 @@ def get_metadata_single(file: Path):
         ):
             return tiff_file.shaped_metadata[0]
 
-        # try reading JSON from custom TIFF tag 50839
-        # (this is where _write_tiff stores full metadata in ImageJ mode)
-        try:
-            page0 = tiff_file.pages.first
-            if page0 and 50839 in page0.tags:
-                import json
-                tag_value = page0.tags[50839].value
-                # handle different formats:
-                # 1. bytes: raw JSON bytes
-                # 2. str: JSON string
-                # 3. dict with 'Info' key: ImageJ mode wraps JSON in {'Info': '<json>'}
-                # 4. dict: already parsed metadata
-                if isinstance(tag_value, bytes):
-                    tag_value = tag_value.rstrip(b"\x00").decode("utf-8")
-                    meta = json.loads(tag_value)
-                elif isinstance(tag_value, str):
-                    meta = json.loads(tag_value)
-                elif isinstance(tag_value, dict):
-                    # tifffile may auto-parse or wrap in 'Info' key
-                    if "Info" in tag_value and isinstance(tag_value["Info"], str):
-                        meta = json.loads(tag_value["Info"])
-                    else:
-                        # already a dict, use as-is
-                        meta = tag_value
-                else:
-                    meta = None
-                if isinstance(meta, dict):
-                    return meta
-        except (json.JSONDecodeError, TypeError, AttributeError, KeyError):
-            pass
+        # IJMetadata tag (50839): mbo stores its full JSON here under 'Info';
+        # Fiji stores slice 'Labels'.
+        tag_meta = _read_ij_tag_50839(tiff_file)
+
+        # ImageJ / Fiji hyperstacks: deposit the source dimension + voxel tags
+        # so dims/labels and reactive dz/fs/dx/dy resolve. Any embedded mbo
+        # metadata (tag 'Info') is layered on top and wins.
+        if getattr(tiff_file, "is_imagej", False):
+            meta = _imagej_to_metadata(tiff_file)
+            if isinstance(tag_meta, dict):
+                meta.update(tag_meta)
+            return meta
+
+        if isinstance(tag_meta, dict):
+            return tag_meta
 
         # fallback: try reading JSON from first page description
         # (this is how _write_tiff stores metadata in non-ImageJ mode)
         try:
             page0 = tiff_file.pages.first
             if page0 and page0.description:
-                import json
                 meta = json.loads(page0.description)
                 if isinstance(meta, dict):
                     return meta
