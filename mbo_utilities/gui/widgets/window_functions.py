@@ -11,6 +11,7 @@ from imgui_bundle import imgui, hello_imgui
 
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui._imgui_helpers import set_tooltip
+from mbo_utilities.gui._colormaps import DEFAULT_COLORMAPS, DEFAULT_COLORMAP
 
 
 class WindowFunctionsWidget(Widget):
@@ -77,10 +78,33 @@ class WindowFunctionsWidget(Widget):
 
 
 class SpatialFunctionsWidget(Widget):
-    """ui widget for spatial functions (gaussian blur, mean subtraction)."""
+    """ui widget for spatial functions (gaussian blur, mean subtraction, colormap)."""
 
     name = "Spatial Functions"
     priority = 11  # show after window functions
+
+    def __init__(self, parent: Any):
+        super().__init__(parent)
+        self._cmaps: list[str] = list(DEFAULT_COLORMAPS)
+        self._cmap_idx: int = self._cmaps.index(DEFAULT_COLORMAP)
+        self._cmap_synced: bool = False
+
+    def _sync_cmap_from_fpl(self) -> None:
+        if self._cmap_synced:
+            return
+        iw = getattr(self.parent, "image_widget", None)
+        if iw is None:
+            return
+        try:
+            cmap_name = str(list(iw.graphics)[0].cmap or "")
+        except Exception:
+            return
+        if not cmap_name:
+            return
+        if cmap_name not in self._cmaps:
+            self._cmaps = [cmap_name] + list(DEFAULT_COLORMAPS)
+        self._cmap_idx = self._cmaps.index(cmap_name)
+        self._cmap_synced = True
 
     @classmethod
     def is_supported(cls, parent: Any) -> bool:
@@ -136,3 +160,14 @@ class SpatialFunctionsWidget(Widget):
 
         if mean_sub_changed and zstats_ready:
             parent.mean_subtraction = mean_sub_value
+
+        # colormap selector
+        self._sync_cmap_from_fpl()
+        imgui.set_next_item_width(hello_imgui.em_size(8))
+        cmap_changed, new_cmap_idx = imgui.combo("Colormap", self._cmap_idx, self._cmaps)
+        if cmap_changed:
+            self._cmap_idx = new_cmap_idx
+            try:
+                parent.image_widget.cmap = self._cmaps[self._cmap_idx]
+            except Exception:
+                pass
