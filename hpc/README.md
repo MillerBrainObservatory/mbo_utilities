@@ -9,6 +9,23 @@ Submit the `lbm_suite2p_python` pipeline to SLURM from a TOML config. Backed by
 uv add "mbo_utilities[hpc]"      # pulls submitit
 ```
 
+### Small `/tmp` (no space left on device)
+
+`uv` extracts wheels into `$TMPDIR` (default `/tmp`) before moving them to its
+cache. On login/compute nodes `/tmp` is often a small separate volume, so large
+wheels (torch, triton) fail with `No space left on device` even when the cache
+filesystem has terabytes free — the error path points at `/tmp`, not the cache.
+Point `TMPDIR` at a filesystem with space:
+
+```bash
+export TMPDIR=/lustre/.../scratch/.uv/tmp   # somewhere with room
+mkdir -p "$TMPDIR"
+uv sync --all-extras
+```
+
+Set it in your shell profile and SLURM job scripts so compute-node runs (which
+often have an even smaller `/tmp`) use it too.
+
 ## Run
 
 ```bash

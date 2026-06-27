@@ -18,6 +18,7 @@ pass use_gpu=True or use_gpu=False to override.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -259,11 +260,45 @@ def compute_plane_shifts(
     )
 
 
-def _stream_plane_mean(arr, max_frames: int, chunk_frames: int) -> np.ndarray:
+# keep the working volume (mean image + align_planes' complex64 copies) near
+# this many voxels. ScanImage planes (hundreds of px) stay below it and run at
+# full resolution; large-FOV non-ScanImage stacks are downsampled to fit.
+_AXIAL_TARGET_VOXELS = 150_000_000
+
+
+def _auto_downsample(
+    nz: int, ny: int, nx: int, target: int = _AXIAL_TARGET_VOXELS
+) -> int:
+    """Integer YX downsample factor keeping ``nz * ny * nx`` near ``target``."""
+    voxels = int(nz) * int(ny) * int(nx)
+    if voxels <= target:
+        return 1
+    return max(1, math.ceil(math.sqrt(voxels / target)))
+
+
+def _block_mean_yx(a: np.ndarray, f: int) -> np.ndarray:
+    """Block-mean the trailing (Y, X) axes by factor ``f``, accumulating at the
+    reduced size so no full-resolution float copy is ever materialized."""
+    *lead, ny, nx = a.shape
+    yc, xc = (ny // f) * f, (nx // f) * f
+    a = a[..., :yc, :xc]
+    out = np.zeros((*lead, yc // f, xc // f), dtype=np.float32)
+    for i in range(f):
+        for j in range(f):
+            out += a[..., i::f, j::f]
+    out /= f * f
+    return out
+
+
+def _stream_plane_mean(
+    arr, max_frames: int, chunk_frames: int, downsample: int = 1
+) -> np.ndarray:
     """stream a (nz, ny, nx) time-mean image from a lazy array without
     materializing the full 4d movie in memory.
 
-    supports both 5d arrays (T, C, Z, Y, X) and 4d (T, Z, Y, X).
+    supports both 5d arrays (T, C, Z, Y, X) and 4d (T, Z, Y, X). ``downsample``
+    block-means the (Y, X) plane by that integer factor before accumulating, so
+    a large-FOV stack never allocates a full-resolution float volume.
     """
     if hasattr(arr, "_shape5d"):
         T, C, Z, Y, X = tuple(arr._shape5d())
@@ -275,20 +310,22 @@ def _stream_plane_mean(arr, max_frames: int, chunk_frames: int) -> np.ndarray:
     else:
         raise ValueError(f"unsupported array shape {getattr(arr, 'shape', None)}")
 
+    f = max(1, int(downsample))
+    yd, xd = (Y // f), (X // f)
+
     n_sub = min(max_frames, T) if max_frames else T
     frame_idx = np.linspace(0, T - 1, n_sub, dtype=int).tolist()
 
-    im3d_sum = np.zeros((Z, Y, X), dtype=np.float64)
+    im3d_sum = np.zeros((Z, yd, xd), dtype=np.float64)
     count = 0
     for start in range(0, n_sub, chunk_frames):
         idx = frame_idx[start : start + chunk_frames]
-        if use_5d:
-            batch = np.asarray(arr[idx])
-            if batch.ndim == 5:
-                # collapse C axis (take first color channel if multiple)
-                batch = batch[:, 0]
-        else:
-            batch = np.asarray(arr[idx])
+        batch = np.asarray(arr[idx])
+        if use_5d and batch.ndim == 5:
+            # collapse C axis (take first color channel if multiple)
+            batch = batch[:, 0]
+        if f > 1:
+            batch = _block_mean_yx(batch, f)
         im3d_sum += batch.sum(axis=0, dtype=np.float64)
         count += batch.shape[0]
 
@@ -306,6 +343,7 @@ def compute_axial_shifts(
     max_reg_xy: int = 30,
     sigma: tuple = (1.45, 0),
     smooth_sigma: float = 1.15,
+    downsample: int | None = None,
     use_gpu: bool | None = None,
     progress_callback=None,
 ) -> np.ndarray:
@@ -335,6 +373,11 @@ def compute_axial_shifts(
         spatial-taper sigma; see `align_planes`.
     smooth_sigma : float
         gaussian fft-filter width; see `align_planes`.
+    downsample : int or None
+        YX block-mean factor for the shift estimate. None (default) picks one
+        from the FOV so large non-ScanImage stacks stay within a bounded
+        working set; 1 forces full resolution. Shifts are scaled back to
+        full-resolution pixels, so precision is +/- `downsample` px.
     use_gpu : bool or None
         None = auto-detect cupy+cuda; True/False override.
     progress_callback : callable or None
@@ -347,7 +390,15 @@ def compute_axial_shifts(
     """
     resolved_gpu = _auto_resolve_gpu() if use_gpu is None else bool(use_gpu)
 
-    im3d = _stream_plane_mean(arr, max_frames=max_frames, chunk_frames=chunk_frames)
+    if hasattr(arr, "_shape5d"):
+        _, _, Z, Y, X = tuple(arr._shape5d())
+    else:
+        Z, Y, X = tuple(arr.shape)[-3:]
+    f = _auto_downsample(Z, Y, X) if downsample is None else max(1, int(downsample))
+
+    im3d = _stream_plane_mean(
+        arr, max_frames=max_frames, chunk_frames=chunk_frames, downsample=f
+    )
 
     tvecs = compute_plane_shifts(
         im3d,
@@ -357,6 +408,9 @@ def compute_axial_shifts(
         use_gpu=resolved_gpu,
         progress_callback=progress_callback,
     )
+    if f > 1:
+        # shifts were measured on the downsampled grid; rescale to full-res px
+        tvecs = tvecs * f
 
     if metadata is not None:
         metadata["plane_shifts"] = tvecs.tolist()
@@ -366,6 +420,7 @@ def compute_axial_shifts(
             "smooth_sigma": float(smooth_sigma),
             "max_frames": int(max_frames),
             "chunk_frames": int(chunk_frames),
+            "downsample": int(f),
             "use_gpu": bool(resolved_gpu),
         }
 

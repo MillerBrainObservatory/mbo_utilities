@@ -407,11 +407,6 @@ class IsoviewPipelineWidget(PipelineWidget):
         # upper). Forwarded to generate_bigstitcher_xml(reverse_z=...).
         self._stitcher_reverse_z: bool = True
 
-        # Rotated only: rotate content upright to match the tile grid. Tilts the
-        # dataset vs world axes (BDV view-rotation swings it); off keeps cameras
-        # in CM00's native frame, orient the whole dataset in BigStitcher.
-        self._stitcher_upright: bool = True
-
         # Link the existing .corrected zarrs in the dataset.xml instead of
         # writing a converted copy (no conversion step). On by default; uncheck
         # to extract a converted copy. Forwarded to
@@ -1258,39 +1253,46 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Join adjacent z-blocks contiguously (camera scans -Z)."
             )
 
-            _, self._stitcher_upright = imgui.checkbox(
-                "Upright (rotated)", self._stitcher_upright,
-            )
-            set_tooltip(
-                "Rotated only: rotate content upright to match the tile grid. "
-                "Off keeps cameras in CM00's native frame (no tilt under view "
-                "rotation; orient in BigStitcher)."
-            )
+            # Raw .stacks have no .corrected zarr to link against.
+            if getattr(self._get_array(), "kind", None) == "raw":
+                self._stitcher_link_existing = False
+            else:
+                ch_link, self._stitcher_link_existing = imgui.checkbox(
+                    "Link existing (.corrected)", self._stitcher_link_existing,
+                )
+                if ch_link:
+                    # toggling link flips per-camera <-> fused, which switches
+                    # the orientation targets (per-camera tables vs the VW00
+                    # profile). Re-seed so a fused VW00 profile can't leak onto
+                    # cam0.
+                    self._apply_orient_profile_all(self._stitcher_orient_profile)
+                set_tooltip(
+                    "Reference the .corrected zarrs in place, no conversion. "
+                    "Much faster; .corrected only."
+                )
 
-            ch_link, self._stitcher_link_existing = imgui.checkbox(
-                "Link existing (.corrected)", self._stitcher_link_existing,
-            )
-            if ch_link:
-                # toggling link flips per-camera <-> fused, which switches the
-                # orientation targets (per-camera tables vs the VW00 profile).
-                # Re-seed so a fused VW00 profile can't leak onto cam0.
-                self._apply_orient_profile_all(self._stitcher_orient_profile)
+            # Workers only drive the zarr conversion; link mode skips it.
+            imgui.begin_disabled(self._stitcher_link_existing)
+            imgui.set_next_item_width(_input_w())
+            _, new_workers = imgui.input_int("Workers", self._workers, 1, 2)
+            self._workers = max(1, min(_MAX_WORKERS, new_workers))
             set_tooltip(
-                "Reference the .corrected zarrs in place, no conversion. "
-                "Much faster; .corrected only."
+                "Parallel volume writers (threads) for zarr conversion. "
+                "RAM-bound: each holds one full camera volume + its pyramid."
             )
+            imgui.end_disabled()
 
             imgui.set_next_item_width(_input_w())
             prev_pc = self._is_per_camera_export()
             ch_cam, self._stitcher_cameras = imgui.input_text(
-                "Cameras", self._stitcher_cameras,
+                "Views", self._stitcher_cameras,
             )
             if ch_cam and self._is_per_camera_export() != prev_pc:
-                # entering/leaving per-camera switches the orientation targets;
+                # entering/leaving per-view switches the orientation targets;
                 # re-seed so the fused VW00 profile can't leak onto cam0.
                 self._apply_orient_profile_all(self._stitcher_orient_profile)
             set_tooltip(
-                "Per-camera export from .corrected, e.g. 0,2. "
+                "Per-view export from .corrected, e.g. 0,2. "
                 "Empty: fused VW00/VW90."
             )
 
@@ -1305,14 +1307,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 imgui.set_next_item_width(_input_w())
                 imgui.combo("Zarr version", 0, ["v3"])
                 imgui.end_disabled()
-
-            imgui.set_next_item_width(_input_w())
-            _, new_workers = imgui.input_int("Workers", self._workers, 1, 2)
-            self._workers = max(1, min(_MAX_WORKERS, new_workers))
-            set_tooltip(
-                "Parallel volume writers (threads). RAM-bound: each holds "
-                "one full camera volume + its pyramid."
-            )
 
     def _draw_consolidate_io_box(self) -> None:
         """Consolidate I/O options for the Parameters popup."""
@@ -2081,7 +2075,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             "source": source,
             "orient_to_cm00": orient_to_cm00,
             "reverse_z": self._stitcher_reverse_z,
-            "upright": self._stitcher_upright,
             "link_existing": self._stitcher_link_existing,
             "zarr_version": self._stitcher_zarr_version,
             "tile_orientations": tile_orientations,
@@ -2707,6 +2700,10 @@ class IsoviewPipelineWidget(PipelineWidget):
         """
         if getattr(arr, "kind", None) != "corrected":
             return
+        # Crop is applied at fuse time only; BigStitcher XML / Consolidate
+        # ignore it.
+        if self._selected_mode != _MODE_FUSE:
+            return
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         from mbo_utilities.gui.widgets import isoview_crop as crop_window
 
@@ -2948,7 +2945,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         if self._iso_selected_cameras is None or not (self._iso_selected_cameras <= set(cams)):
             self._iso_selected_cameras = set(cams)
         imgui.spacing()
-        imgui.text_colored(_SUBSECTION_COLOR, "Cameras")
+        _, _, view_label = resolve_dim_labels(self.parent)
+        view_label = view_label if view_label.endswith("s") else f"{view_label}s"
+        imgui.text_colored(_SUBSECTION_COLOR, view_label)
         set_tooltip("Process only the checked views.", align="right")
         from mbo_utilities.arrays.isoview.array import camera_view_label
         for i, c in enumerate(cams):
@@ -2964,7 +2963,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             if i < len(cams) - 1:
                 imgui.same_line()
         n_sel = len([c for c in cams if c in self._iso_selected_cameras])
-        imgui.text_disabled(f"{n_sel}/{len(cams)} cameras")
+        imgui.text_disabled(f"{n_sel}/{len(cams)} {view_label.lower()}")
 
     def _selected_timepoints(self) -> list[int] | None:
         """Return a 0-based list of selected timepoint indices, or None

@@ -261,9 +261,7 @@ uv pip uninstall mbo_utilities
 ## Troubleshooting
 
 <details>
-<summary><b>GPU/CUDA Errors</b></summary>
-
-**Error: "Failed to auto-detect CUDA root directory"**
+<summary><b>Error: "Failed to auto-detect CUDA root directory"</b></summary>
 
 This occurs when using GPU-accelerated features and CuPy cannot find your CUDA Toolkit.
 
@@ -295,6 +293,18 @@ export CUDA_PATH=/usr/local/cuda-12.6
 ```
 
 If CUDA is not installed, download from [NVIDIA CUDA Downloads](https://developer.nvidia.com/cuda-downloads).
+
+</details>
+
+<details>
+<summary><b>Error: "libcudnn.so.9: cannot open shared object file"</b></summary>
+
+PyTorch can't load a CUDA library that `pip list` still reports as installed — its files were removed, usually when a conflicting CUDA build was uninstalled. Reinstall the environment:
+
+```bash
+cd my_env
+uv sync --reinstall --no-cache --all-extras
+```
 
 </details>
 

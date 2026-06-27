@@ -1106,7 +1106,7 @@ def _init_s2p_selection_state(self):
     try:
         if hasattr(self, "image_widget") and self.image_widget.data:
             data = self.image_widget.data[0]
-            max_frames = data.shape[0]
+            max_frames = int(getattr(data, "num_timepoints", None) or data.shape[0])
             if hasattr(data, "num_planes"):
                 num_planes = data.num_planes
             elif data.ndim == 4:

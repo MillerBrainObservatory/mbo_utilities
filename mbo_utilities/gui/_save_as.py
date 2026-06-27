@@ -870,7 +870,7 @@ def _draw_selection_section(parent: Any):
     num_channels = 1
     try:
         data = parent.image_widget.data[0]
-        max_frames = data.shape[0]
+        max_frames = int(getattr(data, "num_timepoints", None) or data.shape[0])
         # get actual z-planes
         if hasattr(data, "num_planes"):
             num_planes = data.num_planes
@@ -1248,7 +1248,10 @@ def _draw_save_button(parent: Any):
                 # build frames list from parsed timepoint selection
                 tp_parsed = parent._saveas_tp_parsed
                 try:
-                    max_timepoints = parent.image_widget.data[0].shape[0]
+                    _d = parent.image_widget.data[0]
+                    max_timepoints = int(
+                        getattr(_d, "num_timepoints", None) or _d.shape[0]
+                    )
                 except (IndexError, AttributeError):
                     max_timepoints = 1000
 
@@ -1365,9 +1368,15 @@ def _draw_save_button(parent: Any):
                     frames_msg = f"{n_frames} frames ({tp_parsed.include_str})"
                 else:
                     frames_msg = "all frames"
-                roi_msg = f"ROIs {rois}" if rois else roi_mode.description
+                num_rois = getattr(parent.image_widget.data[0], "num_rois", 1)
+                if rois:
+                    roi_msg = f", ROIs {rois}"
+                elif num_rois > 1:
+                    roi_msg = f", {roi_mode.description}"
+                else:
+                    roi_msg = ""
                 channels_msg = f", channels {save_channels}" if len(save_channels) < num_channels else ""
-                parent.logger.info(f"Saving planes {save_planes}{channels_msg} ({frames_msg}), {roi_msg}")
+                parent.logger.info(f"Saving planes {save_planes}{channels_msg} ({frames_msg}){roi_msg}")
                 parent.logger.info(
                     f"Saving to {parent._saveas_outdir} as {parent._ext}"
                 )
