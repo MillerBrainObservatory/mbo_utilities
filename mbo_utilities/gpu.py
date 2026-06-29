@@ -68,12 +68,15 @@ def gpu_devices() -> list[dict[str, Any]]:
     """Per-device memory and utilization.
 
     Returns one dict per device with keys: index, name, total_mb, used_mb,
-    free_mb, util_pct, temp_c. Empty list if no NVIDIA GPU / driver.
+    free_mb, util_pct, temp_c, driver_model, driver_model_pending. The driver
+    model is "WDDM"/"TCC" on Windows and None elsewhere (Linux reports N/A).
+    Empty list if no NVIDIA GPU / driver.
     """
     out = _run([
         "nvidia-smi",
         "--query-gpu=index,name,memory.total,memory.used,memory.free,"
-        "utilization.gpu,temperature.gpu",
+        "utilization.gpu,temperature.gpu,driver_model.current,"
+        "driver_model.pending",
         "--format=csv,noheader,nounits",
     ])
     if not out:
@@ -85,6 +88,13 @@ def gpu_devices() -> list[dict[str, Any]]:
             return float(s)
         except ValueError:
             return None
+
+    def _dm(s: str) -> str | None:
+        # nvidia-smi prints "WDDM"/"TCC" on Windows, "[N/A]"/"N/A" elsewhere.
+        s = s.strip().strip("[]").strip()
+        if not s or s.upper() in ("N/A", "NA", "NOT SUPPORTED"):
+            return None
+        return s
 
     devices = []
     for line in out.splitlines():
@@ -107,6 +117,8 @@ def gpu_devices() -> list[dict[str, Any]]:
             "free_mb": _num(free),
             "util_pct": _num(util),
             "temp_c": _num(temp),
+            "driver_model": _dm(parts[7]) if len(parts) > 7 else None,
+            "driver_model_pending": _dm(parts[8]) if len(parts) > 8 else None,
         })
     return devices
 
