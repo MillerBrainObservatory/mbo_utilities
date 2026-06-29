@@ -132,7 +132,10 @@ def draw_process_status_indicator(parent: Any):
     n_completed = len(completed_procs)
     n_errors = len(error_procs)
 
-    # Determine status color and icon
+    # Determine status color and icon. `status_width_text` (when set) sizes the
+    # button to a fixed worst-case width so a per-frame-changing label (the live
+    # %) doesn't make the click target jitter and drop clicks.
+    status_width_text = None
     if n_errors > 0:
         # errors take priority
         status_color = imgui.ImVec4(0.8, 0.2, 0.2, 1.0)  # Dark Red
@@ -145,6 +148,8 @@ def draw_process_status_indicator(parent: Any):
         if progress_items:
             avg_progress = sum(item["progress"] for item in progress_items) / len(progress_items)
             status_text = f"{ICON_RUNNING} Running ({n_running}) {int(avg_progress * 100)}%"
+            # widest the % can get -> fixes the button width as it animates
+            status_width_text = f"{ICON_RUNNING} Running ({n_running}) 100%"
         else:
             status_text = f"{ICON_RUNNING} Running ({n_running})"
     elif n_completed > 0:
@@ -175,7 +180,14 @@ def draw_process_status_indicator(parent: Any):
     imgui.push_style_color(imgui.Col_.button_hovered, hover_col)
     imgui.push_style_color(imgui.Col_.button_active, status_color)
 
-    if imgui.button(status_text + "##process_status"):
+    # fixed width while the label animates so the click target stays put
+    if status_width_text is not None:
+        pad = imgui.get_style().frame_padding.x
+        btn_w = imgui.calc_text_size(status_width_text).x + pad * 2.0
+        clicked = imgui.button(status_text + "##process_status", imgui.ImVec2(btn_w, 0.0))
+    else:
+        clicked = imgui.button(status_text + "##process_status")
+    if clicked:
         parent._show_process_console = True
 
     imgui.pop_style_color(4)  # button, text, hovered, active

@@ -381,6 +381,17 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._pyramid: bool = True
         self._pyramid_max_layers: int = 4
 
+        # Zarr chunk/shard layout (Correct + Fuse). 0 in any axis = auto:
+        # inner chunk -> one Y×X plane, shard -> memory-bounded Z-slab.
+        # Sharding off = one chunk per file.
+        self._zarr_sharded: bool = True
+        self._zarr_chunk_z: int = 0
+        self._zarr_chunk_y: int = 0
+        self._zarr_chunk_x: int = 0
+        self._zarr_shard_z: int = 0
+        self._zarr_shard_y: int = 0
+        self._zarr_shard_x: int = 0
+
         # Consolidate-mode state
         self._consolidate_output_path: str = ""
         self._consolidate_pyramid: bool = True
@@ -406,11 +417,6 @@ class IsoviewPipelineWidget(PipelineWidget):
         # contiguously (first plane of the lower block meets the last of the
         # upper). Forwarded to generate_bigstitcher_xml(reverse_z=...).
         self._stitcher_reverse_z: bool = True
-
-        # Rotated only: rotate content upright to match the tile grid. Tilts the
-        # dataset vs world axes (BDV view-rotation swings it); off keeps cameras
-        # in CM00's native frame, orient the whole dataset in BigStitcher.
-        self._stitcher_upright: bool = True
 
         # Link the existing .corrected zarrs in the dataset.xml instead of
         # writing a converted copy (no conversion step). On by default; uncheck
@@ -459,6 +465,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._correct_background_percentile: float = 5.0
         self._correct_median_kernel_size: int = 3
         self._correct_median_kernel_enabled: bool = True
+        self._correct_subtract_background: bool = False
         self._correct_mask_percentile: float = 1.0
         self._correct_subsample_factor: int = 100
         self._correct_gauss_kernel: int = 5
@@ -1258,39 +1265,46 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Join adjacent z-blocks contiguously (camera scans -Z)."
             )
 
-            _, self._stitcher_upright = imgui.checkbox(
-                "Upright (rotated)", self._stitcher_upright,
-            )
-            set_tooltip(
-                "Rotated only: rotate content upright to match the tile grid. "
-                "Off keeps cameras in CM00's native frame (no tilt under view "
-                "rotation; orient in BigStitcher)."
-            )
+            # Raw .stacks have no .corrected zarr to link against.
+            if getattr(self._get_array(), "kind", None) == "raw":
+                self._stitcher_link_existing = False
+            else:
+                ch_link, self._stitcher_link_existing = imgui.checkbox(
+                    "Link existing (.corrected)", self._stitcher_link_existing,
+                )
+                if ch_link:
+                    # toggling link flips per-camera <-> fused, which switches
+                    # the orientation targets (per-camera tables vs the VW00
+                    # profile). Re-seed so a fused VW00 profile can't leak onto
+                    # cam0.
+                    self._apply_orient_profile_all(self._stitcher_orient_profile)
+                set_tooltip(
+                    "Reference the .corrected zarrs in place, no conversion. "
+                    "Much faster; .corrected only."
+                )
 
-            ch_link, self._stitcher_link_existing = imgui.checkbox(
-                "Link existing (.corrected)", self._stitcher_link_existing,
-            )
-            if ch_link:
-                # toggling link flips per-camera <-> fused, which switches the
-                # orientation targets (per-camera tables vs the VW00 profile).
-                # Re-seed so a fused VW00 profile can't leak onto cam0.
-                self._apply_orient_profile_all(self._stitcher_orient_profile)
+            # Workers only drive the zarr conversion; link mode skips it.
+            imgui.begin_disabled(self._stitcher_link_existing)
+            imgui.set_next_item_width(_input_w())
+            _, new_workers = imgui.input_int("Workers", self._workers, 1, 2)
+            self._workers = max(1, min(_MAX_WORKERS, new_workers))
             set_tooltip(
-                "Reference the .corrected zarrs in place, no conversion. "
-                "Much faster; .corrected only."
+                "Parallel volume writers (threads) for zarr conversion. "
+                "RAM-bound: each holds one full camera volume + its pyramid."
             )
+            imgui.end_disabled()
 
             imgui.set_next_item_width(_input_w())
             prev_pc = self._is_per_camera_export()
             ch_cam, self._stitcher_cameras = imgui.input_text(
-                "Cameras", self._stitcher_cameras,
+                "Views", self._stitcher_cameras,
             )
             if ch_cam and self._is_per_camera_export() != prev_pc:
-                # entering/leaving per-camera switches the orientation targets;
+                # entering/leaving per-view switches the orientation targets;
                 # re-seed so the fused VW00 profile can't leak onto cam0.
                 self._apply_orient_profile_all(self._stitcher_orient_profile)
             set_tooltip(
-                "Per-camera export from .corrected, e.g. 0,2. "
+                "Per-view export from .corrected, e.g. 0,2. "
                 "Empty: fused VW00/VW90."
             )
 
@@ -1305,14 +1319,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 imgui.set_next_item_width(_input_w())
                 imgui.combo("Zarr version", 0, ["v3"])
                 imgui.end_disabled()
-
-            imgui.set_next_item_width(_input_w())
-            _, new_workers = imgui.input_int("Workers", self._workers, 1, 2)
-            self._workers = max(1, min(_MAX_WORKERS, new_workers))
-            set_tooltip(
-                "Parallel volume writers (threads). RAM-bound: each holds "
-                "one full camera volume + its pyramid."
-            )
 
     def _draw_consolidate_io_box(self) -> None:
         """Consolidate I/O options for the Parameters popup."""
@@ -1397,6 +1403,82 @@ class IsoviewPipelineWidget(PipelineWidget):
             "0–9. Higher = smaller files, slower writes; gains taper past ~5."
         )
 
+    def _draw_zarr_chunk_controls(self) -> None:
+        """Sharding toggle + inner-chunk / shard sizes (zarr only).
+
+        Called from inside a ``tooltip_marks_right()`` block. Each size is
+        three Z/Y/X int inputs; set all three to use them, leave any at 0
+        for auto (inner chunk = one Y×X plane, shard = Z-slab).
+        """
+        if self._output_format != "zarr":
+            return
+
+        _, self._zarr_sharded = imgui.checkbox("Sharding", self._zarr_sharded)
+        set_tooltip(
+            "Group inner chunks into shard files (bounded file count). "
+            "Off = one chunk per file."
+        )
+
+        def _zyx(label, z, y, x, tip):
+            # Fit the 3-field input within the box so its label + (?) marker
+            # never overrun the right edge. Reserve room for the trailing
+            # label and the right-aligned (?).
+            style = imgui.get_style()
+            avail = imgui.get_content_region_avail().x
+            reserve = (
+                imgui.calc_text_size(label).x
+                + imgui.calc_text_size("(?)").x
+                + 2 * style.item_spacing.x
+                + 4
+            )
+            imgui.set_next_item_width(max(_input_w(), avail - reserve))
+            _, vals = imgui.input_int3(label, [int(z), int(y), int(x)])
+            set_tooltip(tip)
+            return [max(0, int(v)) for v in vals]
+
+        self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x = _zyx(
+            "Chunk Z,Y,X",
+            self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x,
+            "Inner chunk decompressed per read. Set all three; 0 = auto "
+            "(one Y×X plane).",
+        )
+        if self._zarr_sharded:
+            self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x = _zyx(
+                "Shard Z,Y,X",
+                self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x,
+                "Outer shard file size. Set all three; 0 = auto "
+                "(memory-bounded Z-slab).",
+            )
+
+    @staticmethod
+    def _zyx_tuple(z: int, y: int, x: int):
+        """(z, y, x) tuple when all three are >0, else None (auto)."""
+        if z > 0 and y > 0 and x > 0:
+            return [int(z), int(y), int(x)]
+        return None
+
+    def _zarr_layout_args(self) -> dict:
+        """zarr_chunks / zarr_shards / zarr_sharded for the task args.
+
+        Empty when the output format isn't zarr (the keys are harmless but
+        meaningless for tif/klb, so skip them).
+        """
+        if self._output_format != "zarr":
+            return {}
+        args: dict = {"zarr_sharded": bool(self._zarr_sharded)}
+        chunks = self._zyx_tuple(
+            self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x
+        )
+        if chunks is not None:
+            args["zarr_chunks"] = chunks
+        if self._zarr_sharded:
+            shards = self._zyx_tuple(
+                self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x
+            )
+            if shards is not None:
+                args["zarr_shards"] = shards
+        return args
+
     def _draw_correct_io_box(self) -> None:
         """Correct-mode I/O options for the Parameters popup. The
         ``output_suffix`` lives in the Run-tab Output section now;
@@ -1421,6 +1503,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             self._draw_codec_controls()
+            self._draw_zarr_chunk_controls()
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -1573,6 +1656,14 @@ class IsoviewPipelineWidget(PipelineWidget):
                 "Raise if a dark haze remains; too high clips dim signal."
             )
 
+            _, self._correct_subtract_background = imgui.checkbox(
+                "Subtract background", self._correct_subtract_background,
+            )
+            set_tooltip(
+                "Subtract the per-camera Background_##.tif frame pixel-by-pixel\n"
+                "(CM## − Background_##.tif, clamped at 0)."
+            )
+
     def _draw_fuse_io_box(self) -> None:
         """Fuse-mode I/O options for the Parameters popup.
 
@@ -1599,6 +1690,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             self._draw_codec_controls()
+            self._draw_zarr_chunk_controls()
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -2081,7 +2173,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             "source": source,
             "orient_to_cm00": orient_to_cm00,
             "reverse_z": self._stitcher_reverse_z,
-            "upright": self._stitcher_upright,
             "link_existing": self._stitcher_link_existing,
             "zarr_version": self._stitcher_zarr_version,
             "tile_orientations": tile_orientations,
@@ -2118,6 +2209,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             "do_tenengrad": self._correct_do_tenengrad,
             "background_percentile": self._correct_background_percentile,
             "median_kernel": median_kernel,
+            "subtract_background_image": bool(self._correct_subtract_background),
             "mask_percentile": self._correct_mask_percentile,
             "subsample_factor": self._correct_subsample_factor,
             "gauss_kernel": self._correct_gauss_kernel,
@@ -2125,9 +2217,14 @@ class IsoviewPipelineWidget(PipelineWidget):
             "segment_threshold": self._correct_segment_threshold,
             "splitting": self._correct_splitting,
         }
+        # Force the pipeline's tiled vs timepoint mode from the loaded array so
+        # a single-unit selection can't flip it (specimen/timepoint counts
+        # alone would).
+        is_tiled = bool(getattr(arr, "is_tiled", False))
+        args["tiled_override"] = is_tiled
         sel = self._selected_timepoints()
         if sel is not None:
-            if bool(getattr(arr, "is_tiled", False)):
+            if is_tiled:
                 # tiled: the slicing timeline IS the spatial-tile (SPM) axis, and
                 # isoview slices tiled data by `specimens`, not `timepoints`. map
                 # the selected positions to SPM indices so "process 1 tile" works.
@@ -2138,6 +2235,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         cams = self._selected_cameras(arr)
         if cams is not None:
             args["cameras"] = cams
+        args.update(self._zarr_layout_args())
         args.update(self._microscope_kwargs())
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         args.update(crop_state.to_config_args(arr))
@@ -2323,40 +2421,58 @@ class IsoviewPipelineWidget(PipelineWidget):
             ],
             **by_view,
         }
-        # Always pass an explicit timepoints list for fuse: isoview's
-        # ProcessingConfig.__post_init__ auto-detects timepoints from
-        # input_dir (the RAW root, all 61 TMs even when only the first
-        # 10 were corrected). Scan the .corrected SPM## tree to find
-        # which TMs actually have corrected output and intersect that
-        # with the user's slicing selection.
-        from mbo_utilities.arrays.isoview.array import (
-            _find_tm_folders, _extract_timepoint, _SPM_PATTERN,
-        )
-        corrected_root = scan_root if _SPM_PATTERN.match(scan_root.name) else None
-        if corrected_root is None:
-            for d in scan_root.iterdir() if scan_root.is_dir() else []:
-                if d.is_dir() and _SPM_PATTERN.match(d.name):
-                    corrected_root = d
-                    break
-        available_tms: list[int] = []
-        if corrected_root is not None:
-            available_tms = [
-                _extract_timepoint(d.name)
-                for d in _find_tm_folders(corrected_root)
-            ]
+        # Force the pipeline's tiled vs timepoint mode from the loaded array's
+        # structure so a single-unit selection can't flip it (specimens/
+        # timepoints counts alone would).
+        is_tiled = bool(getattr(arr, "is_tiled", False))
+        args["tiled_override"] = is_tiled
         tps = self._selected_timepoints()
-        if available_tms:
-            if tps is None:
-                args["timepoints"] = available_tms
-            else:
-                # Map 0-based selection indices onto the sorted list of
-                # available TMs. Keeps the slicing UI consistent with
-                # what the user sees as "1..N corrected timepoints".
-                args["timepoints"] = [
-                    available_tms[i] for i in tps if 0 <= i < len(available_tms)
+        if is_tiled:
+            # Tiled: the slicing axis IS the spatial tile (SPM). Map the
+            # selection to specimen ids so a subset fuses only those tiles;
+            # a whole selection (tps is None) leaves specimens unset for
+            # isoview to auto-detect them all. A tiled tree carries a single
+            # TM, so don't pass a tile-based timepoints list (it would
+            # collapse to [0] and silently drop the selection).
+            if tps is not None:
+                tiles = list(getattr(arr, "_timepoints", []) or [])
+                args["specimens"] = [
+                    tiles[i] for i in tps if 0 <= i < len(tiles)
+                ] or tps
+        else:
+            # Timelapse: isoview's ProcessingConfig.__post_init__ auto-detects
+            # timepoints from input_dir (the RAW root, all TMs even when only
+            # the first N were corrected). Scan the .corrected SPM## tree for
+            # the TMs that actually have corrected output and intersect that
+            # with the user's slicing selection.
+            from mbo_utilities.arrays.isoview.array import (
+                _find_tm_folders, _extract_timepoint, _SPM_PATTERN,
+            )
+            corrected_root = scan_root if _SPM_PATTERN.match(scan_root.name) else None
+            if corrected_root is None:
+                for d in scan_root.iterdir() if scan_root.is_dir() else []:
+                    if d.is_dir() and _SPM_PATTERN.match(d.name):
+                        corrected_root = d
+                        break
+            available_tms: list[int] = []
+            if corrected_root is not None:
+                available_tms = [
+                    _extract_timepoint(d.name)
+                    for d in _find_tm_folders(corrected_root)
                 ]
-        elif tps is not None:
-            args["timepoints"] = tps
+            if available_tms:
+                if tps is None:
+                    args["timepoints"] = available_tms
+                else:
+                    # Map 0-based selection indices onto the sorted list of
+                    # available TMs. Keeps the slicing UI consistent with
+                    # what the user sees as "1..N corrected timepoints".
+                    args["timepoints"] = [
+                        available_tms[i] for i in tps if 0 <= i < len(available_tms)
+                    ]
+            elif tps is not None:
+                args["timepoints"] = tps
+        args.update(self._zarr_layout_args())
         args.update(self._microscope_kwargs())
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         args.update(crop_state.to_config_args(arr))
@@ -2477,7 +2593,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         size_bytes = _dataset_size_bytes(self, filenames)
 
         shape = tuple(arr.shape)
-        dims = "TCZYX" if len(shape) == 5 else None
+        # isoview C axis holds views (VW##), not color channels.
+        dims = "TVZYX" if len(shape) == 5 else None
         shape_text = " × ".join(str(s) for s in shape)
         if dims and len(dims) == len(shape):
             # dimension labels on their own line under the sizes
@@ -2707,6 +2824,10 @@ class IsoviewPipelineWidget(PipelineWidget):
         """
         if getattr(arr, "kind", None) != "corrected":
             return
+        # Crop is applied at fuse time only; BigStitcher XML / Consolidate
+        # ignore it.
+        if self._selected_mode != _MODE_FUSE:
+            return
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         from mbo_utilities.gui.widgets import isoview_crop as crop_window
 
@@ -2808,6 +2929,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             self._correct_background_percentile = 5.0
             self._correct_median_kernel_size = 3
             self._correct_median_kernel_enabled = True
+            self._correct_subtract_background = False
         imgui.push_style_color(
             imgui.Col_.text, imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
         )
@@ -2948,7 +3070,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         if self._iso_selected_cameras is None or not (self._iso_selected_cameras <= set(cams)):
             self._iso_selected_cameras = set(cams)
         imgui.spacing()
-        imgui.text_colored(_SUBSECTION_COLOR, "Cameras")
+        _, _, view_label = resolve_dim_labels(self.parent)
+        view_label = view_label if view_label.endswith("s") else f"{view_label}s"
+        imgui.text_colored(_SUBSECTION_COLOR, view_label)
         set_tooltip("Process only the checked views.", align="right")
         from mbo_utilities.arrays.isoview.array import camera_view_label
         for i, c in enumerate(cams):
@@ -2964,7 +3088,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             if i < len(cams) - 1:
                 imgui.same_line()
         n_sel = len([c for c in cams if c in self._iso_selected_cameras])
-        imgui.text_disabled(f"{n_sel}/{len(cams)} cameras")
+        imgui.text_disabled(f"{n_sel}/{len(cams)} {view_label.lower()}")
 
     def _selected_timepoints(self) -> list[int] | None:
         """Return a 0-based list of selected timepoint indices, or None

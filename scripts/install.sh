@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
 # MBO Utilities Installation Script for Linux/macOS
-# Installs the global 'mbo' CLI (uv tool) and/or a local dev environment,
-# with an optional desktop shortcut for each.
+# Installs a local dev environment, with an optional desktop shortcut.
 #
 # Usage:
 #   curl -LsSf https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.sh | bash
@@ -29,8 +28,6 @@ SOURCE=""
 INSTALL_SPEC=""
 BRANCH_REF=""
 EXTRAS=()
-INSTALL_CLI=true
-INSTALL_ENV=true
 
 # GPU detection
 GPU_AVAILABLE=false
@@ -204,69 +201,6 @@ install_uv() {
         error "Failed to install uv"
         exit 1
     fi
-}
-
-get_uv_tool_bin_dir() {
-    # `uv tool dir --bin` is the canonical query. appending /bin to
-    # `uv tool dir` (without --bin) would point at the tool *install*
-    # directory, not the executable directory — different paths.
-    local bin_dir=$(uv tool dir --bin 2>/dev/null || echo "")
-    if [[ -n "$bin_dir" ]]; then
-        echo "$bin_dir"
-    else
-        echo "$HOME/.local/bin"
-    fi
-}
-
-# =============================================================================
-# Installation Type Selection
-# =============================================================================
-
-show_install_type_prompt() {
-    if [[ "$ASSUME_YES" == "1" ]]; then
-        info "MBO_ASSUME_YES: installing both global CLI + local environment."
-        INSTALL_CLI=true
-        INSTALL_ENV=true
-        return
-    fi
-
-    echo ""
-    echo -e "${WHITE}Installation Type${NC}"
-    echo ""
-    echo -e "  ${GRAY}Global          - global 'mbo' command on your PATH, just runs the GUI.${NC}"
-    echo -e "  ${GRAY}                  Self-contained; no activation, no imports, no notebooks.${NC}"
-    echo -e "  ${GRAY}Local           - project-local venv you 'cd' into and run 'uv run ...' or${NC}"
-    echo -e "  ${GRAY}                  import from. Use this for scripts, notebooks, development.${NC}"
-    echo -e "  ${GRAY}Both            - pick this if you want the GUI anywhere AND a local env to code in.${NC}"
-    echo ""
-    echo -e "  ${CYAN}[1] Both${NC}   - global mbo command + local Python environment (Recommended)"
-    echo -e "  ${CYAN}[2] Local${NC}  - Python environment only (for library use)"
-    echo -e "  ${CYAN}[3] Global${NC} - global mbo command only (just the GUI)"
-    echo ""
-
-    while true; do
-        read -p "Select installation type (1-3): " choice
-        case $choice in
-            1)
-                INSTALL_CLI=true
-                INSTALL_ENV=true
-                return
-                ;;
-            2)
-                INSTALL_CLI=false
-                INSTALL_ENV=true
-                return
-                ;;
-            3)
-                INSTALL_CLI=true
-                INSTALL_ENV=false
-                return
-                ;;
-            *)
-                warn "Invalid selection."
-                ;;
-        esac
-    done
 }
 
 # =============================================================================
@@ -535,18 +469,6 @@ get_cupy_packages() {
     echo "cupy-cuda${major}x nvidia-cuda-nvrtc-cu${major} nvidia-cuda-runtime-cu${major}"
 }
 
-get_uv_tool_python_path() {
-    # path to the python inside the mbo_utilities uv tool env (or nothing).
-    local tool_dir name candidate
-    tool_dir=$(uv tool dir 2>/dev/null) || return 0
-    [[ -n "$tool_dir" ]] || return 0
-    for name in mbo_utilities mbo-utilities; do
-        candidate="$tool_dir/$name/bin/python"
-        [[ -x "$candidate" ]] && { echo "$candidate"; return 0; }
-    done
-    return 0
-}
-
 # =============================================================================
 # Environment Location
 # =============================================================================
@@ -649,121 +571,6 @@ parse_version_info() {
     fi
 
     echo "$version_output"
-}
-
-# =============================================================================
-# CLI Tool Installation
-# =============================================================================
-
-install_mbo_tool() {
-    echo ""
-    info "Installing mbo CLI tool via uv tool install..."
-
-    # Build spec with extras
-    local full_spec="$INSTALL_SPEC"
-    if [[ ${#EXTRAS[@]} -gt 0 ]]; then
-        local extras_str=$(IFS=','; echo "${EXTRAS[*]}")
-        if [[ "$SOURCE" == "pypi" ]]; then
-            full_spec="mbo_utilities[$extras_str]"
-        else
-            # Git URL format: insert extras after package name
-            full_spec="mbo_utilities[$extras_str] @ git+https://github.com/$GITHUB_REPO@$BRANCH_REF"
-        fi
-    fi
-
-    info "  Spec: $full_spec"
-
-    # Check if already installed
-    local existing_tools=$(uv tool list 2>/dev/null || echo "")
-    if echo "$existing_tools" | grep -q "mbo[_-]utilities"; then
-        if [[ "$OVERWRITE" == "1" ]]; then
-            info "Uninstalling existing mbo_utilities..."
-            uv tool uninstall mbo_utilities 2>/dev/null || true
-        else
-            echo ""
-            warn "mbo_utilities is already installed as a tool."
-            echo ""
-            echo -e "  ${CYAN}[1] Upgrade${NC}   - Uninstall and reinstall"
-            echo -e "  ${CYAN}[2] Skip${NC}      - Keep existing installation"
-            echo -e "  ${CYAN}[3] Cancel${NC}    - Exit"
-            echo ""
-
-            if [[ "$ASSUME_YES" == "1" ]]; then
-                info "MBO_ASSUME_YES: keeping existing installation."
-                return 0
-            fi
-
-            while true; do
-                read -p "Select option (1-3): " choice
-                case $choice in
-                    1)
-                        info "Uninstalling existing mbo_utilities..."
-                        uv tool uninstall mbo_utilities 2>/dev/null || true
-                        break
-                        ;;
-                    2)
-                        info "Keeping existing installation."
-                        return 0
-                        ;;
-                    3)
-                        info "Installation cancelled."
-                        exit 0
-                        ;;
-                    *)
-                        warn "Invalid selection."
-                        ;;
-                esac
-            done
-        fi
-    fi
-
-    # Install tool.
-    # --reinstall forces uv to re-fetch and rebuild even when the same branch
-    # name is already cached, so re-running after pushing fixes to a branch
-    # picks them up instead of keeping the stale tool env.
-    if uv tool install "$full_spec" --python "$MBO_PYTHON" --reinstall; then
-        # ensure the tool bin dir is on the user's shell PATH. uv's own
-        # install-time PATH wiring doesn't always fire (locked-down
-        # configs, unusual shells). idempotent — safe to run every time.
-        uv tool update-shell 2>&1 || true
-
-        # make `mbo` reachable in THIS shell too so the user doesn't
-        # need to open a new terminal just to try it.
-        local bin_dir=$(get_uv_tool_bin_dir)
-        if [[ -n "$bin_dir" && ":$PATH:" != *":$bin_dir:"* ]]; then
-            export PATH="$bin_dir:$PATH"
-        fi
-
-        # GPU torch + cupy into the tool's own venv, post-install so a
-        # resolution hiccup only warns instead of aborting. pytorch only
-        # publishes GPU wheels to its own index; without this the tool runs
-        # suite2p/cellpose on CPU.
-        local tool_py=$(get_uv_tool_python_path)
-        local torch_index=$(get_pytorch_index_url)
-        if [[ -n "$tool_py" && -n "$torch_index" ]]; then
-            info "Replacing CPU torch with CUDA build ($torch_index)..."
-            if uv pip install --python "$tool_py" --reinstall torch torchvision --index-url "$torch_index"; then
-                success "GPU torch installed in tool env"
-            else
-                warn "GPU torch install failed. Tool will use CPU torch."
-            fi
-        fi
-        local cupy_pkgs=$(get_cupy_packages)
-        if [[ -n "$tool_py" && -n "$cupy_pkgs" ]]; then
-            info "Installing CuPy for GPU axial registration: $cupy_pkgs..."
-            if uv pip install --python "$tool_py" --reinstall $cupy_pkgs; then
-                success "CuPy installed in tool env"
-            else
-                warn "CuPy install failed. Axial registration will use CPU."
-            fi
-        fi
-
-        success "mbo CLI tool installed successfully"
-        return 0
-    else
-        error "Failed to install mbo tool"
-        return 1
-    fi
 }
 
 # =============================================================================
@@ -1133,31 +940,7 @@ show_usage_instructions() {
     echo -e "${WHITE}Installation Complete${NC}"
     echo ""
 
-    # two distinct usage modes depending on what was installed. CLI works
-    # from any directory; environment is project-local and needs a `cd`
-    # (or activation) first. label them so users running both don't
-    # conflate the two.
-    local show_both=false
-    if [[ "$INSTALL_CLI" == "true" && "$INSTALL_ENV" == "true" && -n "$MBO_ENV_PATH" && -d "$MBO_ENV_PATH" ]]; then
-        show_both=true
-    fi
-
-    local section=0
-    if [[ "$INSTALL_CLI" == "true" ]]; then
-        section=$((section + 1))
-        local bin_dir=$(get_uv_tool_bin_dir)
-        local header="Global - available system-wide"
-        if $show_both; then header="(${section}) $header"; fi
-        echo -e "  ${GRAY}${header}${NC}"
-        echo -e "    ${WHITE}mbo${NC}                    # open GUI"
-        echo -e "    ${WHITE}mbo /path/to/data${NC}      # open specific file"
-        echo -e "    ${WHITE}mbo --help${NC}             # show all commands"
-        echo -e "    ${GRAY}Location: $bin_dir/mbo${NC}"
-        echo ""
-    fi
-
-    if [[ "$INSTALL_ENV" == "true" && -n "$MBO_ENV_PATH" && -d "$MBO_ENV_PATH" ]]; then
-        section=$((section + 1))
+    if [[ -n "$MBO_ENV_PATH" && -d "$MBO_ENV_PATH" ]]; then
         # $MBO_ENV_PATH points at the actual venv dir (ends in /.venv when
         # the user pointed at a project root). `uv run` wants the project
         # dir, not the venv dir — strip the trailing .venv so `cd` lands
@@ -1168,9 +951,7 @@ show_usage_instructions() {
             cd_path="${cd_path%/.venv/}"
         fi
 
-        local header="Local environment - use from the env directory"
-        if $show_both; then header="(${section}) $header"; fi
-        echo -e "  ${GRAY}${header}${NC}"
+        echo -e "  ${GRAY}Local environment - use from the env directory${NC}"
         echo -e "    ${WHITE}cd $cd_path${NC}"
         echo -e "    ${WHITE}uv run mbo${NC}             # open GUI (uses this env)"
         echo -e "    ${WHITE}uv run mbo --help${NC}      # show all commands"
@@ -1201,41 +982,26 @@ main() {
         install_uv
     fi
 
-    # Step 1: Choose installation type
-    show_install_type_prompt
-
-    # Step 2: Choose source
+    # Step 1: Choose source
     show_source_selection
 
-    # Step 3: Detect GPU
+    # Step 2: Detect GPU
     check_nvidia_gpu
 
-    # Step 4: Choose extras
+    # Step 3: Choose extras
     show_optional_dependencies
 
-    # Step 5: Get environment location if needed
-    if [[ "$INSTALL_ENV" == "true" && "$SKIP_ENV" != "1" ]]; then
+    # Step 4: Get environment location
+    if [[ "$SKIP_ENV" != "1" ]]; then
         show_env_location_prompt
     fi
 
-    # Step 6: Install global CLI tool if requested
-    if [[ "$INSTALL_CLI" == "true" ]]; then
-        if ! install_mbo_tool; then
-            error "Global installation failed."
-            exit 1
-        fi
-        if read_yes_no "Add a desktop shortcut for the global app?" "y"; then
-            local bin_dir=$(get_uv_tool_bin_dir)
-            add_mbo_shortcut "$bin_dir/mbo" "Miller Brain Studio"
-        fi
-    fi
-
-    # Step 7: Create local environment if requested
-    if [[ "$INSTALL_ENV" == "true" && "$SKIP_ENV" != "1" && -n "$MBO_ENV_PATH" ]]; then
+    # Step 5: Create local environment
+    if [[ "$SKIP_ENV" != "1" && -n "$MBO_ENV_PATH" ]]; then
         install_dev_environment
         if [[ -x "$MBO_ENV_PATH/bin/mbo" ]]; then
-            if read_yes_no "Add a desktop shortcut for the local environment?" "n"; then
-                add_mbo_shortcut "$MBO_ENV_PATH/bin/mbo" "Miller Brain Studio (local)"
+            if read_yes_no "Add a desktop shortcut?" "n"; then
+                add_mbo_shortcut "$MBO_ENV_PATH/bin/mbo" "Miller Brain Studio"
             fi
         fi
     fi
@@ -1245,9 +1011,6 @@ main() {
 
     success "Installation completed!"
     echo ""
-    if [[ "$INSTALL_CLI" == "true" ]]; then
-        echo -e "${YELLOW}You may need to restart your terminal for PATH changes to take effect.${NC}"
-    fi
 }
 
 main "$@"

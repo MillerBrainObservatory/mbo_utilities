@@ -336,6 +336,8 @@ def imwrite(
     axial_max_frames = int(kwargs.pop("max_frames", 200))
     axial_chunk_frames = int(kwargs.pop("chunk_frames", 10))
     axial_max_reg_xy = int(kwargs.pop("max_reg_xy", 30))
+    _axial_ds = kwargs.pop("axial_downsample", None)
+    axial_downsample = None if _axial_ds is None else int(_axial_ds)
 
     if register_z:
         total_planes = (
@@ -356,6 +358,7 @@ def imwrite(
                 max_frames=axial_max_frames,
                 chunk_frames=axial_chunk_frames,
                 max_reg_xy=axial_max_reg_xy,
+                downsample=axial_downsample,
                 progress_callback=progress_callback,
             )
 

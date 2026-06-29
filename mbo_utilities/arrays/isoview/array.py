@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -651,6 +653,26 @@ _NOT_PER_CAMERA_FIELDS = frozenset({
 # per-tile stride fields surfaced in each tile's metadata section
 _TILE_STRIDE_KEYS = (
     "tile_stride_xyz_um", "tile_stride_x", "tile_stride_y", "tile_stride_z",
+)
+
+# Per-view fields shown in the GUI "Views" panel: per-camera intrinsics plus
+# per-view acquisition settings shared across views. Dropped from the top-level
+# reported metadata (they live under metadata["views"] instead).
+_VIEW_METADATA_FIELDS = (
+    "stack_direction", "wavelength", "magnification", "laser_power",
+    "illumination_filter", "illumination_arms", "exposure_time",
+    "detection_filter", "camera_type", "camera_roi",
+    "camera_pixel_pitch_um", "angle", "camera",
+)
+# Duplicated / synonymous fields dropped from the reported metadata entirely.
+# y_step is the axial step for Y-scan views (reported as dz); camera_pixel_size_um
+# duplicates camera_pixel_pitch_um.
+_DROPPED_METADATA_FIELDS = (
+    "view", "y_step", "min_intensity", "channel", "camera_pixel_size_um",
+)
+# Per-tile fields surfaced in the GUI "Tiles" panel.
+_TILE_METADATA_FIELDS = (
+    "specimen_name", "tile_stride_xyz_um", "stage_x", "stage_y", "stage_z",
 )
 
 
@@ -1924,6 +1946,13 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         self._is_tiled: bool = bool(is_tiled)
         self._timepoints = sorted(tp_paths.keys())
         self._cache: dict[tuple[int, int], np.ndarray] = {}
+        # Reusable open zarr handles keyed by path (bounded LRU). Strided
+        # plane reads (e.g. background stats) would otherwise reopen the
+        # store on every read. zarr reads are thread-safe to share; other
+        # formats are opened per read so handles aren't shared across threads.
+        self._vol_cache: OrderedDict[Path, LazyVolume] = OrderedDict()
+        self._vol_cache_lock = threading.Lock()
+        self._vol_cache_max = 16
 
         # Snapshot the (timepoint, view) → path mapping into a flat list
         # at construction time. The scanner already verified every entry
@@ -2188,17 +2217,30 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             return (False, StatsDimRole.GROUP)
         return default_dim_role(name)
 
+    def _summary_stats_store_path(self) -> str | None:
+        """Cache dataset-level summary stats in the first zarr leaf store.
+
+        Raw kinds back onto .klb/.tif and have no zarr attrs, so persistence
+        is skipped there (None); corrected/fused are .ome.zarr.
+        """
+        for tp in self._timepoints:
+            paths = self._tp_paths.get(tp, {})
+            for vk in self._view_keys:
+                p = paths.get(vk)
+                if p is not None and str(p).lower().endswith(".zarr"):
+                    return str(p)
+        return None
+
     @property
     def slider_dim_labels(self) -> tuple[str, ...]:
         """User-facing slider labels for non-singleton T, C, Z axes.
 
         Tiled datasets fold spatial tiles into the T axis, so T is
         labeled ``"Tile"``; timepoint datasets label it ``"Timepoint"``.
-        The C axis is ``"View"`` for fused trees (VW##) and ``"Cam"``
-        otherwise (CM##).
+        The C axis is ``"View"`` (VW##) for every kind.
         """
         t_label = "Tile" if self._is_tiled else "Timepoint"
-        c_label = "View" if self.kind == "fused" else "Cam"
+        c_label = "View"
         labels: list[str] = []
         if len(self._timepoints) > 1:
             labels.append(t_label)
@@ -2284,9 +2326,69 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         """
         return {k: dict(v) for k, v in self._tile_metadata.items()}
 
+    def tile_label(self, slot) -> str:
+        """Grid-token display label (e.g. ``TL010``) for a tiled slot.
+
+        ``slot`` is a scrubber/projection token: an ``SPM##``/``SPC##``
+        string, a bare index (int or digit string), or a ``specimen_name``
+        grid token. Returns the tile's ``specimen_name`` from
+        :attr:`tile_metadata` when known, else the slot's own ``SPM##`` form.
+        """
+        m = re.match(r"^(?:SP[MC])?(\d+)$", str(slot), re.IGNORECASE)
+        if m is None:
+            # already a grid token (or unrecognized) — show as-is
+            return str(slot)
+        spec = int(m.group(1))
+        ti = {v: k for k, v in self._tile_specimen_ids().items()}.get(spec, spec)
+        tile = self._tile_metadata.get(ti)
+        if tile and tile.get("specimen_name"):
+            return str(tile["specimen_name"])
+        return f"SPM{spec:02d}"
+
     @property
     def filenames(self) -> list[Path]:
         return list(self._filenames_snapshot)
+
+    def _view_sections(self) -> dict:
+        """Per-view metadata keyed by VW display label, for the GUI Views panel.
+
+        raw/corrected/clusterpt: one camera per view (``VW00``, ``VW90``, ...).
+        fused: the two opposing cameras merged per fused view
+        (``VW00_VW180``, ``VW90_VW270``). Per-camera intrinsics come from
+        :attr:`_camera_metadata`; per-view settings shared across views are
+        copied in from the common metadata. Fields that differ between the two
+        cameras of a fused view are kept as a list.
+        """
+        if not self._camera_metadata:
+            return {}
+        shared = {k: self._metadata[k] for k in _VIEW_METADATA_FIELDS if k in self._metadata}
+
+        def _entry(cams):
+            merged = dict(shared)
+            for c in cams:
+                for k, v in self._camera_metadata.get(c, {}).items():
+                    if k in _DROPPED_METADATA_FIELDS:
+                        continue
+                    if k in merged and merged[k] != v:
+                        prev = merged[k] if isinstance(merged[k], list) else [merged[k]]
+                        merged[k] = prev + [v] if v not in prev else prev
+                    else:
+                        merged[k] = v
+            return merged
+
+        out: dict[str, dict] = {}
+        if self.kind == "fused":
+            for a0, a1, _chn in self._view_keys:
+                cams = [VIEW_ANGLE_CAMERA.get(a0, a0)]
+                label = f"VW{a0:02d}"
+                if a1 >= 0:
+                    cams.append(VIEW_ANGLE_CAMERA.get(a1, a1))
+                    label = f"VW{a0:02d}_VW{a1:02d}"
+                out[label] = _entry(cams)
+        else:
+            for c in sorted(self._camera_metadata):
+                out[camera_view_label(c)] = _entry([c])
+        return out
 
     @property
     def metadata(self) -> dict:
@@ -2297,9 +2399,18 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         meta["nplanes"] = self._nz
         meta["num_planes"] = self._nz
         nt = len(self._timepoints)
-        meta["num_timepoints"] = nt
-        meta["nframes"] = nt
-        meta["num_frames"] = nt
+        if self._is_tiled:
+            # The T axis holds spatial tiles, not time samples. Report one
+            # timepoint and the tile count separately so readers don't treat
+            # tiles as a time series.
+            meta["num_tiles"] = nt
+            meta["num_timepoints"] = 1
+            meta["nframes"] = 1
+            meta["num_frames"] = 1
+        else:
+            meta["num_timepoints"] = nt
+            meta["nframes"] = nt
+            meta["num_frames"] = nt
         meta["num_color_channels"] = self.num_color_channels
         meta["channel_names"] = list(self._channel_names)
         meta["num_views"] = self.num_views
@@ -2320,19 +2431,29 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             meta.setdefault("dz", float(meta["y_step"]))
         # fs (the T-axis rate) is not reliably encoded in the acquisition
         # XML, so it is left unset for the user to enter via the metadata
-        # editor. vps/fps stay available for reference but no longer seed
-        # fs automatically.
-        if self._camera_metadata:
-            # The GUI metadata viewer renders a dedicated "Cameras" panel
-            # from metadata["cameras"]. Surface per-camera fields there;
-            # the IsoviewArray.camera_metadata property is the programmatic
-            # accessor for the same data.
-            meta["cameras"] = {k: dict(v) for k, v in self._camera_metadata.items()}
+        # editor. fps stays available for reference but no longer seeds fs
+        # automatically. vps (volumes/sec) is a temporal volume rate and is
+        # undefined for a single-timepoint tiled stack, so drop it there.
+        if self._is_tiled:
+            meta.pop("vps", None)
+            meta.pop("volumes_per_second", None)
+        views = self._view_sections()
+        if views:
+            # GUI metadata viewer renders a "Views" panel from metadata["views"]
+            # (VW00, VW90, ... per camera; VW00_VW180, VW90_VW270 fused pairs).
+            # IsoviewArray.camera_metadata is the per-camera programmatic accessor.
+            meta["views"] = views
         if self._tile_metadata:
-            # Tiled-only: the GUI metadata viewer renders a "Tiles" panel
-            # from metadata["tiles"]; IsoviewArray.tile_metadata is the
-            # programmatic accessor for the same per-tile data.
-            meta["tiles"] = {k: dict(v) for k, v in self._tile_metadata.items()}
+            # Tiled-only "Tiles" panel: specimen name + stride + stage offsets.
+            meta["tiles"] = {
+                ti: {k: t[k] for k in _TILE_METADATA_FIELDS if k in t}
+                for ti, t in self._tile_metadata.items()
+            }
+        # The per-view fields now live under metadata["views"]; drop the
+        # duplicated/synonymous copies from the top level so the reported
+        # metadata isn't cluttered.
+        for k in _VIEW_METADATA_FIELDS + _DROPPED_METADATA_FIELDS:
+            meta.pop(k, None)
         return meta
 
     @metadata.setter
@@ -2446,6 +2567,58 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         self._cache[cache_key] = data
         return data
 
+    def _open_volume(self, path: Path) -> "LazyVolume":
+        """Return a cached open zarr `LazyVolume` for `path` (bounded LRU).
+
+        Avoids reopening the store on every strided plane read. Only used for
+        zarr, whose reads are safe to share across threads.
+        """
+        path = Path(path)
+        with self._vol_cache_lock:
+            v = self._vol_cache.get(path)
+            if v is not None:
+                self._vol_cache.move_to_end(path)
+                return v
+        v = LazyVolume(path, dimensions=self._stack_dimensions())
+        with self._vol_cache_lock:
+            existing = self._vol_cache.get(path)
+            if existing is not None:
+                # another thread opened it first; keep that one
+                self._vol_cache.move_to_end(path)
+                try:
+                    v.close()
+                except Exception:
+                    pass
+                return existing
+            self._vol_cache[path] = v
+            while len(self._vol_cache) > self._vol_cache_max:
+                _, old = self._vol_cache.popitem(last=False)
+                try:
+                    old.close()
+                except Exception:
+                    pass
+            return v
+
+    def _slab_from_volume(
+        self, v: "LazyVolume", t_idx: int, c_idx: int, z_key, y_key, x_key
+    ) -> np.ndarray:
+        if _int_out_of_bounds((z_key, y_key, x_key), v.shape):
+            return self._empty_slab(z_key, y_key, x_key, v.shape)
+        slab = np.asarray(v[z_key, y_key, x_key])
+        if logger.isEnabledFor(logging.DEBUG) and v.chunks is not None:
+            touched = _chunks_touched(
+                v._arr.shape, v.chunks,
+                (0,) * (len(v._arr.shape) - 3) + (z_key, y_key, x_key),
+            )
+            chunk_bytes = int(np.prod(v.chunks)) * v.dtype.itemsize
+            decompressed = touched * chunk_bytes
+            logger.debug(
+                "%s narrow zarr read: t=%d c=%d returned=%d decompressed=%d ratio=%.1fx",
+                type(self).__name__, t_idx, c_idx, slab.nbytes, decompressed,
+                decompressed / max(1, slab.nbytes),
+            )
+        return slab
+
     def _read_slab(
         self, path: Path, t_idx: int, c_idx: int, z_key, y_key, x_key
     ) -> np.ndarray:
@@ -2455,23 +2628,14 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             if _int_out_of_bounds((z_key, y_key, x_key), shape):
                 return self._empty_slab(z_key, y_key, x_key, shape)
             return cached[z_key, y_key, x_key]
+        # zarr: reuse a shared open handle (cheap repeated plane reads).
+        # other formats: open per read so file handles aren't shared threads.
+        if str(path).lower().endswith(".zarr"):
+            return self._slab_from_volume(
+                self._open_volume(path), t_idx, c_idx, z_key, y_key, x_key
+            )
         with LazyVolume(path, dimensions=self._stack_dimensions()) as v:
-            if _int_out_of_bounds((z_key, y_key, x_key), v.shape):
-                return self._empty_slab(z_key, y_key, x_key, v.shape)
-            slab = np.asarray(v[z_key, y_key, x_key])
-            if logger.isEnabledFor(logging.DEBUG) and v.chunks is not None:
-                touched = _chunks_touched(
-                    v._arr.shape, v.chunks,
-                    (0,) * (len(v._arr.shape) - 3) + (z_key, y_key, x_key),
-                )
-                chunk_bytes = int(np.prod(v.chunks)) * v.dtype.itemsize
-                decompressed = touched * chunk_bytes
-                logger.debug(
-                    "%s narrow zarr read: t=%d c=%d returned=%d decompressed=%d ratio=%.1fx",
-                    type(self).__name__, t_idx, c_idx, slab.nbytes, decompressed,
-                    decompressed / max(1, slab.nbytes),
-                )
-        return slab
+            return self._slab_from_volume(v, t_idx, c_idx, z_key, y_key, x_key)
 
     def __array__(self, dtype=None, copy=None) -> np.ndarray:
         out = np.asarray(self[0, 0])
@@ -2484,6 +2648,13 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
 
     def close(self) -> None:
         self._cache.clear()
+        with self._vol_cache_lock:
+            for v in self._vol_cache.values():
+                try:
+                    v.close()
+                except Exception:
+                    pass
+            self._vol_cache.clear()
 
     def _imwrite(
         self,

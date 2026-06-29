@@ -774,8 +774,13 @@ def _launch_standard_viewer(data_in, roi, widget, metadata_only):
             else None
         )
         if validate_axial_shifts(_md, _nz):
-            data_array = with_axial_shifts(data_array)
-            logger.info(f"axial alignment applied ({_nz} planes)")
+            try:
+                data_array = with_axial_shifts(data_array)
+                logger.info(f"axial alignment applied ({_nz} planes)")
+            except Exception as e:
+                # shifts are present but couldn't be applied: warn so the view
+                # isn't silently identical to the unregistered data.
+                logger.warning(f"plane_shifts present but not applied: {e}")
     except Exception as e:
         logger.debug(f"axial alignment skipped: {e}")
 

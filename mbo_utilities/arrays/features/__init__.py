@@ -88,6 +88,12 @@ from mbo_utilities.arrays.features._slicing import (
     parse_timepoint_selection,
     read_chunk,
 )
+from mbo_utilities.arrays.features._selection import (
+    canonical_axis_sizes,
+    selection_to_canonical,
+    to_isoview_kwargs,
+    to_lsp_kwargs,
+)
 from mbo_utilities.arrays.features._pyramid import (
     DownsampleMethod,
     PyramidConfig,
@@ -163,6 +169,11 @@ __all__ = [
     "parse_selection",
     "parse_timepoint_selection",
     "read_chunk",
+    # canonical selection conversion
+    "canonical_axis_sizes",
+    "selection_to_canonical",
+    "to_isoview_kwargs",
+    "to_lsp_kwargs",
     # pyramid
     "DownsampleMethod",
     "PyramidConfig",

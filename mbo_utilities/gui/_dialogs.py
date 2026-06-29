@@ -312,6 +312,27 @@ def load_new_data(parent: Any, path: str):
         raw_data = imread(path)
         parent.logger.debug(f"imread returned: type={type(raw_data).__name__}, shape={getattr(raw_data, 'shape', 'N/A')}")
 
+        # Apply per-plane axial shifts on read when present, matching the
+        # initial-launch path (_launch_standard_viewer). Without this, opening
+        # or reloading a register_z output through the file dialog showed the
+        # raw planes instead of the aligned view.
+        try:
+            from mbo_utilities.arrays._registration import (
+                validate_axial_shifts,
+                with_axial_shifts,
+            )
+            _md = getattr(raw_data, "metadata", None)
+            _nz = (
+                int(raw_data._shape5d()[2])
+                if hasattr(raw_data, "_shape5d")
+                else None
+            )
+            if validate_axial_shifts(_md, _nz):
+                raw_data = with_axial_shifts(raw_data)
+                parent.logger.info(f"axial alignment applied ({_nz} planes)")
+        except Exception as e:
+            parent.logger.debug(f"axial alignment skipped: {e}")
+
         # Apply the same singleton-dim squeeze that _create_image_widget
         # uses on initial launch, so reload via file dialog produces the
         # same natural-rank view. Without this, a 5D Suite2pArray (T,1,Z,Y,X)

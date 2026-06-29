@@ -65,7 +65,7 @@ Construction steps (in order):
 | `stack_type`          | `"isoview-<kind>"`. Used by the GUI's projections widget.                       |
 | `views`               | List of view keys (cam int for corrected, tuples for fused/raw/clusterpt).      |
 | `channel_names`       | Human-readable labels per channel.                                              |
-| `num_timepoints`      | `T` size.                                                                       |
+| `num_timepoints`      | `T` size (tile count for tiled stacks; the metadata dict reports `1` + `num_tiles`). |
 | `num_planes`          | `Z` size.                                                                       |
 | `num_views`           | `C` size (cameras: 4 raw/corrected, 2 views after fuse). C-axis consumers use this. |
 | `num_color_channels`  | Distinct optical wavelengths across the XML sidecars (usually 1; NOT the C size).   |

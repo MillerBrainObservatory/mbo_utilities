@@ -309,3 +309,75 @@ def build_summary_stats_spec(
         spatial_bin=budget.spatial_bin if groups else 1,
         budget=budget,
     )
+
+
+# Persistence: computed summary stats are cached in the backing zarr store so
+# they auto-populate on reopen instead of recomputing. Layout is uniform across
+# every zarr dataset (LBM / isoview / generic): a `mbo_stats` child group holds
+# the scalar series in attrs and the binned mean-image stacks in a `means`
+# array. The same payload schema is read back by any reader.
+
+STATS_GROUP_NAME = "mbo_stats"     # child group inside the zarr store
+STATS_SUMMARY_ATTR = "summary"     # scalar payload, on the child group's attrs
+STATS_MEANS_ARRAY = "means"        # binned mean-image stack array
+STATS_SUMMARY_VERSION = 1
+
+
+def stats_signature(dims, shape, series_name, metric_keys) -> dict:
+    """Identity of a stats payload: recompute when any field changes."""
+    return {
+        "dims": [str(d) for d in dims],
+        "shape": [int(s) for s in shape],
+        "series": str(series_name) if series_name else None,
+        "metrics": [str(k) for k in metric_keys],
+    }
+
+
+def write_stats_store(store_path, payload: dict, means=None) -> None:
+    """Persist `payload` (+ optional `means` stack) into the zarr `store_path`.
+
+    Group stores get a `mbo_stats` child group (scalar payload in attrs, means
+    in a child array). A bare-array store has no child group, so the scalar
+    payload goes on the array's own attrs and means are skipped.
+    """
+    import zarr
+
+    node = zarr.open(str(store_path), mode="a")
+    if isinstance(node, zarr.Group):
+        grp = node.require_group(STATS_GROUP_NAME)
+        grp.attrs[STATS_SUMMARY_ATTR] = payload
+        if means is not None:
+            m = np.ascontiguousarray(means, dtype=np.float32)
+            name = f"{grp.path.rstrip('/')}/{STATS_MEANS_ARRAY}" if grp.path else STATS_MEANS_ARRAY
+            arr = zarr.create_array(
+                store=grp.store, name=name, shape=m.shape, dtype=m.dtype,
+                overwrite=True, zarr_format=3,
+            )
+            arr[...] = m
+    else:
+        node.attrs[STATS_GROUP_NAME] = {STATS_SUMMARY_ATTR: payload}
+
+
+def read_stats_store(store_path):
+    """Return ``(payload, means|None)`` cached at `store_path`, or None.
+
+    Mirror of `write_stats_store`: reads the `mbo_stats` child group when the
+    store is a group, else the scalar payload from the array's attrs.
+    """
+    import zarr
+
+    node = zarr.open(str(store_path), mode="r")
+    payload = None
+    means = None
+    if isinstance(node, zarr.Group) and STATS_GROUP_NAME in node:
+        grp = node[STATS_GROUP_NAME]
+        payload = dict(grp.attrs).get(STATS_SUMMARY_ATTR)
+        if STATS_MEANS_ARRAY in grp:
+            means = np.asarray(grp[STATS_MEANS_ARRAY][...], dtype=np.float32)
+    else:
+        blob = dict(node.attrs).get(STATS_GROUP_NAME)
+        if isinstance(blob, dict):
+            payload = blob.get(STATS_SUMMARY_ATTR)
+    if payload is None:
+        return None
+    return payload, means

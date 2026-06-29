@@ -314,6 +314,7 @@ METADATA_PARAMS: dict[str, MetadataParameter] = {
             "num_z",
             "numPlanes",
             "zplanes",
+            "slices",
         ),
         dtype=int,
         default=1,

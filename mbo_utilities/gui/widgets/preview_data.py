@@ -59,7 +59,12 @@ from mbo_utilities.gui._popups import draw_tools_popups, draw_process_console_po
 from mbo_utilities.gui._save_as import draw_saveas_popup
 from mbo_utilities.gui._keyboard import handle_keyboard_shortcuts, rebind_space_to_playback
 from mbo_utilities.gui._dialogs import check_file_dialogs
-from mbo_utilities.gui._stats import compute_zstats, refresh_zstats, draw_stats_section
+from mbo_utilities.gui._stats import (
+    compute_zstats,
+    draw_stats_section,
+    hydrate_zstats,
+    refresh_zstats,
+)
 from mbo_utilities.gui._help_viewer import draw_help_popup
 from mbo_utilities.gui._metadata_editor import draw_metadata_popup
 from mbo_utilities.gui._options_popup import draw_options_popup
@@ -243,12 +248,18 @@ class PreviewDataWidget(EdgeWindow):
         # Initialize viewer
         self._init_viewer()
 
-        # Start z-stats computation
+        # Hydrate cached stats from disk first; only compute the arrays that
+        # had no valid cache (recompute on shape/dims/series mismatch).
+        # compute_zstats runs its own single background worker, so call it
+        # directly (no extra wrapper thread).
         if threading_enabled:
-            self.logger.debug("Starting zstats computation...")
-            for i in range(self.num_graphics):
-                self._zstats_running[i] = True
-            threading.Thread(target=lambda: compute_zstats(self), daemon=True).start()
+            hydrated = hydrate_zstats(self)
+            pending = [i for i in range(self.num_graphics) if not hydrated[i]]
+            if pending:
+                self.logger.debug(f"Starting zstats computation for {len(pending)} array(s)...")
+                for i in pending:
+                    self._zstats_running[i] = True
+                compute_zstats(self, only=pending)
 
     def _init_logging(self):
         """Initialize logging system."""

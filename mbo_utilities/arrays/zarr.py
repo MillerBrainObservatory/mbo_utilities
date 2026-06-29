@@ -265,6 +265,10 @@ class ZarrArray(ReductionMixin, Shape5DMixin):
         else:
             self._metadata[0] = value
 
+    def _summary_stats_store_path(self) -> str | None:
+        """Cache summary stats in the first backing zarr store."""
+        return str(self.filenames[0]) if self.filenames else None
+
     @property
     def _shape_tzyx(self) -> tuple[int, int, int, int]:
         """internal 4D shape for zarr indexing (used by 2D/3D/4D source paths;
