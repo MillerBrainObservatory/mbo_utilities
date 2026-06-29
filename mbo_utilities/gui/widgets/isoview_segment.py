@@ -83,9 +83,15 @@ def _is_raw(arr: Any) -> bool:
     return str(getattr(arr, "kind", "") or "").lower() == "raw"
 
 
-def _tp_label(slot) -> str:
-    """Display label for a tiled projection slot: a specimen_name grid token
-    (string) as-is, else SPM## for a legacy integer slot."""
+def _tp_label(slot, arr=None) -> str:
+    """Display label for a tiled projection slot: the tile's specimen_name
+    grid token (e.g. TL010) when the array can resolve it, else SPM##."""
+    fn = getattr(arr, "tile_label", None)
+    if callable(fn):
+        try:
+            return fn(slot)
+        except Exception:
+            pass
     return f"SPM{slot:02d}" if isinstance(slot, int) else str(slot)
 
 
@@ -627,7 +633,8 @@ def _draw_display_controls(parent: Any) -> None:
         (None, button_width("Auto"), _auto),
     ]
 
-    tiled = bool(getattr(_get_iso_array(parent), "is_tiled", False))
+    arr = _get_iso_array(parent)
+    tiled = bool(getattr(arr, "is_tiled", False))
     tps = parent._iso_seg_timepoints
     if tps:
         try:
@@ -636,7 +643,7 @@ def _draw_display_controls(parent: Any) -> None:
             cur_idx = 0
         label = "Tile" if tiled else "Timepoint"
         value_fmt = (
-            f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
+            f"{_tp_label(tps[cur_idx], arr)}  ({cur_idx + 1}/{len(tps)})"
             if tiled
             else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
         )

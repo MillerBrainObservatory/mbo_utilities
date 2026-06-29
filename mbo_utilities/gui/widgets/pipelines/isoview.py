@@ -465,6 +465,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._correct_background_percentile: float = 5.0
         self._correct_median_kernel_size: int = 3
         self._correct_median_kernel_enabled: bool = True
+        self._correct_subtract_background: bool = False
         self._correct_mask_percentile: float = 1.0
         self._correct_subsample_factor: int = 100
         self._correct_gauss_kernel: int = 5
@@ -1419,7 +1420,18 @@ class IsoviewPipelineWidget(PipelineWidget):
         )
 
         def _zyx(label, z, y, x, tip):
-            imgui.set_next_item_width(_input_w() * 2.2)
+            # Fit the 3-field input within the box so its label + (?) marker
+            # never overrun the right edge. Reserve room for the trailing
+            # label and the right-aligned (?).
+            style = imgui.get_style()
+            avail = imgui.get_content_region_avail().x
+            reserve = (
+                imgui.calc_text_size(label).x
+                + imgui.calc_text_size("(?)").x
+                + 2 * style.item_spacing.x
+                + 4
+            )
+            imgui.set_next_item_width(max(_input_w(), avail - reserve))
             _, vals = imgui.input_int3(label, [int(z), int(y), int(x)])
             set_tooltip(tip)
             return [max(0, int(v)) for v in vals]
@@ -1642,6 +1654,14 @@ class IsoviewPipelineWidget(PipelineWidget):
             set_tooltip(
                 "Percentile for the camera background floor (0–100).\n"
                 "Raise if a dark haze remains; too high clips dim signal."
+            )
+
+            _, self._correct_subtract_background = imgui.checkbox(
+                "Subtract background", self._correct_subtract_background,
+            )
+            set_tooltip(
+                "Subtract the per-camera Background_##.tif frame pixel-by-pixel\n"
+                "(CM## − Background_##.tif, clamped at 0)."
             )
 
     def _draw_fuse_io_box(self) -> None:
@@ -2189,6 +2209,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             "do_tenengrad": self._correct_do_tenengrad,
             "background_percentile": self._correct_background_percentile,
             "median_kernel": median_kernel,
+            "subtract_background_image": bool(self._correct_subtract_background),
             "mask_percentile": self._correct_mask_percentile,
             "subsample_factor": self._correct_subsample_factor,
             "gauss_kernel": self._correct_gauss_kernel,
@@ -2196,9 +2217,14 @@ class IsoviewPipelineWidget(PipelineWidget):
             "segment_threshold": self._correct_segment_threshold,
             "splitting": self._correct_splitting,
         }
+        # Force the pipeline's tiled vs timepoint mode from the loaded array so
+        # a single-unit selection can't flip it (specimen/timepoint counts
+        # alone would).
+        is_tiled = bool(getattr(arr, "is_tiled", False))
+        args["tiled_override"] = is_tiled
         sel = self._selected_timepoints()
         if sel is not None:
-            if bool(getattr(arr, "is_tiled", False)):
+            if is_tiled:
                 # tiled: the slicing timeline IS the spatial-tile (SPM) axis, and
                 # isoview slices tiled data by `specimens`, not `timepoints`. map
                 # the selected positions to SPM indices so "process 1 tile" works.
@@ -2395,40 +2421,57 @@ class IsoviewPipelineWidget(PipelineWidget):
             ],
             **by_view,
         }
-        # Always pass an explicit timepoints list for fuse: isoview's
-        # ProcessingConfig.__post_init__ auto-detects timepoints from
-        # input_dir (the RAW root, all 61 TMs even when only the first
-        # 10 were corrected). Scan the .corrected SPM## tree to find
-        # which TMs actually have corrected output and intersect that
-        # with the user's slicing selection.
-        from mbo_utilities.arrays.isoview.array import (
-            _find_tm_folders, _extract_timepoint, _SPM_PATTERN,
-        )
-        corrected_root = scan_root if _SPM_PATTERN.match(scan_root.name) else None
-        if corrected_root is None:
-            for d in scan_root.iterdir() if scan_root.is_dir() else []:
-                if d.is_dir() and _SPM_PATTERN.match(d.name):
-                    corrected_root = d
-                    break
-        available_tms: list[int] = []
-        if corrected_root is not None:
-            available_tms = [
-                _extract_timepoint(d.name)
-                for d in _find_tm_folders(corrected_root)
-            ]
+        # Force the pipeline's tiled vs timepoint mode from the loaded array's
+        # structure so a single-unit selection can't flip it (specimens/
+        # timepoints counts alone would).
+        is_tiled = bool(getattr(arr, "is_tiled", False))
+        args["tiled_override"] = is_tiled
         tps = self._selected_timepoints()
-        if available_tms:
-            if tps is None:
-                args["timepoints"] = available_tms
-            else:
-                # Map 0-based selection indices onto the sorted list of
-                # available TMs. Keeps the slicing UI consistent with
-                # what the user sees as "1..N corrected timepoints".
-                args["timepoints"] = [
-                    available_tms[i] for i in tps if 0 <= i < len(available_tms)
+        if is_tiled:
+            # Tiled: the slicing axis IS the spatial tile (SPM). Map the
+            # selection to specimen ids so a subset fuses only those tiles;
+            # a whole selection (tps is None) leaves specimens unset for
+            # isoview to auto-detect them all. A tiled tree carries a single
+            # TM, so don't pass a tile-based timepoints list (it would
+            # collapse to [0] and silently drop the selection).
+            if tps is not None:
+                tiles = list(getattr(arr, "_timepoints", []) or [])
+                args["specimens"] = [
+                    tiles[i] for i in tps if 0 <= i < len(tiles)
+                ] or tps
+        else:
+            # Timelapse: isoview's ProcessingConfig.__post_init__ auto-detects
+            # timepoints from input_dir (the RAW root, all TMs even when only
+            # the first N were corrected). Scan the .corrected SPM## tree for
+            # the TMs that actually have corrected output and intersect that
+            # with the user's slicing selection.
+            from mbo_utilities.arrays.isoview.array import (
+                _find_tm_folders, _extract_timepoint, _SPM_PATTERN,
+            )
+            corrected_root = scan_root if _SPM_PATTERN.match(scan_root.name) else None
+            if corrected_root is None:
+                for d in scan_root.iterdir() if scan_root.is_dir() else []:
+                    if d.is_dir() and _SPM_PATTERN.match(d.name):
+                        corrected_root = d
+                        break
+            available_tms: list[int] = []
+            if corrected_root is not None:
+                available_tms = [
+                    _extract_timepoint(d.name)
+                    for d in _find_tm_folders(corrected_root)
                 ]
-        elif tps is not None:
-            args["timepoints"] = tps
+            if available_tms:
+                if tps is None:
+                    args["timepoints"] = available_tms
+                else:
+                    # Map 0-based selection indices onto the sorted list of
+                    # available TMs. Keeps the slicing UI consistent with
+                    # what the user sees as "1..N corrected timepoints".
+                    args["timepoints"] = [
+                        available_tms[i] for i in tps if 0 <= i < len(available_tms)
+                    ]
+            elif tps is not None:
+                args["timepoints"] = tps
         args.update(self._zarr_layout_args())
         args.update(self._microscope_kwargs())
         from mbo_utilities.gui import _isoview_crop_state as crop_state
@@ -2550,7 +2593,8 @@ class IsoviewPipelineWidget(PipelineWidget):
         size_bytes = _dataset_size_bytes(self, filenames)
 
         shape = tuple(arr.shape)
-        dims = "TCZYX" if len(shape) == 5 else None
+        # isoview C axis holds views (VW##), not color channels.
+        dims = "TVZYX" if len(shape) == 5 else None
         shape_text = " × ".join(str(s) for s in shape)
         if dims and len(dims) == len(shape):
             # dimension labels on their own line under the sizes
@@ -2885,6 +2929,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             self._correct_background_percentile = 5.0
             self._correct_median_kernel_size = 3
             self._correct_median_kernel_enabled = True
+            self._correct_subtract_background = False
         imgui.push_style_color(
             imgui.Col_.text, imgui.ImVec4(0.6, 0.6, 0.65, 1.0)
         )

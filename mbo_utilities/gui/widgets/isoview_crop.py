@@ -110,9 +110,15 @@ def _view_int_from_label(label: str) -> int | None:
         return None
 
 
-def _tp_label(slot) -> str:
-    """Display label for a tiled projection slot: a specimen_name grid token
-    (string) as-is, else SPM## for a legacy integer slot."""
+def _tp_label(slot, arr=None) -> str:
+    """Display label for a tiled projection slot: the tile's specimen_name
+    grid token (e.g. TL010) when the array can resolve it, else SPM##."""
+    fn = getattr(arr, "tile_label", None)
+    if callable(fn):
+        try:
+            return fn(slot)
+        except Exception:
+            pass
     return f"SPM{slot:02d}" if isinstance(slot, int) else str(slot)
 
 
@@ -488,7 +494,7 @@ def draw_window(parent: Any) -> None:
         tiled = bool(getattr(arr, "is_tiled", False))
         if tiled and len(parent._iso_crop_timepoints) > 1:
             cur = parent._iso_crop_current_tp
-            if imgui.button(f"Copy {_tp_label(cur)} crop to all tiles", imgui.ImVec2(0, 0)):
+            if imgui.button(f"Copy {_tp_label(cur, arr)} crop to all tiles", imgui.ImVec2(0, 0)):
                 for cam in parent._iso_crop_shapes:
                     src = parent._iso_crop_pending.get((cur, cam))
                     if src is None:
@@ -574,7 +580,7 @@ def _draw_display_controls(parent: Any, arr: Any) -> None:
             cur_idx = 0
         label = "Tile" if tiled else "Timepoint"
         value_fmt = (
-            f"{_tp_label(tps[cur_idx])}  ({cur_idx + 1}/{len(tps)})"
+            f"{_tp_label(tps[cur_idx], arr)}  ({cur_idx + 1}/{len(tps)})"
             if tiled
             else f"TM{tps[cur_idx]:06d}  ({cur_idx + 1}/{len(tps)})"
         )
@@ -616,7 +622,7 @@ def _draw_camera_section(
 
     from mbo_utilities.arrays.isoview.array import camera_view_label
     color = _CAMERA_COLORS.get(camera, (0.6, 0.8, 1.0, 1.0))
-    spm = f"{_tp_label(tile)}  " if tile is not None else ""
+    spm = f"{_tp_label(tile, arr)}  " if tile is not None else ""
     imgui.text_colored(
         imgui.ImVec4(*color),
         f"{spm}{camera_view_label(camera)}   shape=(Z={nz}, Y={ny}, X={nx})",

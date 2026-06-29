@@ -91,6 +91,7 @@ class ProjectionsViewer(Widget):
         self._projections: dict | None = None
         self._stack_type: str | None = None
         self._is_tiled: bool = False
+        self._iso_array: Any = None
 
         # per-image state
         self._array_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
@@ -148,6 +149,7 @@ class ProjectionsViewer(Widget):
             self._projections = {}
             return False
         self._projections = result
+        self._iso_array = arr
         self._stack_type = str((arr.metadata or {}).get("stack_type", ""))
         self._is_tiled = bool(getattr(arr, "is_tiled", False))
         # initialize selection to the first plausible entry
@@ -338,14 +340,12 @@ class ProjectionsViewer(Widget):
             cur_pos = tps.index(self._timepoint)
             if self._is_tiled:
                 label = "Tile"
-                lo, hi = tps[0], tps[-1]
-                if isinstance(lo, int):
-                    value_fmt = f"%d / {len(tps) - 1}  (SPM{lo:02d}-SPM{hi:02d})"
-                else:
-                    value_fmt = f"%d / {len(tps) - 1}  ({lo}-{hi})"
+                fn = getattr(self._iso_array, "tile_label", None)
+                cur = fn(tps[cur_pos]) if callable(fn) else str(tps[cur_pos])
+                value_fmt = f"{cur}  ({cur_pos + 1}/{len(tps)})"
             else:
                 label = "T"
-                value_fmt = f"%d / {len(tps) - 1}  (TM{tps[0]:06d}-{tps[-1]:06d})"
+                value_fmt = f"TM{tps[cur_pos]:06d}  ({cur_pos + 1}/{len(tps)})"
 
             def _tp():
                 ch, v = imgui.slider_int(

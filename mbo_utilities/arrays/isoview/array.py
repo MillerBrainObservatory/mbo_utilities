@@ -2297,6 +2297,25 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         """
         return {k: dict(v) for k, v in self._tile_metadata.items()}
 
+    def tile_label(self, slot) -> str:
+        """Grid-token display label (e.g. ``TL010``) for a tiled slot.
+
+        ``slot`` is a scrubber/projection token: an ``SPM##``/``SPC##``
+        string, a bare index (int or digit string), or a ``specimen_name``
+        grid token. Returns the tile's ``specimen_name`` from
+        :attr:`tile_metadata` when known, else the slot's own ``SPM##`` form.
+        """
+        m = re.match(r"^(?:SP[MC])?(\d+)$", str(slot), re.IGNORECASE)
+        if m is None:
+            # already a grid token (or unrecognized) — show as-is
+            return str(slot)
+        spec = int(m.group(1))
+        ti = {v: k for k, v in self._tile_specimen_ids().items()}.get(spec, spec)
+        tile = self._tile_metadata.get(ti)
+        if tile and tile.get("specimen_name"):
+            return str(tile["specimen_name"])
+        return f"SPM{spec:02d}"
+
     @property
     def filenames(self) -> list[Path]:
         return list(self._filenames_snapshot)
@@ -2310,9 +2329,18 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         meta["nplanes"] = self._nz
         meta["num_planes"] = self._nz
         nt = len(self._timepoints)
-        meta["num_timepoints"] = nt
-        meta["nframes"] = nt
-        meta["num_frames"] = nt
+        if self._is_tiled:
+            # The T axis holds spatial tiles, not time samples. Report one
+            # timepoint and the tile count separately so readers don't treat
+            # tiles as a time series.
+            meta["num_tiles"] = nt
+            meta["num_timepoints"] = 1
+            meta["nframes"] = 1
+            meta["num_frames"] = 1
+        else:
+            meta["num_timepoints"] = nt
+            meta["nframes"] = nt
+            meta["num_frames"] = nt
         meta["num_color_channels"] = self.num_color_channels
         meta["channel_names"] = list(self._channel_names)
         meta["num_views"] = self.num_views
@@ -2333,8 +2361,12 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             meta.setdefault("dz", float(meta["y_step"]))
         # fs (the T-axis rate) is not reliably encoded in the acquisition
         # XML, so it is left unset for the user to enter via the metadata
-        # editor. vps/fps stay available for reference but no longer seed
-        # fs automatically.
+        # editor. fps stays available for reference but no longer seeds fs
+        # automatically. vps (volumes/sec) is a temporal volume rate and is
+        # undefined for a single-timepoint tiled stack, so drop it there.
+        if self._is_tiled:
+            meta.pop("vps", None)
+            meta.pop("volumes_per_second", None)
         if self._camera_metadata:
             # The GUI metadata viewer renders a dedicated "Cameras" panel
             # from metadata["cameras"]. Surface per-camera fields there;

@@ -883,6 +883,9 @@ def info(input_path, metadata, show_all):
     md = getattr(data, "metadata", None) or {}
     sizes = _info_dim_sizes(data)
 
+    is_isoview = hasattr(data, "is_tiled")
+    is_tiled = bool(getattr(data, "is_tiled", False))
+
     dims = getattr(data, "dims", None)
     shape_str = str(tuple(data.shape))
     if dims and len(dims) == len(data.shape):
@@ -912,29 +915,45 @@ def info(input_path, metadata, show_all):
             if dx is not None and dy is not None:
                 _info_kv("FOV", f"{_info_num(dy * ny)} x {_info_num(dx * nx)}", "um")
 
-        timepoints = sizes.get("T") or _info_md(md, "num_timepoints")
         zplanes = sizes.get("Z") or _info_md(md, "num_zplanes")
-        channels = sizes.get("C") or _info_md(md, "num_color_channels")
-        mrois = _info_md(md, "num_mrois")
-
-        avg = None
-        if isinstance(md.get("si"), dict):
-            try:
-                from mbo_utilities.metadata.scanimage import get_log_average_factor
-                avg = get_log_average_factor(md)
-            except Exception:
-                avg = None
 
         click.secho("\nAcquisition", fg="cyan")
         _info_kv("Stack type", _info_md(md, "stack_type"))
-        _info_kv("Timepoints", _info_num(timepoints))
-        _info_kv("Z-planes", _info_num(zplanes))
-        _info_kv("Color channels", _info_num(channels))
-        _info_kv("mROIs", _info_num(mrois))
-        if avg and avg > 1:
-            _info_kv("Averaging", f"{avg}x")
-        if fs and timepoints:
-            _info_kv("Duration", f"{timepoints / fs:.1f}", "s")
+
+        if is_isoview:
+            views = getattr(data, "views", None) or []
+            view_str = ", ".join(str(v) for v in views) or _info_num(
+                getattr(data, "num_views", None) or sizes.get("C")
+            )
+            if is_tiled:
+                _info_kv("Tiles", _info_num(sizes.get("T")))
+                _info_kv("Timepoints", "1")
+            else:
+                _info_kv("Timepoints", _info_num(sizes.get("T")))
+            _info_kv("Z-planes", _info_num(zplanes))
+            _info_kv("Views", view_str)
+            _info_kv("Color channels", _info_num(getattr(data, "num_color_channels", None)))
+        else:
+            timepoints = sizes.get("T") or _info_md(md, "num_timepoints")
+            channels = sizes.get("C") or _info_md(md, "num_color_channels")
+            mrois = _info_md(md, "num_mrois")
+
+            avg = None
+            if isinstance(md.get("si"), dict):
+                try:
+                    from mbo_utilities.metadata.scanimage import get_log_average_factor
+                    avg = get_log_average_factor(md)
+                except Exception:
+                    avg = None
+
+            _info_kv("Timepoints", _info_num(timepoints))
+            _info_kv("Z-planes", _info_num(zplanes))
+            _info_kv("Color channels", _info_num(channels))
+            _info_kv("mROIs", _info_num(mrois))
+            if avg and avg > 1:
+                _info_kv("Averaging", f"{avg}x")
+            if fs and timepoints:
+                _info_kv("Duration", f"{timepoints / fs:.1f}", "s")
 
     try:
         vmin = data.vmin
@@ -960,36 +979,41 @@ def info(input_path, metadata, show_all):
         if len(filenames) > 5:
             click.echo(f"  ... and {len(filenames) - 3} more")
 
-    input_obj = Path(input_path)
-    scan_root = input_obj if input_obj.is_dir() else input_obj.parent
-    ops_dirs = _info_find_ops_dirs(scan_root)
-
-    click.secho("\nResults", fg="cyan")
-    if ops_dirs:
-        total_rois = total_cells = seg_planes = 0
-        have_seg = False
-        for d in ops_dirs:
-            n_rois, n_cells = _info_segmentation_counts(d)
-            if n_rois is not None:
-                have_seg = True
-                seg_planes += 1
-                total_rois += n_rois
-                if n_cells is not None:
-                    total_cells += n_cells
-        have_reg = any((d / "data.bin").exists() for d in ops_dirs)
-        have_raw = any((d / "data_raw.bin").exists() for d in ops_dirs)
-
-        _info_kv("Suite2p", f"{len(ops_dirs)} folder(s)")
-        if have_reg:
-            _info_kv("Registration", "data.bin present")
-        elif have_raw:
-            _info_kv("Registration", "data_raw.bin only (not registered)")
-        if have_seg:
-            _info_kv("Segmentation", f"{total_rois} ROIs ({total_cells} cells), {seg_planes} plane(s)")
-        else:
-            _info_kv("Segmentation", "not run (no stat.npy)")
+    if is_isoview:
+        click.secho("\nIsoview", fg="cyan")
+        _info_kv("Pipeline stage", _info_md(md, "stack_type"))
+        _info_kv("Layout", "tiled" if is_tiled else "timelapse")
     else:
-        click.echo("  none found")
+        input_obj = Path(input_path)
+        scan_root = input_obj if input_obj.is_dir() else input_obj.parent
+        ops_dirs = _info_find_ops_dirs(scan_root)
+
+        click.secho("\nResults", fg="cyan")
+        if ops_dirs:
+            total_rois = total_cells = seg_planes = 0
+            have_seg = False
+            for d in ops_dirs:
+                n_rois, n_cells = _info_segmentation_counts(d)
+                if n_rois is not None:
+                    have_seg = True
+                    seg_planes += 1
+                    total_rois += n_rois
+                    if n_cells is not None:
+                        total_cells += n_cells
+            have_reg = any((d / "data.bin").exists() for d in ops_dirs)
+            have_raw = any((d / "data_raw.bin").exists() for d in ops_dirs)
+
+            _info_kv("Suite2p", f"{len(ops_dirs)} folder(s)")
+            if have_reg:
+                _info_kv("Registration", "data.bin present")
+            elif have_raw:
+                _info_kv("Registration", "data_raw.bin only (not registered)")
+            if have_seg:
+                _info_kv("Segmentation", f"{total_rois} ROIs ({total_cells} cells), {seg_planes} plane(s)")
+            else:
+                _info_kv("Segmentation", "not run (no stat.npy)")
+        else:
+            click.echo("  none found")
 
     if show_all and md:
         click.secho("\nAll metadata", fg="cyan")

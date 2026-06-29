@@ -864,6 +864,7 @@ def _build_isoview_processing_config(args: dict):
         "pyramid_max_layers",
         "timepoints",
         "specimens",
+        "tiled_override",
         "cameras",
         "segment_mode",
         "gauss_kernel",
