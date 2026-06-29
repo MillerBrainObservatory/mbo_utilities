@@ -856,6 +856,7 @@ def _build_isoview_processing_config(args: dict):
         "output_format",
         "compression",
         "compression_level",
+        "zarr_sharded",
         "overwrite",
         "workers",
         "log",
@@ -919,6 +920,9 @@ def _build_isoview_processing_config(args: dict):
         config_kwargs["search_offsets_x"] = tuple(args["search_offsets_x"])
     if args.get("search_offsets_y") is not None:
         config_kwargs["search_offsets_y"] = tuple(args["search_offsets_y"])
+    for key in ("zarr_chunks", "zarr_shards"):
+        if args.get(key) is not None:
+            config_kwargs[key] = tuple(int(v) for v in args[key])
     for key in ("search_offsets_x_by_view", "search_offsets_y_by_view"):
         d = args.get(key)
         if d is not None:

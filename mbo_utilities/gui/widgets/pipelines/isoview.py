@@ -381,6 +381,17 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._pyramid: bool = True
         self._pyramid_max_layers: int = 4
 
+        # Zarr chunk/shard layout (Correct + Fuse). 0 in any axis = auto:
+        # inner chunk -> one Y×X plane, shard -> memory-bounded Z-slab.
+        # Sharding off = one chunk per file.
+        self._zarr_sharded: bool = True
+        self._zarr_chunk_z: int = 0
+        self._zarr_chunk_y: int = 0
+        self._zarr_chunk_x: int = 0
+        self._zarr_shard_z: int = 0
+        self._zarr_shard_y: int = 0
+        self._zarr_shard_x: int = 0
+
         # Consolidate-mode state
         self._consolidate_output_path: str = ""
         self._consolidate_pyramid: bool = True
@@ -1391,6 +1402,71 @@ class IsoviewPipelineWidget(PipelineWidget):
             "0–9. Higher = smaller files, slower writes; gains taper past ~5."
         )
 
+    def _draw_zarr_chunk_controls(self) -> None:
+        """Sharding toggle + inner-chunk / shard sizes (zarr only).
+
+        Called from inside a ``tooltip_marks_right()`` block. Each size is
+        three Z/Y/X int inputs; set all three to use them, leave any at 0
+        for auto (inner chunk = one Y×X plane, shard = Z-slab).
+        """
+        if self._output_format != "zarr":
+            return
+
+        _, self._zarr_sharded = imgui.checkbox("Sharding", self._zarr_sharded)
+        set_tooltip(
+            "Group inner chunks into shard files (bounded file count). "
+            "Off = one chunk per file."
+        )
+
+        def _zyx(label, z, y, x, tip):
+            imgui.set_next_item_width(_input_w() * 2.2)
+            _, vals = imgui.input_int3(label, [int(z), int(y), int(x)])
+            set_tooltip(tip)
+            return [max(0, int(v)) for v in vals]
+
+        self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x = _zyx(
+            "Chunk Z,Y,X",
+            self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x,
+            "Inner chunk decompressed per read. Set all three; 0 = auto "
+            "(one Y×X plane).",
+        )
+        if self._zarr_sharded:
+            self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x = _zyx(
+                "Shard Z,Y,X",
+                self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x,
+                "Outer shard file size. Set all three; 0 = auto "
+                "(memory-bounded Z-slab).",
+            )
+
+    @staticmethod
+    def _zyx_tuple(z: int, y: int, x: int):
+        """(z, y, x) tuple when all three are >0, else None (auto)."""
+        if z > 0 and y > 0 and x > 0:
+            return [int(z), int(y), int(x)]
+        return None
+
+    def _zarr_layout_args(self) -> dict:
+        """zarr_chunks / zarr_shards / zarr_sharded for the task args.
+
+        Empty when the output format isn't zarr (the keys are harmless but
+        meaningless for tif/klb, so skip them).
+        """
+        if self._output_format != "zarr":
+            return {}
+        args: dict = {"zarr_sharded": bool(self._zarr_sharded)}
+        chunks = self._zyx_tuple(
+            self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x
+        )
+        if chunks is not None:
+            args["zarr_chunks"] = chunks
+        if self._zarr_sharded:
+            shards = self._zyx_tuple(
+                self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x
+            )
+            if shards is not None:
+                args["zarr_shards"] = shards
+        return args
+
     def _draw_correct_io_box(self) -> None:
         """Correct-mode I/O options for the Parameters popup. The
         ``output_suffix`` lives in the Run-tab Output section now;
@@ -1415,6 +1491,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             self._draw_codec_controls()
+            self._draw_zarr_chunk_controls()
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -1593,6 +1670,7 @@ class IsoviewPipelineWidget(PipelineWidget):
             )
 
             self._draw_codec_controls()
+            self._draw_zarr_chunk_controls()
 
             imgui.set_next_item_width(_input_w())
             _, new_workers = imgui.input_int(
@@ -2131,6 +2209,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         cams = self._selected_cameras(arr)
         if cams is not None:
             args["cameras"] = cams
+        args.update(self._zarr_layout_args())
         args.update(self._microscope_kwargs())
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         args.update(crop_state.to_config_args(arr))
@@ -2350,6 +2429,7 @@ class IsoviewPipelineWidget(PipelineWidget):
                 ]
         elif tps is not None:
             args["timepoints"] = tps
+        args.update(self._zarr_layout_args())
         args.update(self._microscope_kwargs())
         from mbo_utilities.gui import _isoview_crop_state as crop_state
         args.update(crop_state.to_config_args(arr))
