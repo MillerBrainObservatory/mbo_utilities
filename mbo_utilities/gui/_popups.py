@@ -105,6 +105,11 @@ def _draw_gpu_meter(d: dict) -> None:
         caption.append(f"{used / 1024:.1f}/{total / 1024:.1f} GB")
     if temp is not None:
         caption.append(f"{temp:.0f}C")
+    dm = d.get("driver_model")
+    if dm:
+        dm_pending = d.get("driver_model_pending")
+        # pending differs -> driver-model switch staged until reboot
+        caption.append(f"{dm}→{dm_pending}" if dm_pending and dm_pending != dm else dm)
     caption_s = ("  " + " · ".join(caption)) if caption else ""
 
     _draw_meter(f"GPU {d.get('index', '?')}: {d.get('name', '?')}", frac, pct, caption_s)
