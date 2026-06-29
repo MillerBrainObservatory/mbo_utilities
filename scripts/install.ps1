@@ -1,6 +1,5 @@
 # MBO Utilities Installation Script for Windows
-# Installs the global 'mbo' CLI (uv tool) and/or a local dev environment,
-# with an optional desktop shortcut for each.
+# Installs a local dev environment, with an optional desktop shortcut.
 #
 # usage:
 #   irm https://raw.githubusercontent.com/MillerBrainObservatory/mbo_utilities/master/scripts/install.ps1 | iex
@@ -18,7 +17,7 @@ $GITHUB_REPO = "MillerBrainObservatory/mbo_utilities"
 
 # accept default answers without prompting (CI / unattended re-provisioning)
 $ASSUME_YES = ($env:MBO_ASSUME_YES -eq "1")
-# python version used for `uv tool install` and `uv venv`
+# python version used for `uv venv`
 $MBO_PYTHON = if ($env:MBO_PYTHON) { $env:MBO_PYTHON } else { "3.12" }
 
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Blue }
@@ -393,30 +392,6 @@ function Get-PytorchIndexUrl {
     return "https://download.pytorch.org/whl/cu121"
 }
 
-function Get-UvToolPythonPath {
-    <#
-    .SYNOPSIS
-    Returns the path to the python interpreter inside a given uv tool's
-    environment. Returns $null if the tool isn't installed or the path
-    can't be located.
-    #>
-    param([string]$ToolName)
-
-    try {
-        $toolDir = uv tool dir 2>$null
-        if ($toolDir) {
-            $toolDir = $toolDir.Trim()
-            # uv normalizes package names — try both underscore and hyphen forms
-            foreach ($name in @($ToolName, $ToolName.Replace("_", "-"), $ToolName.Replace("-", "_"))) {
-                $candidate = Join-Path $toolDir "$name\Scripts\python.exe"
-                if (Test-Path $candidate) { return $candidate }
-            }
-        }
-    }
-    catch {}
-    return $null
-}
-
 function Show-OptionalDependencies {
     param([hashtable]$GpuInfo)
 
@@ -476,208 +451,6 @@ function Show-OptionalDependencies {
     }
 
     return $extras
-}
-
-function Install-MboTool {
-    param(
-        [string]$Spec,
-        [string[]]$Extras = @(),
-        [string[]]$CupyPackages = @(),
-        [string]$PytorchIndexUrl = $null
-    )
-
-    Write-Host ""
-    Write-Info "Installing mbo CLI tool via uv tool install..."
-
-    # build spec with extras
-    # For git URLs: "mbo_utilities @ git+..." -> "mbo_utilities[extras] @ git+..."
-    # For PyPI: "mbo_utilities" -> "mbo_utilities[extras]"
-    if ($Extras.Count -gt 0) {
-        $extrasStr = "[" + ($Extras -join ',') + "]"
-        if ($Spec -match '^([^\s@]+)(\s*@\s*.*)$') {
-            # Git URL format: insert extras after package name, before @ URL
-            $fullSpec = $matches[1] + $extrasStr + $matches[2]
-        }
-        else {
-            # PyPI format: just append extras
-            $fullSpec = "$Spec$extrasStr"
-        }
-    }
-    else {
-        $fullSpec = $Spec
-    }
-
-    Write-Info "  Spec: $fullSpec"
-
-    $prevErrorAction = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-
-    try {
-        # check if already installed
-        $existingTools = uv tool list 2>$null | Out-String
-        if ($existingTools -match "mbo[_-]utilities") {
-            if ($env:MBO_OVERWRITE -eq "1") {
-                Write-Info "Uninstalling existing mbo_utilities..."
-                uv tool uninstall mbo_utilities 2>&1 | Out-Null
-            }
-            else {
-                Write-Host ""
-                Write-Warn "mbo_utilities is already installed as a tool."
-                Write-Host ""
-                Write-Host "  [1] Upgrade   - Uninstall and reinstall" -ForegroundColor Cyan
-                Write-Host "  [2] Skip      - Keep existing installation" -ForegroundColor Cyan
-                Write-Host "  [3] Cancel    - Exit" -ForegroundColor Cyan
-                Write-Host ""
-
-                if ($ASSUME_YES) {
-                    $choice = "2"
-                    Write-Info "MBO_ASSUME_YES: keeping existing installation."
-                }
-                else {
-                    do {
-                        $choice = Read-Host "Select option (1-3)"
-                        $valid = $choice -match '^[123]$'
-                        if (-not $valid) { Write-Warn "Invalid selection." }
-                    } while (-not $valid)
-                }
-
-                switch ($choice) {
-                    "1" {
-                        Write-Info "Uninstalling existing mbo_utilities..."
-                        uv tool uninstall mbo_utilities 2>&1 | Out-Null
-                    }
-                    "2" {
-                        Write-Info "Keeping existing installation."
-                        return $true
-                    }
-                    "3" {
-                        Write-Info "Installation cancelled."
-                        $script:Cancelled = $true
-                        return $false
-                    }
-                }
-            }
-        }
-
-        # install tool.
-        # --reinstall forces uv to re-fetch and rebuild even if the same
-        # branch name is already cached. without it, pushing fixes to a
-        # branch and re-running the script would silently keep the stale
-        # version in the tool environment.
-        $installArgs = @($fullSpec, "--python", $MBO_PYTHON, "--reinstall")
-        uv tool install @installArgs 2>&1 | ForEach-Object { Write-Host $_ }
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "uv tool install failed with exit code $LASTEXITCODE"
-        }
-
-        # ensure the tool bin dir is on User PATH. uv's own install-time
-        # PATH wiring doesn't always fire (fresh windows machines, locked-
-        # down execution policies, certain shell configs), which leaves
-        # `mbo` unreachable from a new terminal even though the tool
-        # itself installed fine. `uv tool update-shell` is idempotent —
-        # safe to run even when PATH is already correct.
-        $updateOut = uv tool update-shell 2>&1 | Out-String
-        if ($updateOut.Trim()) { Write-Host $updateOut.Trim() }
-
-        # make `mbo` reachable in THIS shell too, so the user doesn't
-        # need to restart their terminal to try it. update-shell modifies
-        # the User PATH in the registry, but the current session inherits
-        # its PATH from when it was launched — we need to refresh it
-        # explicitly. merge Machine PATH + updated User PATH.
-        $binDir = Get-UvToolBinDir
-        if ($binDir -and $env:Path -notlike "*$binDir*") {
-            $env:Path = "$binDir;$env:Path"
-        }
-
-        # replace the CPU torch that came from PyPI with the GPU build
-        # from pytorch's own index. uv tool install can't express
-        # "use alt index for one package only", so we do this as a
-        # post-install reinstall into the tool's own venv.
-        if ($PytorchIndexUrl) {
-            $toolPy = Get-UvToolPythonPath -ToolName "mbo_utilities"
-            if ($toolPy) {
-                Write-Info "Replacing CPU torch with CUDA build ($PytorchIndexUrl)..."
-                uv pip install --python $toolPy --reinstall torch torchvision --index-url $PytorchIndexUrl 2>&1 | ForEach-Object { Write-Host $_ }
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warn "GPU torch install failed. Tool will use CPU torch."
-                }
-                else {
-                    Write-Success "GPU torch installed in tool env"
-                }
-            }
-            else {
-                Write-Warn "Could not locate tool's python; GPU torch not installed."
-            }
-        }
-
-        # install cupy + its NVRTC/runtime wheels into the tool's venv: the
-        # optional GPU backend for axial registration. done as a post-install
-        # step (not --with) so a cupy resolution hiccup only warns instead of
-        # aborting the whole tool install.
-        if ($CupyPackages.Count -gt 0) {
-            $toolPy = Get-UvToolPythonPath -ToolName "mbo_utilities"
-            if ($toolPy) {
-                Write-Info "Installing CuPy for GPU axial registration: $($CupyPackages -join ', ')..."
-                uv pip install --python $toolPy --reinstall @CupyPackages 2>&1 | ForEach-Object { Write-Host $_ }
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warn "CuPy install failed. Axial registration will use CPU."
-                }
-                else {
-                    Write-Success "CuPy installed in tool env: $($CupyPackages[0])"
-                }
-            }
-            else {
-                Write-Warn "Could not locate tool's python; CuPy not installed."
-            }
-        }
-
-        Write-Success "mbo CLI tool installed successfully"
-        return $true
-    }
-    catch {
-        Write-Err "Failed to install mbo tool: $_"
-        return $false
-    }
-    finally {
-        $ErrorActionPreference = $prevErrorAction
-    }
-}
-
-function Show-InstallTypePrompt {
-    if ($ASSUME_YES) {
-        Write-Info "MBO_ASSUME_YES: installing both global CLI + local environment."
-        return @{ InstallCli = $true; InstallEnv = $true }
-    }
-
-    Write-Host ""
-    Write-Host "Installation Type" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  Global - one 'mbo' command that works in any terminal." -ForegroundColor DarkGray
-    Write-Host "           Opens the GUI viewer. Nothing to activate. Choose this to just use the app." -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  Local  - a Python venv you install into and work from." -ForegroundColor DarkGray
-    Write-Host "           For writing scripts, running notebooks, 'import mbo_utilities', or development." -ForegroundColor DarkGray
-    Write-Host "           You 'cd' into its folder and run things with 'uv run ...'." -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  Both   - the 'mbo' command everywhere, plus an environment to write code in." -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  [1] Both   - global mbo command + local Python environment (Recommended)" -ForegroundColor Cyan
-    Write-Host "  [2] Local  - Python environment only (scripts, notebooks, imports)" -ForegroundColor Cyan
-    Write-Host "  [3] Global - mbo command only (just the GUI)" -ForegroundColor Cyan
-    Write-Host ""
-
-    do {
-        $choice = Read-Host "Select installation type (1-3)"
-        $valid = $choice -match '^[123]$'
-        if (-not $valid) { Write-Warn "Invalid selection." }
-    } while (-not $valid)
-
-    switch ($choice) {
-        "1" { return @{ InstallCli = $true; InstallEnv = $true } }
-        "2" { return @{ InstallCli = $false; InstallEnv = $true } }
-        "3" { return @{ InstallCli = $true; InstallEnv = $false } }
-    }
 }
 
 function Get-DefaultEnvPath {
@@ -1093,33 +866,6 @@ function Install-DevEnvironment {
     }
 }
 
-function Get-UvToolBinDir {
-    # `uv tool dir --bin` is the canonical query. `uv tool bin-dir`
-    # was a typo — not a real subcommand, always fell through to the
-    # fallback below (which works on Windows default but masked the bug).
-    try {
-        $binDir = uv tool dir --bin 2>$null
-        if ($binDir -and $LASTEXITCODE -eq 0) {
-            return $binDir.Trim()
-        }
-    }
-    catch {}
-
-    # fallback to common locations
-    $fallbacks = @(
-        (Join-Path $env:USERPROFILE ".local\bin"),
-        (Join-Path $env:LOCALAPPDATA "uv\bin")
-    )
-    foreach ($path in $fallbacks) {
-        $mboExe = Join-Path $path "mbo.exe"
-        if (Test-Path $mboExe) {
-            return $path
-        }
-    }
-
-    return $null
-}
-
 function Read-YesNo {
     param([string]$Prompt, [bool]$DefaultYes = $true)
 
@@ -1163,35 +909,14 @@ function Add-MboShortcut {
 
 function Show-UsageInstructions {
     param(
-        [string]$EnvPath = $null,
-        [bool]$CliInstalled = $true
+        [string]$EnvPath = $null
     )
 
     Write-Host ""
     Write-Host "Installation Complete" -ForegroundColor White
     Write-Host ""
 
-    # two distinct usage modes depending on what was installed. the CLI
-    # tool is available from any directory; the environment is a
-    # project-local venv that needs a `cd` (or activation) first. label
-    # them clearly so users running both don't conflate the two.
-    $sectionNum = 0
-    $showBoth = $CliInstalled -and $EnvPath
-
-    if ($CliInstalled) {
-        $sectionNum++
-        $binDir = Get-UvToolBinDir
-        $header = if ($showBoth) { "(${sectionNum}) Global - available system-wide" } else { "Global - available system-wide" }
-        Write-Host "  $header" -ForegroundColor Gray
-        Write-Host "    mbo                    # open GUI" -ForegroundColor White
-        Write-Host "    mbo /path/to/data      # open specific file" -ForegroundColor White
-        Write-Host "    mbo --help             # show all commands" -ForegroundColor White
-        Write-Host "    Location: $binDir\mbo.exe" -ForegroundColor DarkGray
-        Write-Host ""
-    }
-
     if ($EnvPath) {
-        $sectionNum++
         # $EnvPath points at the actual venv dir (ends in \.venv when the
         # user pointed at a project root). `uv run` wants the project dir,
         # not the venv dir — strip the trailing .venv so `cd` lands on the
@@ -1201,12 +926,7 @@ function Show-UsageInstructions {
             $cdPath = Split-Path $cdPath -Parent
         }
 
-        $header = if ($showBoth) {
-            "(${sectionNum}) Local environment - use from the env directory"
-        } else {
-            "Local environment - use from the env directory"
-        }
-        Write-Host "  $header" -ForegroundColor Gray
+        Write-Host "  Local environment - use from the env directory" -ForegroundColor Gray
         Write-Host "    cd $cdPath" -ForegroundColor White
         Write-Host "    uv run mbo             # open GUI (uses this env)" -ForegroundColor White
         Write-Host "    uv run mbo --help      # show all commands" -ForegroundColor White
@@ -1222,7 +942,6 @@ function Show-UsageInstructions {
 }
 
 function Main {
-    $script:Cancelled = $false
     Show-Banner
 
     # step 0: show system dependencies (informational)
@@ -1234,19 +953,16 @@ function Main {
         Install-Uv
     }
 
-    # step 1: choose installation type (env, CLI, or both)
-    $installType = Show-InstallTypePrompt
-
-    # step 2: choose source (pypi or github branch)
+    # step 1: choose source (pypi or github branch)
     $sourceInfo = Show-SourceSelection
 
-    # step 3: detect GPU
+    # step 2: detect GPU
     $gpuInfo = Test-NvidiaGpu
 
-    # step 4: choose extras
+    # step 3: choose extras
     $extras = Show-OptionalDependencies -GpuInfo $gpuInfo
 
-    # step 4.5: GPU packages only matter when the suite2p extra is selected
+    # step 3.5: GPU packages only matter when the suite2p extra is selected
     # (it pulls torch for suite2p and uses cupy for axial registration). a
     # base/viewer install stays slim — no torch, no cupy. wheels bundle their
     # own CUDA runtime, so only an NVIDIA driver is required.
@@ -1261,49 +977,29 @@ function Main {
         Write-Info "GPU torch will be installed from $pytorchIndexUrl"
     }
 
-    # step 5: get environment location if needed
+    # step 4: get environment location
     $envPath = $null
     $envLocation = $null
-    if ($installType.InstallEnv -and $env:MBO_SKIP_ENV -ne "1") {
+    if ($env:MBO_SKIP_ENV -ne "1") {
         $envLocation = Show-EnvLocationPrompt
     }
 
-    # step 6: install global CLI tool if requested
-    if ($installType.InstallCli) {
-        $toolInstalled = Install-MboTool -Spec $sourceInfo.Spec -Extras $extras -CupyPackages $cupyPackages -PytorchIndexUrl $pytorchIndexUrl
-        if ($script:Cancelled) {
-            return
-        }
-        if (-not $toolInstalled) {
-            Write-Err "Global installation failed."
-            return
-        }
-        if (Read-YesNo "Add a desktop shortcut for the global app?" $true) {
-            $binDir = Get-UvToolBinDir
-            $globalMbo = if ($binDir) { Join-Path $binDir "mbo.exe" } else { "mbo" }
-            Add-MboShortcut -MboExe $globalMbo -Name "Miller Brain Studio"
-        }
-    }
-
-    # step 7: create local environment if requested
-    if ($installType.InstallEnv -and $envLocation) {
+    # step 5: create local environment
+    if ($envLocation) {
         $envPath = Install-DevEnvironment -EnvPath $envLocation -Spec $sourceInfo.Spec -Extras $extras -GpuInfo $gpuInfo -CupyPackages $cupyPackages -PytorchIndexUrl $pytorchIndexUrl
         if ($envPath) {
-            if (Read-YesNo "Add a desktop shortcut for the local environment?" $false) {
+            if (Read-YesNo "Add a desktop shortcut?" $false) {
                 $localMbo = Join-Path $envPath "Scripts\mbo.exe"
-                Add-MboShortcut -MboExe $localMbo -Name "Miller Brain Studio (local)"
+                Add-MboShortcut -MboExe $localMbo -Name "Miller Brain Studio"
             }
         }
     }
 
     # show usage instructions
-    Show-UsageInstructions -EnvPath $envPath -CliInstalled $installType.InstallCli
+    Show-UsageInstructions -EnvPath $envPath
 
     Write-Success "Installation completed!"
     Write-Host ""
-    if ($installType.InstallCli) {
-        Write-Host "Open a NEW terminal to use 'mbo' (this session's PATH is already updated)." -ForegroundColor Yellow
-    }
 }
 
 Main
