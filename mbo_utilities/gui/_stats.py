@@ -17,8 +17,10 @@ from imgui_bundle import imgui, implot
 
 from mbo_utilities.arrays.features import canonical_axis, find_slider_name
 from mbo_utilities.arrays.features._summary_stats import (
+    STATS_SUMMARY_VERSION,
     SummaryStatsSpec,
     build_summary_stats_spec,
+    stats_signature,
 )
 from mbo_utilities.gui._imgui_helpers import set_tooltip, style_seaborn_dark
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
@@ -214,33 +216,138 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
         f"slices={n_slices}"
     )
 
-    # Persist the single-series stats back to disk when there is no group.
-    if spec.groups:
-        return
-    stats0 = parent._zstats[idx - 1].get(())
-    if stats0 is None:
-        return
-    if hasattr(arr, "stats"):
-        try:
-            arr.stats = stats0
-            parent.logger.debug(f"Saved stats to array {idx} metadata")
-        except Exception as e:
-            parent.logger.debug(f"Could not save stats to array metadata: {e}")
-    elif hasattr(arr, "zstats"):
-        try:
-            arr.zstats = stats0
-            parent.logger.debug(f"Saved z-stats to array {idx} metadata")
-        except Exception as e:
-            parent.logger.debug(f"Could not save z-stats to array metadata: {e}")
+    # Persist the full per-combo stats (+ mean stack) to the backing zarr
+    # store so the next open hydrates instead of recomputing.
+    _persist_stats(parent, idx, arr, spec)
 
 
-def compute_zstats(parent: Any):
-    """Compute z-stats for all graphics/arrays."""
+def _base_array(arr: Any) -> Any:
+    """Unwrap GUI view wrappers (Squeezed/Axial/Phasecorr) to the disk array.
+
+    These wrappers hold the source on ``_base`` (SqueezedView) or ``_source``
+    (AxialShiftView / PhaseCorrectedView) and do not forward underscore
+    attributes, so reach the innermost array to call its persistence hooks.
+    """
+    cur = arr
+    for _ in range(8):
+        nxt = getattr(cur, "_base", None) or getattr(cur, "_source", None)
+        if nxt is None or nxt is cur:
+            break
+        cur = nxt
+    return cur
+
+
+def _persist_stats(parent: Any, idx: int, arr: Any, spec: SummaryStatsSpec) -> None:
+    """Write the array's computed stats (+ binned mean stack) to its store."""
+    base = _base_array(arr)
+    save = getattr(base, "save_summary_stats", None)
+    if not callable(save):
+        return
+    zstats = parent._zstats[idx - 1]
+    if not zstats:
+        return
+    combos = list(zstats.keys())
+    payload = {
+        "version": STATS_SUMMARY_VERSION,
+        **stats_signature(
+            spec.dims, spec.shape,
+            spec.series.name if spec.series else None,
+            [m.key for m in spec.metrics],
+        ),
+        "series_pref": str(getattr(parent, "_stats_axis_pref", "z")).lower(),
+        "series_indices": [int(s) for s in (parent._zstats_z_indices[idx - 1] or [])],
+        "spatial_bin": int(spec.spatial_bin),
+        "combos": [[int(v) for v in c] for c in combos],
+        "stats": [zstats[c] for c in combos],
+    }
+    means = None
+    means_map = parent._zstats_means[idx - 1]
+    try:
+        stacks = [means_map.get(c) for c in combos]
+        if stacks and all(s is not None for s in stacks):
+            means = np.stack([np.asarray(s, dtype=np.float32) for s in stacks])
+    except Exception:
+        means = None
+    try:
+        if save(payload, means):
+            parent.logger.debug(f"[zstats] persisted array={idx} ({len(combos)} combos)")
+    except Exception as e:
+        parent.logger.debug(f"[zstats] persist array={idx} failed: {e}")
+
+
+def _hydrate_one(parent: Any, idx: int, arr: Any) -> bool:
+    """Load cached stats for one array and populate parent state. Returns True
+    when the cache matched the current dims/shape/series and was applied."""
+    base = _base_array(arr)
+    loader = getattr(base, "load_summary_stats", None)
+    if not callable(loader):
+        return False
+    loaded = loader()
+    if not loaded:
+        return False
+    payload, means = loaded
+
+    spec = _spec_for(parent, arr)
+    sig = stats_signature(
+        spec.dims, spec.shape,
+        spec.series.name if spec.series else None,
+        [m.key for m in spec.metrics],
+    )
+    if any(payload.get(k) != sig[k] for k in ("dims", "shape", "series", "metrics")):
+        return False
+
+    combos = [tuple(int(v) for v in c) for c in payload.get("combos", [])]
+    stats_list = payload.get("stats", [])
+    if len(combos) != len(stats_list):
+        return False
+
+    parent._zstats_spec[idx - 1] = spec
+    parent._zstats[idx - 1] = {c: stats_list[k] for k, c in enumerate(combos)}
+    parent._zstats_z_indices[idx - 1] = [int(s) for s in payload.get("series_indices", [])]
+
+    mean_map: dict = {}
+    scalar_map: dict = {}
+    if means is not None and len(means) == len(combos):
+        for k, c in enumerate(combos):
+            mimg = np.asarray(means[k], dtype=np.float32)
+            mean_map[c] = mimg
+            scalar_map[c] = mimg.mean(axis=(1, 2))
+    parent._zstats_means[idx - 1] = mean_map
+    parent._zstats_mean_scalar[idx - 1] = scalar_map
+
+    parent._zstats_done[idx - 1] = True
+    parent._zstats_running[idx - 1] = False
+    parent._zstats_progress[idx - 1] = 1.0
+    parent.logger.debug(f"[zstats] hydrated array={idx} from store · {spec.describe()}")
+    return True
+
+
+def hydrate_zstats(parent: Any) -> list[bool]:
+    """Populate stats from each array's cached store. Returns a per-array
+    ``hydrated`` flag list; arrays that returned False must be computed."""
+    n = parent.num_graphics
+    out = [False] * n
+    if not parent.image_widget or not parent.image_widget.data:
+        return out
+    for i, arr in enumerate(parent.image_widget.data):
+        if i >= n:
+            break
+        try:
+            out[i] = _hydrate_one(parent, i + 1, arr)
+        except Exception as e:
+            parent.logger.debug(f"[zstats] hydrate array={i + 1} failed: {e}")
+    return out
+
+
+def compute_zstats(parent: Any, only: list[int] | None = None):
+    """Compute z-stats for all graphics/arrays (or only the given 0-based indices)."""
     if not parent.image_widget or not parent.image_widget.data:
         return
 
     # Compute z-stats for each graphic (array)
     for idx, arr in enumerate(parent.image_widget.data, start=1):
+        if only is not None and (idx - 1) not in only:
+            continue
         threading.Thread(
             target=compute_zstats_single_array,
             args=(parent, idx, arr),

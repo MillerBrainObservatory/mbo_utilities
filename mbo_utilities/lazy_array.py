@@ -232,6 +232,46 @@ class LazyArray:
             labels=labels,
         )
 
+    def _summary_stats_store_path(self) -> str | None:
+        """Path to the zarr store that caches this array's summary stats.
+
+        Returns None when the array is not single-zarr-backed (the stats are
+        then kept only in memory for the session). Disk-backed subclasses
+        (ZarrArray, IsoviewArray) override this with their store path so the
+        GUI can persist/reload stats without recomputing every open.
+        """
+        return None
+
+    def save_summary_stats(self, payload: dict, means=None) -> bool:
+        """Persist a computed summary-stats payload (+ optional mean stack).
+
+        Format-agnostic: writes into the backing zarr store via
+        `_summary_stats_store_path`. Returns False (no-op) when not disk-backed
+        or on any write error, so the caller never has to guard the format.
+        """
+        path = self._summary_stats_store_path()
+        if path is None:
+            return False
+        from mbo_utilities.arrays.features._summary_stats import write_stats_store
+
+        try:
+            write_stats_store(path, payload, means)
+            return True
+        except Exception:
+            return False
+
+    def load_summary_stats(self):
+        """Return cached ``(payload, means|None)`` from the store, or None."""
+        path = self._summary_stats_store_path()
+        if path is None:
+            return None
+        from mbo_utilities.arrays.features._summary_stats import read_stats_store
+
+        try:
+            return read_stats_store(path)
+        except Exception:
+            return None
+
     def dim_index(self, label: str) -> int | None:
         try:
             return self.dims.index(label.upper())

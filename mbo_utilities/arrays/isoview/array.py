@@ -2188,6 +2188,20 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             return (False, StatsDimRole.GROUP)
         return default_dim_role(name)
 
+    def _summary_stats_store_path(self) -> str | None:
+        """Cache dataset-level summary stats in the first zarr leaf store.
+
+        Raw kinds back onto .klb/.tif and have no zarr attrs, so persistence
+        is skipped there (None); corrected/fused are .ome.zarr.
+        """
+        for tp in self._timepoints:
+            paths = self._tp_paths.get(tp, {})
+            for vk in self._view_keys:
+                p = paths.get(vk)
+                if p is not None and str(p).lower().endswith(".zarr"):
+                    return str(p)
+        return None
+
     @property
     def slider_dim_labels(self) -> tuple[str, ...]:
         """User-facing slider labels for non-singleton T, C, Z axes.
