@@ -904,9 +904,14 @@ def info(input_path, metadata, show_all):
         dz = _info_md(md, "dz")
         ny = sizes.get("Y", data.shape[-2] if data.ndim >= 2 else None)
         nx = sizes.get("X", data.shape[-1] if data.ndim >= 1 else None)
+        if is_isoview and is_tiled:
+            n_timepoints = 1
+        else:
+            n_timepoints = sizes.get("T") or _info_md(md, "num_timepoints")
 
         click.secho("\nImaging", fg="cyan")
-        _info_kv("Frame rate", _info_num(fs), "Hz")
+        if n_timepoints != 1:
+            _info_kv("Frame rate", _info_num(fs), "Hz")
         if dx is not None or dy is not None:
             _info_kv("Pixel size", f"{_info_num(dx)} x {_info_num(dy)}", "um")
         _info_kv("Z step", _info_num(dz), "um")
@@ -934,7 +939,7 @@ def info(input_path, metadata, show_all):
             _info_kv("Views", view_str)
             _info_kv("Color channels", _info_num(getattr(data, "num_color_channels", None)))
         else:
-            timepoints = sizes.get("T") or _info_md(md, "num_timepoints")
+            timepoints = n_timepoints
             channels = sizes.get("C") or _info_md(md, "num_color_channels")
             mrois = _info_md(md, "num_mrois")
 
