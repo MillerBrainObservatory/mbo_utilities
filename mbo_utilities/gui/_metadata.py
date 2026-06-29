@@ -513,22 +513,22 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                     display_value = "Yes" if value is True else ("No" if value is False else value)
                     _clickable_value(key, display_value, value_col)
 
-            # Cameras section
-            cameras = metadata.get("cameras")
-            if cameras and isinstance(cameras, dict):
-                cameras_match = not _metadata_search_filter
+            # Views section
+            views = metadata.get("views")
+            if views and isinstance(views, dict):
+                views_match = not _metadata_search_filter
                 if _metadata_search_filter:
-                    cameras_match = _matches_filter_recursive("cameras", cameras, _metadata_search_filter)
+                    views_match = _matches_filter_recursive("views", views, _metadata_search_filter)
 
-                if cameras_match:
+                if views_match:
                     imgui.spacing()
-                    imgui.text_colored(_TREE_NODE_COLOR, "Cameras")
+                    imgui.text_colored(_TREE_NODE_COLOR, "Views")
                     imgui.separator()
-                    for cam_idx, cam_meta in sorted(cameras.items()):
-                        if _metadata_search_filter and not _matches_filter_recursive(f"camera_{cam_idx}", cam_meta, _metadata_search_filter):
+                    for view_label, view_meta in views.items():
+                        if _metadata_search_filter and not _matches_filter_recursive(view_label, view_meta, _metadata_search_filter):
                             continue
-                        if _colored_tree_node(f"camera_{cam_idx}"):
-                            for k, v in sorted(cam_meta.items()):
+                        if _colored_tree_node(str(view_label)):
+                            for k, v in sorted(view_meta.items()):
                                 if k == "multiscales":
                                     continue
                                 if _metadata_search_filter and not _matches_filter_recursive(k, v, _metadata_search_filter):
@@ -537,7 +537,7 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                                 imgui.same_line(value_col)
                                 imgui.text_colored(_VALUE_COLOR, fmt_multivalue(v))
                             imgui.tree_pop()
-                shown_keys.add("cameras")
+                shown_keys.add("views")
 
             # Tiles section (tiled acquisitions only)
             tiles = metadata.get("tiles")

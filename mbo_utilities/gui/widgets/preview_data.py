@@ -250,6 +250,8 @@ class PreviewDataWidget(EdgeWindow):
 
         # Hydrate cached stats from disk first; only compute the arrays that
         # had no valid cache (recompute on shape/dims/series mismatch).
+        # compute_zstats runs its own single background worker, so call it
+        # directly (no extra wrapper thread).
         if threading_enabled:
             hydrated = hydrate_zstats(self)
             pending = [i for i in range(self.num_graphics) if not hydrated[i]]
@@ -257,9 +259,7 @@ class PreviewDataWidget(EdgeWindow):
                 self.logger.debug(f"Starting zstats computation for {len(pending)} array(s)...")
                 for i in pending:
                     self._zstats_running[i] = True
-                threading.Thread(
-                    target=lambda: compute_zstats(self, only=pending), daemon=True
-                ).start()
+                compute_zstats(self, only=pending)
 
     def _init_logging(self):
         """Initialize logging system."""

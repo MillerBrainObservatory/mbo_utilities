@@ -32,6 +32,11 @@ from mbo_utilities.reader import imread
 # the rest of the GUI's run-state palette.
 _ACTIVE_Z_COLOR = (0.13, 0.55, 0.13, 1.00)
 
+# seconds the stats worker sleeps after each read point, ceding the GIL so the
+# main render/event loop gets a scheduling window (UI stays responsive during
+# background compute). Negligible vs the per-point read cost.
+_ZSTATS_YIELD_S = 0.001
+
 
 def _slider_labels(parent: Any) -> dict[str, str]:
     """Live slider labels keyed by canonical axis (for spec display names)."""
@@ -201,6 +206,9 @@ def compute_zstats_single_array(parent: Any, idx: int, arr: Any):
             total_bytes += int(stack.nbytes)
             prev_end = t_after_compute
 
+            # cede the GIL between heavy reads so the GUI loop gets a window.
+            time.sleep(_ZSTATS_YIELD_S)
+
         parent._zstats[idx - 1][combo] = stats
         means_stack = np.stack(means)
         parent._zstats_means[idx - 1][combo] = means_stack
@@ -340,19 +348,29 @@ def hydrate_zstats(parent: Any) -> list[bool]:
 
 
 def compute_zstats(parent: Any, only: list[int] | None = None):
-    """Compute z-stats for all graphics/arrays (or only the given 0-based indices)."""
+    """Compute z-stats for all graphics (or only the given 0-based indices).
+
+    Runs in a single background thread that processes arrays sequentially.
+    One CPU-bound worker (not one per graphic) keeps GIL contention with the
+    main render/event loop low so the UI stays responsive during compute.
+    Non-blocking: returns immediately, safe to call from the main thread.
+    """
     if not parent.image_widget or not parent.image_widget.data:
         return
 
-    # Compute z-stats for each graphic (array)
-    for idx, arr in enumerate(parent.image_widget.data, start=1):
-        if only is not None and (idx - 1) not in only:
-            continue
-        threading.Thread(
-            target=compute_zstats_single_array,
-            args=(parent, idx, arr),
-            daemon=True,
-        ).start()
+    arrays = list(enumerate(parent.image_widget.data, start=1))
+
+    def _run():
+        for idx, arr in arrays:
+            if only is not None and (idx - 1) not in only:
+                continue
+            try:
+                compute_zstats_single_array(parent, idx, arr)
+            except Exception as e:
+                parent._zstats_running[idx - 1] = False
+                parent.logger.debug(f"[zstats] array={idx} failed: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def refresh_zstats(parent: Any):
