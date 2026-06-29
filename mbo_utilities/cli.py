@@ -887,6 +887,8 @@ def info(input_path, metadata, show_all):
     is_tiled = bool(getattr(data, "is_tiled", False))
 
     dims = getattr(data, "dims", None)
+    if dims and is_isoview:
+        dims = tuple("V" if d == "C" else d for d in dims)
     shape_str = str(tuple(data.shape))
     if dims and len(dims) == len(data.shape):
         shape_str += f"  [{', '.join(dims)}]"
