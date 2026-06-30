@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbo_utilities"
-version = "3.3.3"
+version = "3.3.4"
 description = "Various utilities for the Miller Brain Observatory"
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -106,7 +106,7 @@ notebooks = [
     "seaborn>=0.13.2",
 ]
 isoview = [
-    "isoview>=0.5.1",
+    "isoview>=0.5.2",
 ]
 docs = [
     "sphinx>=6.1.3",
