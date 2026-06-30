@@ -827,7 +827,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             mode = self._selected_mode
             imgui.text_colored(
                 _SUBSECTION_COLOR,
-                f"Mode: {mode}    Dataset: {Path(arr.scan_root).name}",
+                f"Mode: {mode}    Dataset: "
+                f"{Path(getattr(arr, 'base_path', None) or arr.scan_root).name}",
             )
             imgui.spacing()
             imgui.separator()
@@ -1416,13 +1417,9 @@ class IsoviewPipelineWidget(PipelineWidget):
         )
 
         def _zyx(header, ident, z, y, x, tip):
-            # Header above the three Z/Y/X fields; reserve room on the right
-            # for the right-aligned (?) marker so it never clips the edge.
-            imgui.text_colored(_SUBSECTION_COLOR, header)
-            style = imgui.get_style()
-            avail = imgui.get_content_region_avail().x
-            reserve = imgui.calc_text_size("(?)").x + 2 * style.item_spacing.x + 4
-            imgui.set_next_item_width(max(_input_w(), avail - reserve))
+            # Header above the three Z/Y/X fields (white, like other param names).
+            imgui.text(header)
+            imgui.set_next_item_width(_input_w())
             _, vals = imgui.input_int3(ident, [int(z), int(y), int(x)])
             set_tooltip(tip)
             return [max(0, int(v)) for v in vals]
@@ -1720,7 +1717,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         imgui.spacing()
         imgui.separator()
         imgui.spacing()
-        imgui.text_disabled("View transforms")
+        imgui.text_colored(_TITLE_COLOR, "View transforms")
         imgui.spacing()
         self._draw_fuse_transforms_box()
 
