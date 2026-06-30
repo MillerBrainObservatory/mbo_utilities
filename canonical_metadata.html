@@ -1,0 +1,884 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Canonical Metadata Layer &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=10c9b41c" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=b8b12719"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="_static/tippy/canonical_metadata.7617ddab-7c73-4af7-a400-c098c0705b09.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'canonical_metadata';</script>
+    <link rel="icon" href="_static/utilities.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Glossary" href="glossary.html" />
+    <link rel="prev" title="Development" href="development.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <img src="_static/logo_utilities.png" class="logo__image only-light pst-js-only" alt="mbo_utilities - Home"/>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/cli.html">Command Line Interface</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/hpc.html">HPC / SLURM</a></li>
+<li class="toctree-l1"><a class="reference internal" href="usage/gui_guide.html">Miller Brain Studio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="development.html">Development</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Canonical Metadata Layer</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/canonical_metadata.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/canonical_metadata.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fcanonical_metadata.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/canonical_metadata.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Canonical Metadata Layer</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why">Why</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-four-edges-the-reactive-core">The four edges + the reactive core</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-canonical-vocabulary">The canonical vocabulary</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adding-a-format-alias-the-single-place">Adding a format / alias — the single place</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#two-kinds-of-alias">Two kinds of alias</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#inbound-imread">Inbound: <code class="docutils literal notranslate"><span class="pre">imread</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#query-the-array-api">Query: the array API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#reactive-core-dimensionspecs">Reactive core: <code class="docutils literal notranslate"><span class="pre">DimensionSpecs</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#outbound-writers">Outbound: writers</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#display-mbo-studio">Display: mbo studio</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adding-a-new-array-class">Adding a new array class</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-status">Implementation status</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="canonical-metadata-layer">
+<h1>Canonical Metadata Layer<a class="headerlink" href="#canonical-metadata-layer" title="Link to this heading">#</a></h1>
+<p>How <code class="docutils literal notranslate"><span class="pre">mbo_utilities</span></code> represents imaging metadata so that one canonical name
+(<code class="docutils literal notranslate"><span class="pre">fs</span></code>, <code class="docutils literal notranslate"><span class="pre">dx</span></code>, <code class="docutils literal notranslate"><span class="pre">dy</span></code>, <code class="docutils literal notranslate"><span class="pre">dz</span></code>, …) is authoritative everywhere — resolved from any
+source’s aliases on read, queried through a single array API, and fanned back
+out to each format’s keys on write.</p>
+<blockquote>
+<div><p><strong>Status.</strong> This document describes the target design. The registry,
+alias resolution, and the array query API already exist; the sections
+marked <strong>(planned)</strong> are not implemented yet. See
+<a class="reference internal" href="#implementation-status">Implementation status</a> for the build plan.</p>
+</div></blockquote>
+<section id="why">
+<h2>Why<a class="headerlink" href="#why" title="Link to this heading">#</a></h2>
+<p>The same physical quantity is stored under different keys by different
+software:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Quantity</p></th>
+<th class="head"><p>mbo canonical</p></th>
+<th class="head"><p>ScanImage</p></th>
+<th class="head"><p>Suite2p</p></th>
+<th class="head"><p>ImageJ/Fiji</p></th>
+<th class="head"><p>OME</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>X pixel size</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dx</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">pixel_resolution[0]</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dx</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">XResolution</span></code>*</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">PhysicalSizeX</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>Z step</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dz</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">actualStackZStepSize</span></code></p></td>
+<td><p>—</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">spacing</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">PhysicalSizeZ</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Frame rate</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">fs</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">scanFrameRate</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">fs</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">finterval</span></code>*</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>Timepoints</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">num_timepoints</span></code></p></td>
+<td><p>—</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">nframes</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">frames</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">SizeT</span></code></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">*</span></code> ImageJ stores the <strong>inverse</strong> (<code class="docutils literal notranslate"><span class="pre">finterval</span></code> = 1/<code class="docutils literal notranslate"><span class="pre">fs</span></code>, <code class="docutils literal notranslate"><span class="pre">XResolution</span></code> =
+px-per-µm = 1/<code class="docutils literal notranslate"><span class="pre">dx</span></code>) — see <a class="reference internal" href="#two-kinds-of-alias">transform aliases</a>.</p>
+<p>The goal: load a stack a collaborator edited and saved in Fiji, and have
+<code class="docutils literal notranslate"><span class="pre">array.fs</span></code> / <code class="docutils literal notranslate"><span class="pre">array.dx</span></code> / <code class="docutils literal notranslate"><span class="pre">array.dz</span></code> return the right numbers — with no
+call site knowing which key the value came from — then write it back out
+to OME-Zarr with all the OME keys populated.</p>
+</section>
+<section id="the-four-edges-the-reactive-core">
+<h2>The four edges + the reactive core<a class="headerlink" href="#the-four-edges-the-reactive-core" title="Link to this heading">#</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>                       ┌─────────────────────────────┐
+   any source meta ──▶ │  inbound: alias resolution  │ ──▶ canonical dict
+   (SI/Fiji/OME/...)   └─────────────────────────────┘
+                                     │
+                            ┌────────▼────────┐
+                            │  reactive core  │  dims + shape + metadata
+                            │ DimensionSpecs  │  → per-dim {role,size,scale,unit}
+                            └────────┬────────┘
+                  ┌──────────────────┼──────────────────┐
+            query │                  │ display          │ outbound
+        arr.dx/fs │           mbo studio viewer         │ per-format keys
+                  ▼                  ▼                  ▼
+           (used everywhere)   (canonical values)  (OME-Zarr / ImageJ / ops)
+</pre></div>
+</div>
+</section>
+<section id="the-canonical-vocabulary">
+<h2>The canonical vocabulary<a class="headerlink" href="#the-canonical-vocabulary" title="Link to this heading">#</a></h2>
+<p>Defined in <strong>one place</strong>: <code class="docutils literal notranslate"><span class="pre">mbo_utilities/metadata/base.py</span></code>, the
+<code class="docutils literal notranslate"><span class="pre">METADATA_PARAMS</span></code> registry. Each entry is a <code class="docutils literal notranslate"><span class="pre">MetadataParameter</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">MetadataParameter</span><span class="p">:</span>
+    <span class="n">canonical</span><span class="p">:</span> <span class="nb">str</span>                 <span class="c1"># the mbo truth, e.g. &quot;dx&quot;</span>
+    <span class="n">aliases</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">()</span>  <span class="c1"># other keys that mean the same value</span>
+    <span class="n">dtype</span><span class="p">:</span> <span class="nb">type</span> <span class="o">=</span> <span class="nb">float</span>            <span class="c1"># coerced on read</span>
+    <span class="n">unit</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>        <span class="c1"># &quot;µm&quot;, &quot;Hz&quot;, ...</span>
+    <span class="n">default</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span>            <span class="c1"># value when absent</span>
+    <span class="n">description</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">label</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                <span class="c1"># GUI display label</span>
+</pre></div>
+</div>
+<p>The reverse lookup <code class="docutils literal notranslate"><span class="pre">ALIAS_MAP</span></code> (alias → canonical) is built automatically
+from every entry, so you never maintain it by hand.</p>
+</section>
+<section id="adding-a-format-alias-the-single-place">
+<h2>Adding a format / alias — the single place<a class="headerlink" href="#adding-a-format-alias-the-single-place" title="Link to this heading">#</a></h2>
+<blockquote>
+<div><p>Someone wants <code class="docutils literal notranslate"><span class="pre">pixresX</span></code> to also mean <code class="docutils literal notranslate"><span class="pre">dx</span></code>.</p>
+</div></blockquote>
+<p>Add it to the <code class="docutils literal notranslate"><span class="pre">aliases</span></code> tuple of the <code class="docutils literal notranslate"><span class="pre">dx</span></code> entry in <code class="docutils literal notranslate"><span class="pre">METADATA_PARAMS</span></code>. That
+is the only edit:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># mbo_utilities/metadata/base.py</span>
+<span class="s2">&quot;dx&quot;</span><span class="p">:</span> <span class="n">MetadataParameter</span><span class="p">(</span>
+    <span class="n">canonical</span><span class="o">=</span><span class="s2">&quot;dx&quot;</span><span class="p">,</span>
+    <span class="n">aliases</span><span class="o">=</span><span class="p">(</span>
+        <span class="s2">&quot;PhysicalSizeX&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pixel_size_x&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;XResolution&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pixresX&quot;</span><span class="p">,</span>      <span class="c1"># &lt;-- added; nothing else changes</span>
+    <span class="p">),</span>
+    <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+    <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;µm&quot;</span><span class="p">,</span>
+    <span class="n">default</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+<span class="p">),</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">ALIAS_MAP</span></code> rebuilds at import, and every consumer downstream —
+<code class="docutils literal notranslate"><span class="pre">get_param</span></code>, <code class="docutils literal notranslate"><span class="pre">array.dx</span></code>, <code class="docutils literal notranslate"><span class="pre">normalize_metadata</span></code>, the GUI viewer, every
+writer — picks it up. No call site changes.</p>
+<p>Adding a brand-new canonical quantity is the same: add a new
+<code class="docutils literal notranslate"><span class="pre">MetadataParameter</span></code> entry keyed by its canonical name.</p>
+<section id="two-kinds-of-alias">
+<span id="id1"></span><h3>Two kinds of alias<a class="headerlink" href="#two-kinds-of-alias" title="Link to this heading">#</a></h3>
+<ol class="arabic">
+<li><p><strong>Rename alias</strong> — the value is identical, only the key differs
+(<code class="docutils literal notranslate"><span class="pre">PhysicalSizeX</span></code> ≡ <code class="docutils literal notranslate"><span class="pre">dx</span></code>). Add it to <code class="docutils literal notranslate"><span class="pre">aliases</span></code>.</p></li>
+<li><p><strong>Transform alias</strong> — the value needs a function to reach the canonical
+form:</p>
+<ul class="simple">
+<li><p>ImageJ <code class="docutils literal notranslate"><span class="pre">finterval</span></code> (seconds) = <code class="docutils literal notranslate"><span class="pre">1</span> <span class="pre">/</span> <span class="pre">fs</span></code></p></li>
+<li><p>TIFF <code class="docutils literal notranslate"><span class="pre">XResolution</span></code> (px per µm) = <code class="docutils literal notranslate"><span class="pre">1</span> <span class="pre">/</span> <span class="pre">dx</span></code></p></li>
+<li><p>ScanImage <code class="docutils literal notranslate"><span class="pre">pixel_resolution</span></code> (tuple) → <code class="docutils literal notranslate"><span class="pre">(dx,</span> <span class="pre">dy)</span></code> (handled as a
+one-off special case in <code class="docutils literal notranslate"><span class="pre">get_param</span></code>).</p></li>
+</ul>
+<p>Declared alongside the param via <code class="docutils literal notranslate"><span class="pre">transforms</span></code>, so it still lives in one
+place. Each entry maps a source key → <code class="docutils literal notranslate"><span class="pre">(to_canonical,</span> <span class="pre">from_canonical)</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="s2">&quot;fs&quot;</span><span class="p">:</span> <span class="n">MetadataParameter</span><span class="p">(</span>
+    <span class="n">canonical</span><span class="o">=</span><span class="s2">&quot;fs&quot;</span><span class="p">,</span>
+    <span class="n">aliases</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;frame_rate&quot;</span><span class="p">,</span> <span class="s2">&quot;fps&quot;</span><span class="p">,</span> <span class="s2">&quot;scanFrameRate&quot;</span><span class="p">),</span>
+    <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;Hz&quot;</span><span class="p">,</span>
+    <span class="c1"># alias -&gt; (parse_to_canonical, emit_from_canonical)</span>
+    <span class="n">transforms</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;finterval&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">_reciprocal</span><span class="p">,</span> <span class="n">_reciprocal</span><span class="p">)},</span>
+<span class="p">),</span>
+</pre></div>
+</div>
+<p>On read, <code class="docutils literal notranslate"><span class="pre">get_param(&quot;fs&quot;)</span></code> returns <code class="docutils literal notranslate"><span class="pre">1/finterval</span></code> when only <code class="docutils literal notranslate"><span class="pre">finterval</span></code>
+is present (direct/rename values still win); on write,
+<code class="docutils literal notranslate"><span class="pre">normalize_metadata</span></code> emits <code class="docutils literal notranslate"><span class="pre">finterval</span></code> from <code class="docutils literal notranslate"><span class="pre">fs</span></code>. The nested lookup runs
+with transforms disabled, so reciprocal pairs (<code class="docutils literal notranslate"><span class="pre">fs</span></code>↔<code class="docutils literal notranslate"><span class="pre">finterval</span></code>) can’t
+recurse.</p>
+<p><code class="docutils literal notranslate"><span class="pre">get_param(meta,</span> <span class="pre">&quot;fs&quot;)</span></code> would then resolve <code class="docutils literal notranslate"><span class="pre">fs</span></code> from a Fiji file that
+only carries <code class="docutils literal notranslate"><span class="pre">finterval</span></code>, and writers could emit <code class="docutils literal notranslate"><span class="pre">finterval</span></code> from <code class="docutils literal notranslate"><span class="pre">fs</span></code>.</p>
+</li>
+</ol>
+</section>
+</section>
+<section id="inbound-imread">
+<h2>Inbound: <code class="docutils literal notranslate"><span class="pre">imread</span></code><a class="headerlink" href="#inbound-imread" title="Link to this heading">#</a></h2>
+<p>A reader’s only metadata job is to <strong>deposit the source’s raw keys</strong> into
+<code class="docutils literal notranslate"><span class="pre">self._metadata</span></code> — it must <em>not</em> pre-normalize. Resolution happens through
+the registry:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">mbo_utilities.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_param</span>
+
+<span class="n">meta</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;PhysicalSizeX&quot;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s2">&quot;frame_rate&quot;</span><span class="p">:</span> <span class="mf">7.5</span><span class="p">}</span>  <span class="c1"># what the reader stored</span>
+<span class="n">get_param</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="s2">&quot;dx&quot;</span><span class="p">)</span>   <span class="c1"># 0.5   (via PhysicalSizeX)</span>
+<span class="n">get_param</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="s2">&quot;fs&quot;</span><span class="p">)</span>   <span class="c1"># 7.5   (via frame_rate)</span>
+</pre></div>
+</div>
+<p>To stamp every alias into a dict (so plain-dict consumers and external
+tools see them all), use <code class="docutils literal notranslate"><span class="pre">normalize_metadata(meta)</span></code> /
+<code class="docutils literal notranslate"><span class="pre">normalize_resolution(meta)</span></code>.</p>
+</section>
+<section id="query-the-array-api">
+<h2>Query: the array API<a class="headerlink" href="#query-the-array-api" title="Link to this heading">#</a></h2>
+<p>On any <code class="docutils literal notranslate"><span class="pre">LazyArray</span></code>, read canonical values directly — this is <strong>the</strong>
+sanctioned access path:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Property</p></th>
+<th class="head"><p>Meaning</p></th>
+<th class="head"><p>Source</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">arr.dx</span></code>, <code class="docutils literal notranslate"><span class="pre">arr.dy</span></code></p></td>
+<td><p>pixel size (µm)</p></td>
+<td><p>metadata, via registry</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">arr.dz</span></code></p></td>
+<td><p>z-step (µm), <code class="docutils literal notranslate"><span class="pre">None</span></code> if no Z</p></td>
+<td><p>metadata, via registry</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">arr.fs</span></code></p></td>
+<td><p>frame rate (Hz)</p></td>
+<td><p>metadata, via registry</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">arr.finterval</span></code></p></td>
+<td><p>frame interval (s)</p></td>
+<td><p>derived from <code class="docutils literal notranslate"><span class="pre">fs</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">arr.num_timepoints</span></code>, <code class="docutils literal notranslate"><span class="pre">arr.num_zplanes</span></code></p></td>
+<td><p>sizes by dim name</p></td>
+<td><p>dims + shape</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">arr.nt/nc/nz/ny/nx</span></code></p></td>
+<td><p>sizes by 5D position</p></td>
+<td><p>shape</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">arr</span> <span class="o">=</span> <span class="n">mbo</span><span class="o">.</span><span class="n">imread</span><span class="p">(</span><span class="s2">&quot;fiji_edited.tif&quot;</span><span class="p">)</span>
+<span class="n">arr</span><span class="o">.</span><span class="n">dx</span>        <span class="c1"># resolves XResolution/PhysicalSizeX/pixel_resolution → µm</span>
+<span class="n">arr</span><span class="o">.</span><span class="n">fs</span>        <span class="c1"># resolves frame_rate/scanFrameRate/finterval → Hz</span>
+<span class="n">arr</span><span class="o">.</span><span class="n">num_zplanes</span>
+</pre></div>
+</div>
+<p>These delegate to <code class="docutils literal notranslate"><span class="pre">dimension_specs</span></code> (below), so they stay correct when
+<code class="docutils literal notranslate"><span class="pre">dims</span></code> or <code class="docutils literal notranslate"><span class="pre">metadata</span></code> change. <strong>Do not</strong> hand-roll fallback chains; the
+following anti-pattern in <code class="docutils literal notranslate"><span class="pre">arrays/mp4.py</span></code> is exactly what the layer
+exists to delete:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># before — every call site re-implements alias resolution</span>
+<span class="n">candidates</span> <span class="o">=</span> <span class="p">[</span><span class="nb">getattr</span><span class="p">(</span><span class="n">arr</span><span class="p">,</span> <span class="s2">&quot;dx&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+              <span class="n">md</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;dx&quot;</span><span class="p">),</span>
+              <span class="p">(</span><span class="n">md</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pixel_resolution&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[</span><span class="kc">None</span><span class="p">])[</span><span class="mi">0</span><span class="p">]]</span>
+<span class="n">dx</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">candidates</span> <span class="k">if</span> <span class="n">v</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span>
+
+<span class="c1"># after</span>
+<span class="n">dx</span> <span class="o">=</span> <span class="n">arr</span><span class="o">.</span><span class="n">dx</span>
+</pre></div>
+</div>
+<blockquote>
+<div><p><strong>Note.</strong> <code class="docutils literal notranslate"><span class="pre">num_channels</span></code> is <em>not</em> a base property — <code class="docutils literal notranslate"><span class="pre">ScanImageArray</span></code>
+assigns <code class="docutils literal notranslate"><span class="pre">self.num_channels</span></code> as instance state, so a base property would
+collide. Use <code class="docutils literal notranslate"><span class="pre">arr.nc</span></code> for the channel count.</p>
+</div></blockquote>
+<blockquote>
+<div><p><strong>Unknown values.</strong> When a quantity was never stored, <code class="docutils literal notranslate"><span class="pre">arr.dx</span></code>/<code class="docutils literal notranslate"><span class="pre">arr.dy</span></code>
+return <code class="docutils literal notranslate"><span class="pre">1.0</span></code>, <code class="docutils literal notranslate"><span class="pre">arr.dz</span></code>/<code class="docutils literal notranslate"><span class="pre">arr.fs</span></code> return <code class="docutils literal notranslate"><span class="pre">None</span></code> (registry defaults). The
+layer does not distinguish “1.0 µm” from “unknown”.</p>
+</div></blockquote>
+</section>
+<section id="reactive-core-dimensionspecs">
+<h2>Reactive core: <code class="docutils literal notranslate"><span class="pre">DimensionSpecs</span></code><a class="headerlink" href="#reactive-core-dimensionspecs" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">LazyArray.dimension_specs</span></code> builds, from <code class="docutils literal notranslate"><span class="pre">dims</span></code> + <code class="docutils literal notranslate"><span class="pre">shape</span></code> + <code class="docutils literal notranslate"><span class="pre">metadata</span></code>, a
+per-dimension <code class="docutils literal notranslate"><span class="pre">{role,</span> <span class="pre">size,</span> <span class="pre">scale,</span> <span class="pre">unit}</span></code> model and caches it. The cache is
+dropped by <code class="docutils literal notranslate"><span class="pre">invalidate_dimension_specs()</span></code> whenever <code class="docutils literal notranslate"><span class="pre">dims</span></code> is reassigned, so
+the canonical accessors reflect the current state.</p>
+<p>Selection/stride reactivity (writing a subset of planes/timepoints) lives
+in <code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code>, which carries a provenance stamp so <code class="docutils literal notranslate"><span class="pre">dz</span></code>/<code class="docutils literal notranslate"><span class="pre">fs</span></code> scale
+correctly across multi-hop writes (raw → zarr → tiff → bin) without
+double-scaling. <code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code> is the authoritative output-side layer and
+should not be replaced by the simpler one-shot scaling in
+<code class="docutils literal notranslate"><span class="pre">DimensionSpecs.with_selections</span></code>.</p>
+</section>
+<section id="outbound-writers">
+<h2>Outbound: writers<a class="headerlink" href="#outbound-writers" title="Link to this heading">#</a></h2>
+<p>A writer emits the canonical value under the keys its target format
+expects:</p>
+<ul class="simple">
+<li><p><strong>OME-Zarr (NGFF):</strong> axes + per-axis <code class="docutils literal notranslate"><span class="pre">scale</span></code> (<code class="docutils literal notranslate"><span class="pre">dz</span></code> for Z, <code class="docutils literal notranslate"><span class="pre">1/fs</span></code> for T) +
+<code class="docutils literal notranslate"><span class="pre">PhysicalSizeX/Y/Z</span></code>.</p></li>
+<li><p><strong>ImageJ TIFF:</strong> <code class="docutils literal notranslate"><span class="pre">finterval</span></code>, <code class="docutils literal notranslate"><span class="pre">spacing</span></code>, <code class="docutils literal notranslate"><span class="pre">XResolution</span></code>/<code class="docutils literal notranslate"><span class="pre">YResolution</span></code>,
+<code class="docutils literal notranslate"><span class="pre">unit</span></code>.</p></li>
+<li><p><strong>Suite2p ops:</strong> <code class="docutils literal notranslate"><span class="pre">fs</span></code>, <code class="docutils literal notranslate"><span class="pre">dx</span></code>, <code class="docutils literal notranslate"><span class="pre">dy</span></code>, <code class="docutils literal notranslate"><span class="pre">nplanes</span></code>.</p></li>
+</ul>
+<p>Today <code class="docutils literal notranslate"><span class="pre">normalize_metadata</span></code> and <code class="docutils literal notranslate"><span class="pre">VoxelSize.to_dict(include_aliases=True)</span></code>
+fan out the OME/ImageJ/legacy spatial keys. The <strong>(planned)</strong> consolidation
+is to drive per-format emission from the registry (and the transform
+aliases) instead of the hand-written scale loops in
+<code class="docutils literal notranslate"><span class="pre">OutputMetadata.to_ome_ngff</span></code> / <code class="docutils literal notranslate"><span class="pre">to_imagej</span></code>.</p>
+</section>
+<section id="display-mbo-studio">
+<h2>Display: mbo studio<a class="headerlink" href="#display-mbo-studio" title="Link to this heading">#</a></h2>
+<p>The metadata viewer is driven by <code class="docutils literal notranslate"><span class="pre">IMAGING_METADATA_KEYS</span></code> and reads the
+canonical, resolved values (with <code class="docutils literal notranslate"><span class="pre">unit</span></code> and <code class="docutils literal notranslate"><span class="pre">label</span></code> from the registry), so
+it shows accurate numbers regardless of which software wrote the file.</p>
+</section>
+<section id="adding-a-new-array-class">
+<h2>Adding a new array class<a class="headerlink" href="#adding-a-new-array-class" title="Link to this heading">#</a></h2>
+<p>A new reader participates in the whole layer for free by following the
+<code class="docutils literal notranslate"><span class="pre">LazyArray</span></code> contract:</p>
+<ol class="arabic simple">
+<li><p>Implement <code class="docutils literal notranslate"><span class="pre">can_open</span></code>, <code class="docutils literal notranslate"><span class="pre">_shape5d</span></code>, <code class="docutils literal notranslate"><span class="pre">__getitem__</span></code>, <code class="docutils literal notranslate"><span class="pre">dtype</span></code>.</p></li>
+<li><p>Set <code class="docutils literal notranslate"><span class="pre">self._metadata</span></code> to the source’s raw keys (do not pre-normalize).</p></li>
+</ol>
+<p>That’s it — <code class="docutils literal notranslate"><span class="pre">arr.dx</span></code>, <code class="docutils literal notranslate"><span class="pre">arr.fs</span></code>, <code class="docutils literal notranslate"><span class="pre">arr.num_zplanes</span></code>, <code class="docutils literal notranslate"><span class="pre">dimension_specs</span></code>, the
+GUI viewer, and the writers all work, resolving whatever aliases the source
+used.</p>
+</section>
+<section id="implementation-status">
+<span id="id2"></span><h2>Implementation status<a class="headerlink" href="#implementation-status" title="Link to this heading">#</a></h2>
+<p>Already in place:</p>
+<ul class="simple">
+<li><p>✅ <code class="docutils literal notranslate"><span class="pre">METADATA_PARAMS</span></code> + <code class="docutils literal notranslate"><span class="pre">ALIAS_MAP</span></code> registry (<code class="docutils literal notranslate"><span class="pre">metadata/base.py</span></code>)</p></li>
+<li><p>✅ <code class="docutils literal notranslate"><span class="pre">get_param</span></code> rename-alias resolution + <code class="docutils literal notranslate"><span class="pre">pixel_resolution</span></code> tuple case</p></li>
+<li><p>✅ <code class="docutils literal notranslate"><span class="pre">normalize_metadata</span></code> / <code class="docutils literal notranslate"><span class="pre">normalize_resolution</span></code> / <code class="docutils literal notranslate"><span class="pre">VoxelSize.to_dict</span></code></p></li>
+<li><p>✅ <code class="docutils literal notranslate"><span class="pre">dimension_specs</span></code> reactive derivation; <code class="docutils literal notranslate"><span class="pre">OutputMetadata</span></code> provenance</p></li>
+<li><p>✅ <code class="docutils literal notranslate"><span class="pre">arr.dx/dy/dz/fs/finterval</span></code> and <code class="docutils literal notranslate"><span class="pre">arr.num_timepoints/num_zplanes</span></code></p></li>
+<li><p>✅ <strong>Transform aliases</strong> (<code class="docutils literal notranslate"><span class="pre">finterval</span></code>↔<code class="docutils literal notranslate"><span class="pre">fs</span></code>, <code class="docutils literal notranslate"><span class="pre">XResolution</span></code>↔<code class="docutils literal notranslate"><span class="pre">dx</span></code>,
+<code class="docutils literal notranslate"><span class="pre">YResolution</span></code>↔<code class="docutils literal notranslate"><span class="pre">dy</span></code>) — reciprocal derivation on read + emission on write,
+recursion-guarded. <code class="docutils literal notranslate"><span class="pre">arr.fs</span></code> now resolves an ImageJ <code class="docutils literal notranslate"><span class="pre">finterval</span></code>.</p></li>
+</ul>
+<p>Planned (this initiative):</p>
+<ul class="simple">
+<li><p>🔲 <strong>Wide adoption of <code class="docutils literal notranslate"><span class="pre">arr.dx</span></code>/<code class="docutils literal notranslate"><span class="pre">arr.fs</span></code></strong> — replace scattered
+<code class="docutils literal notranslate"><span class="pre">get_param(arr.metadata,</span> <span class="pre">…)</span></code> and the <code class="docutils literal notranslate"><span class="pre">mp4</span></code>-style fallback chains.</p></li>
+<li><p>🔲 <strong>Inbound coverage audit</strong> — confirm each reader (esp. the ImageJ/OME
+TIFF path) deposits the source tags so the registry can resolve them.</p></li>
+<li><p>🔲 <strong>Registry-driven per-format write emission</strong> for OME-Zarr / ImageJ /
+ops.</p></li>
+</ul>
+<p>See also: <a class="reference internal" href="#dim_metadata_refactor.md"><span class="xref myst">Dim/metadata contract consolidation</span></a>.</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="development.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Development</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="glossary.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Glossary</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why">Why</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-four-edges-the-reactive-core">The four edges + the reactive core</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-canonical-vocabulary">The canonical vocabulary</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adding-a-format-alias-the-single-place">Adding a format / alias — the single place</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#two-kinds-of-alias">Two kinds of alias</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#inbound-imread">Inbound: <code class="docutils literal notranslate"><span class="pre">imread</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#query-the-array-api">Query: the array API</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#reactive-core-dimensionspecs">Reactive core: <code class="docutils literal notranslate"><span class="pre">DimensionSpecs</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#outbound-writers">Outbound: writers</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#display-mbo-studio">Display: mbo studio</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#adding-a-new-array-class">Adding a new array class</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-status">Implementation status</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

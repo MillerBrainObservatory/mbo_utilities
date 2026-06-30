@@ -1,0 +1,810 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" data-theme="dark">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>HPC / SLURM &#8212; mbo_utilities</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "dark";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="../_static/mystnb.11b39860a7a0cbfd473a3ad8a317855267ff0bd372690045ca344a6b62be495e.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../_static/togglebutton.css?v=9c3e77be" />
+    <link rel="stylesheet" type="text/css" href="../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=10c9b41c" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../_static/documentation_options.js?v=e645c8fa"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../_static/copybutton.js?v=f281be69"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../_static/togglebutton.js?v=b8b12719"></script>
+    <script src="../_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../_static/design-tabs.js?v=f930bc37"></script>
+    <script defer="defer" src="https://unpkg.com/@popperjs/core@2"></script>
+    <script defer="defer" src="https://unpkg.com/tippy.js@6"></script>
+    <script defer="defer" src="../_static/tippy/usage/hpc.ceb28939-f104-41a5-9d05-94225a749547.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'usage/hpc';</script>
+    <link rel="icon" href="../_static/utilities.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Miller Brain Studio" href="gui_guide.html" />
+    <link rel="prev" title="Command Line Interface" href="cli.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="dark">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+    
+    <img src="../_static/logo_utilities.png" class="logo__image only-dark" alt="mbo_utilities - Home"/>
+    <img src="../_static/logo_utilities.png" class="logo__image only-light pst-js-only" alt="mbo_utilities - Home"/>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://millerbrainobservatory.github.io/" title="MBO User Hub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><img src="../_static/icon_mbo_home.png" class="icon-link-image" alt="MBO User Hub"/></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/MillerBrainObservatory/" title="MBO Github" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">MBO Github</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://mbo.rockefeller.edu/contact/" title="Connect with MBO" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-regular fa-address-card fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Connect with MBO</span></a>
+        </li>
+</ul></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../user_guide.html">User Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command Line Interface</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">HPC / SLURM</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gui_guide.html">Miller Brain Studio</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../file_formats.html">Supported File Formats</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dff.html">DF/F Analysis</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../api/index.html">API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api/io.html">1. I/O Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../api/visualization.html">2. Visualization Functions</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../development.html">Development</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../canonical_metadata.html">Canonical Metadata Layer</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="../glossary.html">Glossary</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/blob/master/docs/usage/hpc.md?plain=1" target="_blank"
+   class="btn btn-sm btn-source-file-button dropdown-item"
+   title="Show source"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-code"></i>
+  </span>
+<span class="btn__text-container">Show source</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/edit/master/docs/usage/hpc.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/MillerBrainObservatory/mbo_utilties/issues/new?title=Issue%20on%20page%20%2Fusage/hpc.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../_sources/usage/hpc.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>HPC / SLURM</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#typical-flow">Typical flow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#config">Config</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#modes">Modes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#monitor">Monitor</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#shared-environment-mbo-server-configs">Shared environment (<code class="docutils literal notranslate"><span class="pre">mbo_server_configs</span></code>)</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="hpc-slurm">
+<span id="hpc-usage"></span><h1>HPC / SLURM<a class="headerlink" href="#hpc-slurm" title="Link to this heading">#</a></h1>
+<p>Run the LBM-Suite2p pipeline on a SLURM cluster (or locally) from a TOML config. Built on <a class="reference external" href="https://github.com/facebookincubator/submitit">submitit</a>.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">info</span></code></p></td>
+<td><p>Show partitions: nodes, CPUs, GPU usage, free memory</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">init</span></code></p></td>
+<td><p>Write a commented <code class="docutils literal notranslate"><span class="pre">hpc.toml</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">check</span></code></p></td>
+<td><p>Verify the request fits the data and the partition</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">run</span></code></p></td>
+<td><p>Submit the run (single / array / local)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">status</span></code></p></td>
+<td><p>Job state, an output dir’s timings, or your queue</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">watch</span></code></p></td>
+<td><p>Follow a run’s <code class="docutils literal notranslate"><span class="pre">.err</span></code>/<code class="docutils literal notranslate"><span class="pre">.out</span></code> logs</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="typical-flow">
+<h2>Typical flow<a class="headerlink" href="#typical-flow" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>hpc<span class="w"> </span>info<span class="w">                          </span><span class="c1"># size a job: which partition has free GPUs</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>init<span class="w"> </span>/data/raw<span class="w">                </span><span class="c1"># write /data/raw/hpc.toml (edit it)</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>check<span class="w"> </span>hpc.toml<span class="w"> </span>--mode<span class="w"> </span>array<span class="w">   </span><span class="c1"># does the request fit the data + partition?</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>run<span class="w"> </span>hpc.toml<span class="w"> </span>--mode<span class="w"> </span>array<span class="w">     </span><span class="c1"># submit array + dependent aggregate</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>watch<span class="w"> </span>hpc.toml<span class="w">                </span><span class="c1"># follow the newest run&#39;s logs</span>
+</pre></div>
+</div>
+</section>
+<section id="config">
+<h2>Config<a class="headerlink" href="#config" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">init</span></code> writes a commented <code class="docutils literal notranslate"><span class="pre">hpc.toml</span></code>. The four tables:</p>
+<div class="highlight-toml notranslate"><div class="highlight"><pre><span></span><span class="k">[io]</span>
+<span class="n">input</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/lustre/.../raw&quot;</span><span class="w">          </span><span class="c1"># directory of ScanImage TIFFs</span>
+<span class="n">output</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/lustre/.../results&quot;</span><span class="w">      </span><span class="c1"># WRITABLE root; prefer scratch</span>
+<span class="n">name</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;s2p&quot;</span><span class="w">                      </span><span class="c1"># label for the dated output subfolder</span>
+
+<span class="k">[slurm]</span>
+<span class="n">partition</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;hpc_a100_a&quot;</span><span class="w">    </span><span class="c1"># see `mbo hpc info`</span>
+<span class="n">gres</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;gpu:a100:1&quot;</span><span class="w">    </span><span class="c1"># GPUs per job</span>
+<span class="n">cpus_per_task</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="mi">16</span><span class="w">              </span><span class="c1"># workers derive from this and F</span>
+<span class="n">mem_gb</span><span class="w">            </span><span class="o">=</span><span class="w"> </span><span class="mi">128</span><span class="w">             </span><span class="c1"># per job; size to the node, not a small default</span>
+<span class="n">time</span><span class="w">              </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;24:00:00&quot;</span>
+<span class="n">array_parallelism</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w">               </span><span class="c1"># max concurrent array tasks (0 = scheduler default)</span>
+
+<span class="k">[pipeline]</span>
+<span class="n">planes_per_gpu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="w">                  </span><span class="c1"># pack factor F: planes sharing one GPU</span>
+<span class="n">node_local</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="w">              </span><span class="c1"># stage on node-local NVMe, copy results back</span>
+
+<span class="k">[parameters]</span><span class="w">                        </span><span class="c1"># suite2p ops + pipeline knobs (keep_reg, diameter, ...)</span>
+<span class="n">algorithm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;cellpose&quot;</span>
+<span class="n">keep_reg</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+</pre></div>
+</div>
+<p>One job holds one GPU. <code class="docutils literal notranslate"><span class="pre">planes_per_gpu</span></code> (F) planes share it, each holding a movie in RAM, so peak RAM ≈ F × per-plane size. Set <code class="docutils literal notranslate"><span class="pre">mem_gb</span></code> to the node’s capacity — too low OOMs at the cgroup cap. <code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">check</span></code> does this math for you.</p>
+</section>
+<section id="modes">
+<h2>Modes<a class="headerlink" href="#modes" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>hpc<span class="w"> </span>run<span class="w"> </span>hpc.toml<span class="w">                  </span><span class="c1"># single (default)</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>run<span class="w"> </span>hpc.toml<span class="w"> </span>--mode<span class="w"> </span>array
+mbo<span class="w"> </span>hpc<span class="w"> </span>run<span class="w"> </span>hpc.toml<span class="w"> </span>--local
+mbo<span class="w"> </span>hpc<span class="w"> </span>run<span class="w"> </span>hpc.toml<span class="w"> </span>--dry-run<span class="w">        </span><span class="c1"># print the job layout, submit nothing</span>
+</pre></div>
+</div>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Mode</p></th>
+<th class="head"><p>What it does</p></th>
+<th class="head"><p>Use when</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">single</span></code> (default)</p></td>
+<td><p>One GPU job over all planes (F packed per GPU), volumetric merge inline</p></td>
+<td><p>The dataset fits one job’s wall-time limit</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">array</span></code></p></td>
+<td><p>One array task per F-plane shard, then a dependent aggregate that merges the volume</p></td>
+<td><p>Spreading shards across <strong>multiple</strong> nodes cuts wall time</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">local</span></code></p></td>
+<td><p>Runs the compute inline in this process, off the scheduler</p></td>
+<td><p>Testing, or a workstation with a GPU</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong><code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">array</span></code> only helps across multiple nodes.</strong> On a single-node partition all tasks pile onto one node, where <code class="docutils literal notranslate"><span class="pre">cpus_per_task</span> <span class="pre">×</span> <span class="pre">tasks</span></code> must fit the node’s CPUs and they share its GPUs — the same wall time as <code class="docutils literal notranslate"><span class="pre">single</span></code>. Use <code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">info</span></code> to see a partition’s <code class="docutils literal notranslate"><span class="pre">NODES</span></code> count, and <code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">check</span> <span class="pre">--mode</span> <span class="pre">array</span></code> to catch the single-node case before submitting.</p>
+<details>
+<summary><b>run overrides (set config fields on the command line)</b></summary>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--input</span></code> / <code class="docutils literal notranslate"><span class="pre">--output</span></code> / <code class="docutils literal notranslate"><span class="pre">--name</span></code></p></td>
+<td><p>Override the <code class="docutils literal notranslate"><span class="pre">[io]</span></code> fields</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--partition</span></code> / <code class="docutils literal notranslate"><span class="pre">--gres</span></code> / <code class="docutils literal notranslate"><span class="pre">--time</span></code></p></td>
+<td><p>Override the <code class="docutils literal notranslate"><span class="pre">[slurm]</span></code> fields</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--planes-per-gpu</span></code></p></td>
+<td><p>Override pack factor F</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">--local</span></code></p></td>
+<td><p>Shortcut for <code class="docutils literal notranslate"><span class="pre">--mode</span> <span class="pre">local</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--gpu</span></code></p></td>
+<td><p>Local-run CUDA device index (nvidia-smi order); <code class="docutils literal notranslate"><span class="pre">-1</span></code> = auto. Ignored under SLURM</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</details>
+</section>
+<section id="monitor">
+<h2>Monitor<a class="headerlink" href="#monitor" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>mbo<span class="w"> </span>hpc<span class="w"> </span>status<span class="w"> </span><span class="m">5162141</span><span class="w">                </span><span class="c1"># job state, exit code, failure diagnosis</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>status<span class="w"> </span>/data/results/2025_..<span class="w">  </span><span class="c1"># timings.json summary for an output dir</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>status<span class="w">                        </span><span class="c1"># the last run you launched</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>watch<span class="w">                         </span><span class="c1"># follow the last run&#39;s logs</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>watch<span class="w"> </span><span class="m">5162141</span><span class="w">                 </span><span class="c1"># follow logs by job id (shows state first)</span>
+mbo<span class="w"> </span>hpc<span class="w"> </span>watch<span class="w"> </span>hpc.toml<span class="w"> </span>-o<span class="w">             </span><span class="c1"># follow a run&#39;s .out instead of .err</span>
+</pre></div>
+</div>
+<p>While <code class="docutils literal notranslate"><span class="pre">watch</span></code> follows a terminal: <code class="docutils literal notranslate"><span class="pre">o</span></code>/<code class="docutils literal notranslate"><span class="pre">e</span></code> switch out/err, <code class="docutils literal notranslate"><span class="pre">n</span></code>/<code class="docutils literal notranslate"><span class="pre">p</span></code> switch task logs, <code class="docutils literal notranslate"><span class="pre">q</span></code> quits.</p>
+<details>
+<summary><b>Diagnostics</b></summary>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span> <span class="pre">check</span></code></p></td>
+<td><p>Memory math + structural fixes for a config vs. the partition</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</details>
+</section>
+<section id="shared-environment-mbo-server-configs">
+<h2>Shared environment (<code class="docutils literal notranslate"><span class="pre">mbo_server_configs</span></code>)<a class="headerlink" href="#shared-environment-mbo-server-configs" title="Link to this heading">#</a></h2>
+<p>Separate from the <code class="docutils literal notranslate"><span class="pre">mbo</span> <span class="pre">hpc</span></code> CLI above: the shared software under <code class="docutils literal notranslate"><span class="pre">/lustre/fs8/mbo/scratch/mbo_soft</span></code> (CLI tools, neovim, the <code class="docutils literal notranslate"><span class="pre">mbo</span></code> venv, repos) is exposed through <code class="docutils literal notranslate"><span class="pre">MBO_*</span></code> variables and navigation aliases. Source it once from <code class="docutils literal notranslate"><span class="pre">~/.bashrc</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">source</span><span class="w"> </span>/lustre/fs8/mbo/scratch/mbo_soft/repos/mbo_server_configs/config/hpc/mbo.sh
+</pre></div>
+</div>
+<p>Variables (defined in <code class="docutils literal notranslate"><span class="pre">config/hpc/env.sh</span></code>):</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Variable</p></th>
+<th class="head"><p>Value</p></th>
+<th class="head"><p>Points to</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_ROOT</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">/lustre/fs8/mbo</span></code></p></td>
+<td><p>lab root — change this only to move filesystems</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_SCRATCH</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_ROOT/scratch</span></code></p></td>
+<td><p>scratch root</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_STORE</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_ROOT/store</span></code></p></td>
+<td><p>long-term store</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_SOFT</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_SCRATCH/mbo_soft</span></code></p></td>
+<td><p>shared software root</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_BIN</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_SOFT/bin</span></code></p></td>
+<td><p>shared bin (on <code class="docutils literal notranslate"><span class="pre">PATH</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_REPOS</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_SOFT/repos</span></code></p></td>
+<td><p>shared repos</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_NVIM</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_SOFT/neovim</span></code></p></td>
+<td><p>neovim install</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_ENVS</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_SOFT/envs</span></code></p></td>
+<td><p>shared venvs dir</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_ENV</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_ENVS/mbo</span></code></p></td>
+<td><p>default shared venv</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_DATA</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_SCRATCH/mbo_data</span></code></p></td>
+<td><p>data root</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_LBM</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_DATA/lbm</span></code></p></td>
+<td><p>LBM data</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_LSM</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_DATA/lsm</span></code></p></td>
+<td><p>LSM data</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">MBO_USER</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">$MBO_SCRATCH/$USER</span></code></p></td>
+<td><p>your personal scratch (override: set <code class="docutils literal notranslate"><span class="pre">MBO_USER</span></code> first)</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Also sets <code class="docutils literal notranslate"><span class="pre">UV_LINK_MODE=hardlink</span></code>, <code class="docutils literal notranslate"><span class="pre">UV_CACHE_DIR=$MBO_USER/.uv/cache</span></code>, <code class="docutils literal notranslate"><span class="pre">UV_PYTHON_INSTALL_DIR=$MBO_USER/.uv/python</span></code>.</p>
+<p>Navigation aliases and helpers (defined in <code class="docutils literal notranslate"><span class="pre">config/hpc/mbo.sh</span></code>):</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Command</p></th>
+<th class="head"><p>Action</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">cdsoft</span></code> / <code class="docutils literal notranslate"><span class="pre">cdrepos</span></code> / <code class="docutils literal notranslate"><span class="pre">cdscratch</span></code> / <code class="docutils literal notranslate"><span class="pre">cdme</span></code></p></td>
+<td><p>cd to <code class="docutils literal notranslate"><span class="pre">$MBO_SOFT</span></code> / <code class="docutils literal notranslate"><span class="pre">$MBO_REPOS</span></code> / <code class="docutils literal notranslate"><span class="pre">$MBO_SCRATCH</span></code> / <code class="docutils literal notranslate"><span class="pre">$MBO_USER</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">cddata</span></code> / <code class="docutils literal notranslate"><span class="pre">cdlbm</span></code> / <code class="docutils literal notranslate"><span class="pre">cdlsm</span></code></p></td>
+<td><p>cd to <code class="docutils literal notranslate"><span class="pre">$MBO_DATA</span></code> / <code class="docutils literal notranslate"><span class="pre">$MBO_LBM</span></code> / <code class="docutils literal notranslate"><span class="pre">$MBO_LSM</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo-activate</span> <span class="pre">[env]</span></code></p></td>
+<td><p>source a shared venv (default <code class="docutils literal notranslate"><span class="pre">mbo</span></code>)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo-run</span> <span class="pre">&lt;cmd&gt;</span> <span class="pre">[args]</span></code></p></td>
+<td><p>run an executable from the shared <code class="docutils literal notranslate"><span class="pre">mbo</span></code> venv</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo-jobs</span></code> / <code class="docutils literal notranslate"><span class="pre">mbo-gpus</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">squeue</span> <span class="pre">--me</span></code> / list HPC GPU node availability</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo-gpu</span> <span class="pre">[part]</span> <span class="pre">[time]</span> <span class="pre">[n]</span></code> / <code class="docutils literal notranslate"><span class="pre">mbo-cpu</span> <span class="pre">[part]</span> <span class="pre">[time]</span></code></p></td>
+<td><p>interactive GPU / CPU shell via <code class="docutils literal notranslate"><span class="pre">srun</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">mbo-stage</span> <span class="pre">&lt;path&gt;</span> <span class="pre">[dest]</span></code> / <code class="docutils literal notranslate"><span class="pre">mbo-pull</span></code> / <code class="docutils literal notranslate"><span class="pre">mbo-push</span></code></p></td>
+<td><p>rsync data-transfer helpers</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mbo-nvim-setup</span></code> / <code class="docutils literal notranslate"><span class="pre">mbo-update</span></code></p></td>
+<td><p>install nvim tools / pull latest configs</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Verify live values after login with <code class="docutils literal notranslate"><span class="pre">env</span> <span class="pre">|</span> <span class="pre">grep</span> <span class="pre">'^MBO_'</span></code>.</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="cli.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Command Line Interface</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="gui_guide.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Miller Brain Studio</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#typical-flow">Typical flow</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#config">Config</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#modes">Modes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#monitor">Monitor</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#shared-environment-mbo-server-configs">Shared environment (<code class="docutils literal notranslate"><span class="pre">mbo_server_configs</span></code>)</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2024, Elizabeth R. Miller Brain Observatory | The Rockefeller University. All Rights Reserved.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
