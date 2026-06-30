@@ -491,3 +491,13 @@ def get_compute_gpu() -> str:
 def set_compute_gpu(value: str) -> None:
     """Persist the compute-GPU policy for future launches."""
     _set_option("compute_gpu", str(value))
+
+
+def get_s2p_torch_device() -> str:
+    """Return the persisted suite2p torch device ('cuda'/'cpu'/'mps'/'cuda:N')."""
+    return str(_get_options().get("s2p_torch_device", "cuda"))
+
+
+def set_s2p_torch_device(value: str) -> None:
+    """Persist the suite2p torch device as a sticky default for new datasets."""
+    _set_option("s2p_torch_device", str(value))

@@ -314,7 +314,11 @@ class PreviewDataWidget(EdgeWindow):
         """Suite2p processing settings (upstream schema)."""
         if self._s2p is None and HAS_SUITE2P:
             from mbo_utilities.gui.widgets.pipelines.settings import Suite2pSettings
+            from mbo_utilities.preferences import get_s2p_torch_device
             self._s2p = Suite2pSettings()
+            # apply the persisted torch device as the sticky default (a loaded
+            # dataset's settings.npy still overrides via _try_hydrate_s2p).
+            self._s2p.torch_device = get_s2p_torch_device()
         return self._s2p
 
     @s2p.setter
