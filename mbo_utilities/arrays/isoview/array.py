@@ -661,7 +661,7 @@ _TILE_STRIDE_KEYS = (
 _VIEW_METADATA_FIELDS = (
     "stack_direction", "wavelength", "magnification", "laser_power",
     "illumination_filter", "illumination_arms", "exposure_time",
-    "detection_filter", "camera_type", "camera_roi",
+    "detection_filter", "detection_objective", "camera_type", "camera_roi",
     "camera_pixel_pitch_um", "angle", "camera",
 )
 # Duplicated / synonymous fields dropped from the reported metadata entirely.

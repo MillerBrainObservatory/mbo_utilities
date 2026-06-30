@@ -2496,37 +2496,50 @@ def _draw_section_suite2p_content(self):
         imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p Main Settings")
         imgui.spacing()
 
-        # torch device (top-level upstream setting). List each physical GPU as
-        # "cuda, <name>" (value "cuda:N") so a specific device can be picked;
-        # fall back to the plain class names when nvidia-smi reports nothing.
-        devices = _cached_gpu_devices()
-        if devices:
-            device_values = [f"cuda:{int(d.get('index', i))}" for i, d in enumerate(devices)]
-            device_labels = [f"cuda, {d.get('name', '?')}" for d in devices]
-            device_values += ["cpu", "mps"]
-            device_labels += ["cpu", "mps"]
-        else:
-            device_values = ["cuda", "cpu", "mps"]
-            device_labels = list(device_values)
-        cur_dev = self.s2p.torch_device
-        if cur_dev in device_values:
-            current_device_idx = device_values.index(cur_dev)
-        elif cur_dev == "cuda" and devices:
-            # generic "cuda" -> the first listed GPU
-            current_device_idx = 0
-        else:
-            current_device_idx = 0
+        # Torch device class (top-level upstream setting). The GPU picker below
+        # refines a "cuda" choice to a specific device; the stored value is a
+        # single torch device string ("cpu"/"mps"/"cuda"/"cuda:N").
+        from mbo_utilities.preferences import set_s2p_torch_device
+        cur = self.s2p.torch_device or "cuda"
+        cur_class = "cuda" if cur.startswith("cuda") else cur
+        class_options = ["cuda", "cpu", "mps"]
+        class_idx = class_options.index(cur_class) if cur_class in class_options else 0
         imgui.set_next_item_width(INPUT_WIDTH)
         with _hi("torch_device", self.s2p.torch_device):
-            device_changed, selected_device_idx = imgui.combo(
-                "Torch Device", current_device_idx, device_labels
+            class_changed, new_class_idx = imgui.combo(
+                "Torch Device", class_idx, class_options
             )
-        if device_changed:
-            self.s2p.torch_device = device_values[selected_device_idx]
+        if class_changed:
+            new_class = class_options[new_class_idx]
+            # keep an existing cuda:N when staying on cuda; else the class name
+            self.s2p.torch_device = (
+                cur if new_class == "cuda" and cur.startswith("cuda") else new_class
+            )
+            set_s2p_torch_device(self.s2p.torch_device)
         set_tooltip(
-            "GPU device for registration / detection / extraction / dcnv.\n"
-            "cuda falls back to cpu at runtime if allocation fails.\n"
-            "Options > Compute GPU sets which GPUs are visible."
+            "Compute backend for registration / detection / extraction / dcnv.\n"
+            "cuda falls back to cpu at runtime if allocation fails."
+        )
+
+        # GPU picker — only meaningful for cuda, greyed out otherwise.
+        devices = _cached_gpu_devices()
+        gpu_values = ["cuda"] + [f"cuda:{int(d.get('index', i))}" for i, d in enumerate(devices)]
+        gpu_labels = ["auto (default)"] + [
+            f"{int(d.get('index', i))}: {d.get('name', '?')}" for i, d in enumerate(devices)
+        ]
+        cur = self.s2p.torch_device or "cuda"
+        is_cuda = cur.startswith("cuda")
+        gpu_idx = gpu_values.index(cur) if cur in gpu_values else 0
+        imgui.begin_disabled(not is_cuda)
+        imgui.set_next_item_width(hello_imgui.em_size(14))
+        gpu_changed, new_gpu_idx = imgui.combo("GPU", gpu_idx, gpu_labels)
+        imgui.end_disabled()
+        if gpu_changed and is_cuda and 0 <= new_gpu_idx < len(gpu_values):
+            self.s2p.torch_device = gpu_values[new_gpu_idx]
+            set_s2p_torch_device(self.s2p.torch_device)
+        set_tooltip(
+            "Which CUDA GPU suite2p uses. 'auto (default)' uses the device from "
+            "Options > Compute GPU. Enabled only when Torch Device = cuda."
         )
 
         imgui.spacing()
