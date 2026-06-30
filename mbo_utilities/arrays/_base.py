@@ -306,6 +306,8 @@ def _imwrite_base(
         _write_plane,
         _write_volumetric_tiff,
         _write_volumetric_zarr,
+        _scanphase_record,
+        _write_scanphase_sidecar,
     )
 
     outpath = Path(outpath)
@@ -607,6 +609,13 @@ def _imwrite_base(
     # normalize planes to 0-indexed list for iteration
     planes_0idx = _normalize_planes(planes_list, num_planes)
 
+    # 0-based source frames written, in output order — aligns recorded
+    # scan-phase offsets to the registered/written frame index on replay.
+    if frames_list is not None:
+        written_frames_0 = [f - 1 for f in frames_list]
+    else:
+        written_frames_0 = list(range(effective_nt))
+
     # extract output_name if provided (e.g., "data_raw.bin" for suite2p)
     output_name = kwargs.pop("output_name", None)
 
@@ -665,6 +674,15 @@ def _imwrite_base(
                 frames=frames_list,
                 **kwargs,
             )
+
+            # record the scan-phase offsets applied during this write so the
+            # registered movie can be rebuilt from raw + reg_outputs after the
+            # binary is deleted. functional channel's plane dir only.
+            if ext_clean == "bin" and c_idx == 0:
+                _write_scanphase_sidecar(
+                    target.parent,
+                    _scanphase_record(arr, written_frames_0, c_idx, plane_idx),
+                )
 
     # signal completion
     if progress_callback:

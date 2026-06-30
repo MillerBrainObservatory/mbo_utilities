@@ -234,6 +234,286 @@ class _Suite2pRegTifPlaneReader:
         self._inner.close()
 
 
+def _load_scanphase_sidecar(plane_dir: Path) -> dict | None:
+    """Load the scan-phase replay record (scanphase.npy) if present."""
+    sp_file = plane_dir / "scanphase.npy"
+    if not sp_file.exists():
+        return None
+    try:
+        return load_npy(sp_file).item()
+    except Exception as e:
+        logger.warning(f"Could not read {sp_file}: {e}")
+        return None
+
+
+def _resolve_reconstruct_raw_source(sp: dict | None, ops: dict):
+    """Open the raw movie the run registered from, as a 5D lazy array.
+
+    Tries, in order: the scan-phase sidecar's raw_source dir then its file
+    list, then ops['raw_source'] / ops['data_path'] (set by streamed runs).
+    Returns (array, reader_kwargs) or (None, {}).
+    """
+    from mbo_utilities import imread
+
+    reader_kwargs = {}
+    cands: list = []
+    if sp:
+        reader_kwargs = dict(sp.get("reader_kwargs") or {})
+        if sp.get("raw_source"):
+            cands.append(sp["raw_source"])
+        if sp.get("raw_files"):
+            cands.append([Path(f) for f in sp["raw_files"]])
+    if not reader_kwargs:
+        reader_kwargs = dict(ops.get("reader_kwargs") or {})
+    if ops.get("raw_source"):
+        cands.append(ops["raw_source"])
+    dp = ops.get("data_path")
+    if dp:
+        p = Path(dp)
+        if p.suffix and p.parent != p:
+            cands.append(p.parent)
+        cands.append(p)
+
+    seen = set()
+    for c in cands:
+        key = str(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            exists = all(Path(x).exists() for x in c) if isinstance(c, list) else Path(c).exists()
+        except Exception:
+            exists = False
+        if not exists:
+            continue
+        try:
+            return imread(c, **reader_kwargs), reader_kwargs
+        except Exception as e:
+            logger.debug(f"reconstruct raw source {key} failed: {e}")
+    return None, reader_kwargs
+
+
+def _apply_registration(frames, yoff, xoff, yoff1, xoff1, blocks, device):
+    """Apply suite2p rigid (+ nonrigid) shifts to int16 frames.
+
+    No bidiphase: mbo's scan-phase correction is the bidirectional step.
+    Uses suite2p's `shift_frames` when available; falls back to a rigid numpy
+    roll (matching suite2p's `-dy,-dx` convention) with a warning if nonrigid
+    shifts were requested but suite2p is missing.
+    """
+    frames = np.ascontiguousarray(frames)
+    try:
+        import torch
+        from suite2p.registration import register
+
+        fr = torch.from_numpy(frames)
+        if device is not None:
+            fr = fr.to(device)
+        dev = device if device is not None else torch.device("cpu")
+        out = np.asarray(
+            register.shift_frames(
+                fr,
+                yoff.astype(int),
+                xoff.astype(int),
+                yoff1,
+                xoff1,
+                blocks,
+                device=dev,
+            )
+        )
+    except Exception as e:
+        if yoff1 is not None:
+            logger.warning(
+                f"suite2p unavailable ({e}); applying rigid shifts only "
+                "(nonrigid skipped, frames approximate)."
+            )
+        out = np.empty_like(frames)
+        for k in range(len(frames)):
+            out[k] = np.roll(
+                frames[k], (-int(yoff[k]), -int(xoff[k])), axis=(0, 1)
+            )
+    if out.ndim == 2:
+        out = out[np.newaxis]
+    return out.astype(np.int16, copy=False)
+
+
+def _resolve_replay_device(recorded):
+    """torch device for the reconstitution: the run's recorded device, else
+    auto (cuda if available, else cpu). None when torch is absent."""
+    try:
+        import torch
+    except Exception:
+        return None
+    if recorded:
+        try:
+            dev = torch.device(recorded)
+            if dev.type == "cuda" and not torch.cuda.is_available():
+                return torch.device("cpu")
+            if dev.type == "cuda":
+                torch.zeros(1, device=dev)
+            return dev
+        except Exception:
+            pass
+    try:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+    except Exception:
+        pass
+    return torch.device("cpu")
+
+
+class _Suite2pReconstructReader:
+    """Rebuild a registered suite2p plane from raw + reg_outputs (no binary).
+
+    Reconstitutes, on read, the registered frames suite2p wrote to data.bin:
+    the raw movie read with the scan-phase correction recorded at write time,
+    then the saved registration shifts applied. Presents the same surface as
+    `_SinglePlaneReader` so `Suite2pArray` holds it interchangeably.
+    """
+
+    def __init__(self, ops_path: Path):
+        self.ops_path = Path(ops_path)
+        plane_dir = self.ops_path.parent
+        self.metadata = load_npy(self.ops_path).item()
+
+        reg_file = plane_dir / "reg_outputs.npy"
+        reg = load_npy(reg_file).item()
+        self._reg = {
+            "yoff": np.asarray(reg["yoff"]),
+            "xoff": np.asarray(reg["xoff"]),
+            "yoff1": np.asarray(reg["yoff1"]) if reg.get("yoff1") is not None else None,
+            "xoff1": np.asarray(reg["xoff1"]) if reg.get("xoff1") is not None else None,
+        }
+        self._nonrigid = bool(self.metadata.get("nonrigid", True))
+
+        sp = _load_scanphase_sidecar(plane_dir)
+        self._raw, _ = _resolve_reconstruct_raw_source(sp, self.metadata)
+        if self._raw is None:
+            raise FileNotFoundError(
+                f"No data.bin, data_raw.bin, or reg_tif/ in {plane_dir}, and the "
+                "raw source to rebuild it from could not be located "
+                f"(raw_source={self.metadata.get('raw_source')!r}). Re-point the "
+                "raw data or keep the binary."
+            )
+
+        self.Ly = int(get_param(self.metadata, "Ly"))
+        self.Lx = int(get_param(self.metadata, "Lx"))
+        self.dtype = np.int16
+        self.nframes = int(len(self._reg["yoff"]))
+        self.shape = (self.nframes, self.Ly, self.Lx)
+        self.active_file = self.ops_path
+        self.filenames = [self.ops_path]
+
+        if sp is not None:
+            self._offsets = np.asarray(sp.get("offsets"), dtype=np.float32)
+            fm = sp.get("frame_map")
+            self._frame_map = np.asarray(fm, dtype=np.int64) if fm is not None else None
+            self._use_fft = bool(sp.get("use_fft", True))
+            self._plane_index = int(sp.get("plane_index", (int(self.metadata.get("plane", 1)) - 1)))
+            self._channel_index = int(sp.get("channel_index", 0))
+        else:
+            # no offsets recorded (streamed run, or an already-corrected
+            # source like zarr/h5): read the raw as imread returns it and
+            # apply only the registration shifts. viewing-grade — the run's
+            # exact per-frame scan-phase isn't recoverable without the sidecar.
+            self._offsets = None
+            self._frame_map = None
+            self._plane_index = (
+                int(self.metadata.get("plane", 1)) - 1
+                if self._raw._shape5d()[2] > 1
+                else 0
+            )
+            self._channel_index = 0
+
+        # pin the recorded scan-phase so reads reproduce the registered binary
+        # (the array's fixed-shift path); without a sidecar, leave it untouched.
+        if self._offsets is not None and hasattr(self._raw, "fix_phase"):
+            self._raw.fix_phase = True
+            if hasattr(self._raw, "use_fft"):
+                self._raw.use_fft = self._use_fft
+
+        self._device = _resolve_replay_device(self.metadata.get("torch_device"))
+        self._blocks = None
+        if self._nonrigid and self._reg["yoff1"] is not None:
+            try:
+                from suite2p.registration import nonrigid as s2p_nonrigid
+
+                block_size = self.metadata.get("block_size") or (128, 128)
+                self._blocks = s2p_nonrigid.make_blocks(
+                    self.Ly, self.Lx, (int(block_size[0]), int(block_size[1]))
+                )
+            except Exception as e:
+                logger.warning(f"nonrigid block layout unavailable ({e})")
+
+    def _source_frame(self, i: int) -> int:
+        return int(self._frame_map[i]) if self._frame_map is not None else int(i)
+
+    def _read_registered(self, idx):
+        """Registered int16 frames for registered-frame indices `idx`."""
+        idx = np.asarray(idx, dtype=np.int64)
+        raw = np.empty((len(idx), self.Ly, self.Lx), dtype=np.int16)
+        c, z = self._channel_index, self._plane_index
+        # group consecutive frames that share a source-contiguous run and a
+        # constant pinned offset into one slice read.
+        k = 0
+        n = len(idx)
+        while k < n:
+            j = k + 1
+            off = float(self._offsets[idx[k]]) if self._offsets is not None else 0.0
+            s0 = self._source_frame(int(idx[k]))
+            while j < n:
+                off_j = float(self._offsets[idx[j]]) if self._offsets is not None else 0.0
+                if off_j != off or self._source_frame(int(idx[j])) != s0 + (j - k):
+                    break
+                j += 1
+            if self._offsets is not None and hasattr(self._raw, "offset"):
+                self._raw.offset = off
+            block = np.asarray(self._raw[s0 : s0 + (j - k), c, z, :, :])
+            raw[k:j] = block.reshape(j - k, self.Ly, self.Lx)
+            k = j
+
+        yoff1 = self._reg["yoff1"][idx] if self._reg["yoff1"] is not None else None
+        xoff1 = self._reg["xoff1"][idx] if self._reg["xoff1"] is not None else None
+        return _apply_registration(
+            raw,
+            self._reg["yoff"][idx],
+            self._reg["xoff"][idx],
+            yoff1,
+            xoff1,
+            self._blocks,
+            self._device,
+        )
+
+    def __getitem__(self, key):
+        if not isinstance(key, tuple):
+            key = (key,)
+        key = key + (slice(None),) * (3 - len(key))
+        t_key, y_key, x_key = key[0], key[1], key[2]
+
+        t_is_int = isinstance(t_key, (int, np.integer))
+        if t_is_int:
+            t = int(t_key)
+            if t < 0:
+                t += self.nframes
+            idx = [t]
+        elif isinstance(t_key, slice):
+            idx = list(range(*t_key.indices(self.nframes)))
+        else:
+            idx = [int(i) for i in t_key]
+
+        out = self._read_registered(idx)  # (N, Ly, Lx)
+        out = out[:, y_key, x_key]
+        return out[0] if t_is_int else out
+
+    def close(self):
+        close = getattr(self._raw, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+
 class Suite2pArray(ReductionMixin, Shape5DMixin):
     """
     Lazy array reader for Suite2p binary output files.
@@ -373,6 +653,9 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
             return _SinglePlaneReader(ops_path, use_raw=self._use_raw)
         if has_reg_tif:
             return _Suite2pRegTifPlaneReader(ops_path, channel=0)
+        # no pixels on disk: rebuild registered frames from raw + reg_outputs.
+        if (plane_dir / "reg_outputs.npy").exists():
+            return _Suite2pReconstructReader(ops_path)
         raise FileNotFoundError(
             f"No data.bin, data_raw.bin, or reg_tif/ in {plane_dir}"
         )
