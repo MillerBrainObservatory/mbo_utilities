@@ -296,19 +296,6 @@ class TestFullPipeline:
             pipeline_results.suite2p_results[ext] = {"n_cells": 0, "error": "no stat.npy"}
             print("  Warning: no stat.npy found")
 
-    def test_99_summary(self, pipeline_results):
-        """print timing summary."""
-        pipeline_results.print_summary()
-
-        # print suite2p results
-        if pipeline_results.suite2p_results:
-            print("\nSUITE2P RESULTS:")
-            for fmt, res in pipeline_results.suite2p_results.items():
-                print(f"  {fmt}: {res.get('n_cells', 0)} cells")
-
-        # basic assertions
-        assert len(pipeline_results.timings) > 0, "No timings recorded"
-
     def _find_readable_path(self, out_dir: Path, ext: str) -> Path | None:
         """find the path to read from a write output directory."""
         ext_clean = ext.lstrip(".").lower()

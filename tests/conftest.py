@@ -23,6 +23,10 @@ BASELINE_DIR = TEST_DATA_ROOT / "baselines"
 OUTPUT_DIR = TEST_DATA_ROOT / "test_outputs"
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: slow tests (real suite2p runs)")
+
+
 @pytest.fixture(scope="session")
 def test_data_root():
     """Root directory for test data."""

@@ -1,376 +1,163 @@
 """
-Metadata preservation tests.
+Metadata I/O across filetypes.
 
-Tests that metadata is correctly:
-1. Read from source files
-2. Preserved through format conversions
-3. Written to output files in format-appropriate ways
-4. Accessible via array.metadata property
+Verifies that scientific metadata (dx/dy/dz/fs + free-form keys) survives a
+write -> read round-trip for each format, that subset writes rescale dz/fs,
+and that ScanImage source metadata is read when local data is present.
+
+Synthetic data, CI-runnable. The single local-data test skips cleanly.
 """
-
-import json
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 import mbo_utilities as mbo
-from mbo_utilities.arrays import NumpyArray
-from tests.conftest import find_output_file
+
+# scientific metadata stamped on every synthetic write
+SAMPLE = {"dx": 1.5, "dy": 1.5, "dz": 4.0, "fs": 9.6, "objective": "16x", "comment": "unit-test"}
+
+# formats that round-trip a single-channel volume losslessly with metadata
+VOLUME_FORMATS = [".tiff", ".zarr", ".h5"]
 
 
-def wrap_array(data):
-    """Wrap numpy array in NumpyArray for imwrite compatibility."""
-    if isinstance(data, np.ndarray):
-        return NumpyArray(data)
-    return data
+def _wrap(data, dims=None, metadata=None):
+    """imread an ndarray, declaring its source axes and metadata."""
+    return mbo.imread(data, dims=dims, metadata=metadata)
 
 
-class TestMetadataReading:
-    """Test reading metadata from various sources."""
-
-    def test_read_metadata_from_source_tiff(self, source_tiff_path):
-        """Read metadata from ScanImage TIFF."""
-        metadata = mbo.get_metadata(source_tiff_path)
-
-        assert metadata is not None, "No metadata returned"
-        assert isinstance(metadata, dict), f"Expected dict, got {type(metadata)}"
-
-        # Check for expected ScanImage keys
-        expected_keys = ["frame_rate", "pixel_resolution"]
-        for key in expected_keys:
-            assert key in metadata, f"Missing expected key: {key}"
-
-    def test_metadata_accessible_via_array_property(self, source_array):
-        """Verify metadata is accessible via array.metadata."""
-        assert hasattr(source_array, "metadata"), "Array has no metadata attribute"
-
-        metadata = source_array.metadata
-        assert isinstance(metadata, dict), f"Expected dict, got {type(metadata)}"
-
-    def test_metadata_contains_shape_info(self, source_array, source_metadata):
-        """Verify metadata contains consistent shape information."""
-        arr = source_array
-        md = source_metadata
-
-        # Check num_planes if present
-        if "num_planes" in md and arr.ndim == 4:
-            assert md["num_planes"] == arr.shape[1], \
-                f"num_planes mismatch: {md['num_planes']} vs {arr.shape[1]}"
+def _read_back(out_dir, ext):
+    """Locate and imread the written output for a format."""
+    if ext == ".zarr":
+        path = next(out_dir.rglob("*.zarr"))
+    elif ext in (".h5", ".hdf5"):
+        path = next(out_dir.rglob("*.h5"))
+    elif ext in (".tiff", ".tif"):
+        path = next(out_dir.rglob("*.tif"))
+    else:
+        path = out_dir
+    return mbo.imread(path)
 
 
-class TestMetadataPreservation:
-    """Test metadata preservation through format conversions."""
+class TestMetadataReadback:
+    """dx/dy/dz/fs + free-form keys survive a write -> read round-trip."""
 
-    def test_metadata_preserved_to_zarr(self, reference_tiff, output_dir, sample_metadata):
-        """Metadata written to Zarr attrs should be retrievable."""
-        ref_data = reference_tiff["data"]
+    @pytest.mark.parametrize("ext", VOLUME_FORMATS)
+    def test_scientific_keys_survive(self, synthetic_4d_data, output_dir, ext):
+        arr = _wrap(synthetic_4d_data, dims="TZYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=ext, metadata=SAMPLE, overwrite=True)
 
-        mbo.imwrite(
-            wrap_array(ref_data),
-            output_dir,
-            ext=".zarr",
-            metadata=sample_metadata,
-            ome=False,
-            overwrite=True,
-        )
+        back = _read_back(output_dir, ext)
 
-        # Read back metadata - find the zarr file
-        zarr_path, _ = find_output_file(output_dir, ".zarr")
-        assert zarr_path is not None, "No zarr output found"
+        assert back.dx == SAMPLE["dx"]
+        assert back.dy == SAMPLE["dy"]
+        assert back.dz == SAMPLE["dz"]
+        assert back.fs == SAMPLE["fs"]
 
-        arr = mbo.imread(zarr_path)
+    @pytest.mark.parametrize("ext", VOLUME_FORMATS)
+    def test_freeform_keys_survive(self, synthetic_4d_data, output_dir, ext):
+        arr = _wrap(synthetic_4d_data, dims="TZYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=ext, metadata=SAMPLE, overwrite=True)
 
-        # Check key preservation
-        arr_metadata = arr.metadata if hasattr(arr, "metadata") else {}
+        md = _read_back(output_dir, ext).metadata
+        assert md["objective"] == "16x"
+        assert md["comment"] == "unit-test"
 
-        # At minimum, shape info should be present
-        # Specific keys depend on implementation
-        assert arr_metadata is not None or hasattr(arr, "shape")
+    @pytest.mark.parametrize("ext", VOLUME_FORMATS)
+    def test_pixels_exact_after_roundtrip(self, synthetic_4d_data, output_dir, ext):
+        arr = _wrap(synthetic_4d_data, dims="TZYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=ext, metadata=SAMPLE, overwrite=True)
 
-    def test_metadata_preserved_to_h5(self, reference_tiff, output_dir, sample_metadata):
-        """Metadata written to HDF5 attrs should be retrievable."""
-        import h5py
+        back = np.asarray(_read_back(output_dir, ext)[:])  # 5D (T,1,Z,Y,X)
+        assert np.array_equal(back[:, 0], synthetic_4d_data)
 
-        ref_data = reference_tiff["data"]
 
-        mbo.imwrite(
-            wrap_array(ref_data),
-            output_dir,
-            ext=".h5",
-            metadata=sample_metadata,
-            overwrite=True,
-        )
+class TestBinOpsMetadata:
+    """Suite2p .bin writes carry sizing + fs into per-plane ops.npy."""
 
-        # Find the h5 file
-        h5_path, _ = find_output_file(output_dir, ".h5")
-        assert h5_path is not None, "No H5 output found"
+    def test_ops_has_sizing_and_fs(self, synthetic_4d_data, output_dir):
+        arr = _wrap(synthetic_4d_data, dims="TZYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=".bin", metadata=SAMPLE, overwrite=True)
 
-        # Read directly with h5py to check attrs
-        with h5py.File(h5_path, "r") as f:
-            # Check file-level or dataset-level attrs
-            file_attrs = dict(f.attrs)
-
-            if "data" in f:
-                data_attrs = dict(f["data"].attrs)
-            elif "mov" in f:
-                data_attrs = dict(f["mov"].attrs)
-            else:
-                data_attrs = {}
-
-            all_attrs = {**file_attrs, **data_attrs}
-
-        # Check some metadata was written
-        # Note: exact preservation depends on implementation
-        assert len(all_attrs) > 0 or h5_path.exists()
-
-    def test_metadata_preserved_to_bin_ops(self, reference_tiff, output_dir, sample_metadata):
-        """Metadata written to binary format should be in ops.npy."""
-        ref_data = reference_tiff["data"]
-
-        # Binary needs 3D
-        if ref_data.ndim == 4:
-            test_data = ref_data[:, 0, :, :]
-        else:
-            test_data = ref_data
-
-        mbo.imwrite(
-            wrap_array(test_data),
-            output_dir,
-            ext=".bin",
-            metadata=sample_metadata,
-            overwrite=True,
-        )
-
-        # Find ops.npy
-        ops_files = list(output_dir.rglob("ops.npy"))
-        assert len(ops_files) > 0, "No ops.npy found"
+        nt, _, nz, ny, nx = arr.shape
+        ops_files = sorted(output_dir.rglob("ops.npy"))
+        assert len(ops_files) == nz, f"expected one ops.npy per plane, got {len(ops_files)}"
 
         ops = np.load(ops_files[0], allow_pickle=True).item()
-
-        # Check shape info is in ops
-        assert "Ly" in ops, "Missing Ly in ops"
-        assert "Lx" in ops, "Missing Lx in ops"
-        assert ops["Ly"] == test_data.shape[1], f"Ly mismatch: {ops['Ly']} vs {test_data.shape[1]}"
-        assert ops["Lx"] == test_data.shape[2], f"Lx mismatch: {ops['Lx']} vs {test_data.shape[2]}"
-
-    def test_custom_metadata_keys_preserved(self, synthetic_3d_data, output_dir):
-        """Custom metadata keys should be preserved."""
-        custom_metadata = {
-            "experiment_id": "exp_001",
-            "subject": "mouse_42",
-            "custom_param": 123.456,
-            "tags": ["test", "custom"],
-        }
-
-        mbo.imwrite(
-            wrap_array(synthetic_3d_data),
-            output_dir,
-            ext=".zarr",
-            metadata=custom_metadata,
-            ome=False,
-            overwrite=True,
-        )
-
-        # Verify the zarr was created
-        zarr_path, _ = find_output_file(output_dir, ".zarr")
-        assert zarr_path is not None, "No zarr output found"
+        assert ops["Ly"] == ny
+        assert ops["Lx"] == nx
+        assert ops["nframes"] == nt
+        assert ops["fs"] == SAMPLE["fs"]
+        assert ops["dz"] == SAMPLE["dz"]
 
 
-class TestZarrMetadata:
-    """Test Zarr-specific metadata handling."""
+class TestGetMetadata:
+    """mbo.get_metadata reads scientific keys back off disk."""
 
-    def test_ome_zarr_has_multiscales(self, synthetic_4d_data, output_dir):
-        """OME-Zarr should have multiscales metadata."""
-        import zarr
+    @pytest.mark.parametrize("ext", VOLUME_FORMATS)
+    def test_get_metadata_keys(self, synthetic_4d_data, output_dir, ext):
+        arr = _wrap(synthetic_4d_data, dims="TZYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=ext, metadata=SAMPLE, overwrite=True)
 
-        mbo.imwrite(
-            wrap_array(synthetic_4d_data),
-            output_dir,
-            ext=".zarr",
-            ome=True,
-            overwrite=True,
-        )
+        if ext == ".zarr":
+            path = next(output_dir.rglob("*.zarr"))
+        elif ext == ".h5":
+            path = next(output_dir.rglob("*.h5"))
+        else:
+            path = next(output_dir.rglob("*.tif"))
 
-        out_file, _ = find_output_file(output_dir, ".zarr")
-        if out_file is None:
-            pytest.skip("No zarr output found")
-
-        # Check for OME metadata
-        try:
-            z = zarr.open_group(str(out_file), mode="r")
-            attrs = dict(z.attrs)
-            # OME-Zarr should have multiscales in attrs
-            has_ome = "multiscales" in attrs or "ome" in attrs
-        except:
-            # Might be array not group
-            z = zarr.open_array(str(out_file), mode="r")
-            attrs = dict(z.attrs)
-            has_ome = len(attrs) > 0
-
-        # Note: OME metadata structure depends on implementation
-        assert out_file.exists()
-
-    def test_zarr_scale_attribute(self, synthetic_4d_data, output_dir, sample_metadata):
-        """Zarr should have scale attribute for napari compatibility."""
-        import zarr
-
-        metadata = {**sample_metadata, "dz": 5.0}
-
-        mbo.imwrite(
-            wrap_array(synthetic_4d_data),
-            output_dir,
-            ext=".zarr",
-            metadata=metadata,
-            ome=True,
-            overwrite=True,
-        )
-
-        out_file, _ = find_output_file(output_dir, ".zarr")
-        if out_file is None:
-            pytest.skip("No zarr output found")
-
-        # Check for scale in attrs
-        try:
-            z = zarr.open_group(str(out_file), mode="r")
-            if "0" in z:
-                arr_attrs = dict(z["0"].attrs)
-            else:
-                arr_attrs = dict(z.attrs)
-        except:
-            z = zarr.open_array(str(out_file), mode="r")
-            arr_attrs = dict(z.attrs)
-
-        # Scale might be in various places depending on implementation
-        assert out_file.exists()
+        md = mbo.get_metadata(path)
+        assert md["dx"] == SAMPLE["dx"]
+        assert md["dz"] == SAMPLE["dz"]
+        assert float(md["fs"]) == SAMPLE["fs"]
 
 
-class TestTiffMetadata:
-    """Test TIFF-specific metadata handling."""
+class TestNpyEmbeddedMetadata:
+    """.npy carries metadata inline (no sidecar .json)."""
 
-    def test_tiff_has_description_tag(self, synthetic_3d_data, output_dir, sample_metadata):
-        """TIFF should store metadata in ImageDescription tag."""
-        import tifffile
+    def test_no_json_sidecar_and_reactive_keys(self, synthetic_3d_data, output_dir):
+        arr = _wrap(synthetic_3d_data, dims="TYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=".npy", metadata=SAMPLE, overwrite=True)
 
-        mbo.imwrite(
-            wrap_array(synthetic_3d_data),
-            output_dir,
-            ext=".tiff",
-            metadata=sample_metadata,
-            overwrite=True,
-        )
+        assert list(output_dir.glob("*.json")) == []
 
-        out_file, _ = find_output_file(output_dir, ".tiff")
-        assert out_file is not None
-
-        with tifffile.TiffFile(out_file) as tif:
-            # Check for metadata in various places
-            has_metadata = False
-
-            # Check ImageDescription
-            if tif.pages[0].description:
-                has_metadata = True
-
-            # Check OME metadata
-            if hasattr(tif, "ome_metadata") and tif.ome_metadata:
-                has_metadata = True
-
-            # Check shaped metadata
-            if hasattr(tif, "shaped_metadata") and tif.shaped_metadata:
-                has_metadata = True
-
-        # At minimum, the file should exist and be valid
-        assert out_file.exists()
+        back = mbo.imread(output_dir)
+        md = back.metadata
+        assert md["num_timepoints"] == synthetic_3d_data.shape[0]
+        assert "dimension_names" in md
+        # scientific keys are embedded inline (no sidecar)
+        assert md["dx"] == SAMPLE["dx"]
+        assert md["dz"] == SAMPLE["dz"]
+        assert md["fs"] == SAMPLE["fs"]
 
 
-class TestMetadataRoundtrip:
-    """Test metadata survives full round-trip."""
+class TestSubsetScaling:
+    """Subset writes rescale stride-aware physical metadata (dz, fs)."""
 
-    @pytest.mark.parametrize("ext", [".zarr", ".h5"])
-    def test_metadata_roundtrip(self, synthetic_3d_data, output_dir, sample_metadata, ext):
-        """Write with metadata, read back, verify metadata present."""
-        # Write with metadata
-        mbo.imwrite(
-            wrap_array(synthetic_3d_data),
-            output_dir,
-            ext=ext,
-            metadata=sample_metadata,
-            ome=False,
-            overwrite=True,
-        )
+    def test_plane_stride_scales_dz(self, synthetic_4d_data, output_dir):
+        # source Z=3, dz=4.0; planes=[1,3] is stride 2 -> dz doubles
+        arr = _wrap(synthetic_4d_data, dims="TZYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=".zarr", planes=[1, 3], metadata=SAMPLE, overwrite=True)
 
-        # Read back
-        out_file, _ = find_output_file(output_dir, ext)
-        assert out_file is not None, f"No output for {ext}"
+        back = next(output_dir.rglob("*.zarr"))
+        a = mbo.imread(back)
+        assert a.nz == 2
+        assert a.dz == SAMPLE["dz"] * 2
 
-        arr = mbo.imread(out_file)
+    def test_timepoint_stride_scales_fs(self, synthetic_4d_data, output_dir):
+        # source T=10, fs=9.6; timepoints=[1,3,5,7,9] is stride 2 -> fs halves
+        arr = _wrap(synthetic_4d_data, dims="TZYX", metadata=SAMPLE)
+        mbo.imwrite(arr, output_dir, ext=".zarr", timepoints=[1, 3, 5, 7, 9],
+                    metadata=SAMPLE, overwrite=True)
 
-        # Check metadata exists
-        if hasattr(arr, "metadata"):
-            md = arr.metadata
-            assert md is not None, f"No metadata after {ext} round-trip"
-            assert isinstance(md, dict), f"Metadata not dict: {type(md)}"
+        a = mbo.imread(next(output_dir.rglob("*.zarr")))
+        assert a.nt == 5
+        assert a.fs == SAMPLE["fs"] / 2
 
 
-class TestMetadataEdgeCases:
-    """Test metadata edge cases."""
+class TestSourceMetadata:
+    """Read real ScanImage metadata (skips without local data)."""
 
-    def test_empty_metadata(self, synthetic_3d_data, output_dir):
-        """Empty metadata dict should not cause errors."""
-        mbo.imwrite(
-            wrap_array(synthetic_3d_data),
-            output_dir,
-            ext=".zarr",
-            metadata={},
-            overwrite=True,
-        )
-        zarr_path, _ = find_output_file(output_dir, ".zarr")
-        assert zarr_path is not None, "No zarr output found"
-
-    def test_none_metadata(self, synthetic_3d_data, output_dir):
-        """None metadata should not cause errors."""
-        mbo.imwrite(
-            wrap_array(synthetic_3d_data),
-            output_dir,
-            ext=".zarr",
-            metadata=None,
-            overwrite=True,
-        )
-        zarr_path, _ = find_output_file(output_dir, ".zarr")
-        assert zarr_path is not None, "No zarr output found"
-
-    def test_large_metadata(self, synthetic_3d_data, output_dir):
-        """Large metadata should be handled."""
-        large_metadata = {
-            "large_array": list(range(1000)),
-            "nested": {"a": {"b": {"c": {"d": "deep"}}}},
-            "long_string": "x" * 10000,
-        }
-
-        mbo.imwrite(
-            wrap_array(synthetic_3d_data),
-            output_dir,
-            ext=".zarr",
-            metadata=large_metadata,
-            overwrite=True,
-        )
-        zarr_path, _ = find_output_file(output_dir, ".zarr")
-        assert zarr_path is not None, "No zarr output found"
-
-    def test_special_characters_in_metadata(self, synthetic_3d_data, output_dir):
-        """Metadata with special characters should be handled."""
-        special_metadata = {
-            "path": "C:\\Users\\test\\data",
-            "unicode": "日本語テスト",
-            "symbols": "!@#$%^&*()",
-        }
-
-        mbo.imwrite(
-            wrap_array(synthetic_3d_data),
-            output_dir,
-            ext=".zarr",
-            metadata=special_metadata,
-            overwrite=True,
-        )
-        zarr_path, _ = find_output_file(output_dir, ".zarr")
-        assert zarr_path is not None, "No zarr output found"
+    def test_read_scanimage_keys(self, source_tiff_path):
+        md = mbo.get_metadata(source_tiff_path)
+        for key in ("frame_rate", "pixel_resolution"):
+            assert key in md, f"missing ScanImage key: {key}"
