@@ -564,6 +564,12 @@ def draw_metadata_inspector(metadata: dict, data_array=None):
                             imgui.tree_pop()
                 shown_keys.add("tiles")
 
+            # processing-only isoview identifiers/maps: kept in arr.metadata for
+            # the pipeline widgets + BigStitcher export, hidden from the viewer.
+            if is_isoview:
+                shown_keys.update({"camera_view_map", "specimen", "timepoint",
+                                   "view_keys", "view_names"})
+
             # Other metadata section
             remaining = {k: v for k, v in metadata.items() if k not in shown_keys}
             if _metadata_search_filter:

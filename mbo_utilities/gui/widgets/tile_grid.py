@@ -185,7 +185,7 @@ class TileGridViewer(Widget):
 
         self._sig: str | None = None
         self._grid: dict | None = None
-        self._channel_names: list[str] = []
+        self._view_names: list[str] = []
         self._tile_labels: dict[int, str] = {}
 
         # source MIPs keyed by (ti, c, axis); display thumbs and GPU textures
@@ -252,7 +252,7 @@ class TileGridViewer(Widget):
         self._flip_seeded = set()
         self._tile_xyz = {}
         self._pick = None
-        self._channel_names = list(getattr(arr, "channel_names", []) or [])
+        self._view_names = list(getattr(arr, "view_names", []) or [])
         self._is_rotated = str(
             (getattr(arr, "metadata", {}) or {}).get("camera_orientation", "")
         ).strip().lower() == "rotated"
@@ -752,10 +752,10 @@ class TileGridViewer(Widget):
 
         # Row 2 — display: channel, colormap, contrast, manual min/max.
         row2 = []
-        if len(self._channel_names) > 1:
+        if len(self._view_names) > 1:
             def _view():
                 ch, v = imgui.combo(
-                    "##tilegrid_view", self._c_index, list(self._channel_names)
+                    "##tilegrid_view", self._c_index, list(self._view_names)
                 )
                 if ch:
                     self._c_index = v
@@ -835,7 +835,7 @@ class TileGridViewer(Widget):
         """Camera index for view-combo index ``c`` (from its ``VW{angle}``
         label), or ``None`` for fused pairs / non-camera views."""
         try:
-            name = self._channel_names[c]
+            name = self._view_names[c]
         except (IndexError, TypeError):
             return None
         if str(name).endswith("_fused"):
@@ -847,7 +847,7 @@ class TileGridViewer(Widget):
         """``"VW00"`` / ``"VW90"`` for a fused-pair channel (e.g.
         ``VW90_VW270_CH00_fused``), else ``None``."""
         try:
-            name = str(self._channel_names[c])
+            name = str(self._view_names[c])
         except (IndexError, TypeError):
             return None
         if not name.endswith("_fused"):
@@ -938,7 +938,7 @@ class TileGridViewer(Widget):
             self._ensure_grid(arr)
         except Exception:
             pass
-        names = list(getattr(arr, "channel_names", []) or [])
+        names = list(getattr(arr, "view_names", []) or [])
         # seed EVERY channel's defaults, not just the currently-viewed one —
         # otherwise views the user never switched to (e.g. VW90) export as native
         # and the tiles mis-stitch.
@@ -1225,7 +1225,7 @@ class TileGridViewer(Widget):
         Buttons are sized from measured text in a 2-column grid so the popup
         always fits its content (no clipping) and lines up cleanly.
         """
-        imgui.text_disabled(f"Tile {label}  ({self._channel_names[self._c_index] if self._c_index < len(self._channel_names) else 'view'})")
+        imgui.text_disabled(f"Tile {label}  ({self._view_names[self._c_index] if self._c_index < len(self._view_names) else 'view'})")
         imgui.separator()
         style = imgui.get_style()
         sp = style.item_spacing.x

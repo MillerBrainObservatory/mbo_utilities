@@ -47,15 +47,44 @@ def _cached_gpu_devices() -> list:
     return _GPU_DEV_CACHE
 
 
+def _selected_compute_gpu(torch_device: str) -> str:
+    """Text reporting the device the next run uses — read-only.
+
+    The GPU is chosen in File > Options > Compute GPU; this only reports it,
+    derived from CUDA_VISIBLE_DEVICES (set live from Options) + cached
+    nvidia-smi names. No subprocess, no disk.
+    """
+    td = torch_device or "cuda"
+    if td.startswith("cpu"):
+        return "Compute: CPU"
+    if td.startswith("mps"):
+        return "Compute: MPS"
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if cvd is not None and cvd.strip() == "":
+        return "Compute: CPU  (GPU off in File > Options)"
+    devices = _cached_gpu_devices()
+
+    def _name(idx: int) -> str:
+        for i, d in enumerate(devices):
+            if int(d.get("index", i)) == idx:
+                return str(d.get("name", f"GPU {idx}"))
+        return f"GPU {idx}"
+
+    if cvd and cvd.split(",")[0].strip().isdigit():
+        return f"Compute GPU: {_name(int(cvd.split(',')[0].strip()))}"
+    return "Compute GPU: auto (default device)"
+
+
 # light orange for parameters whose value differs from upstream suite2p
 # default. picked to read as "modified" without competing with the title
 # color (which is also orange-ish) — slightly redder, lower brightness.
 _MODIFIED_COLOR = imgui.ImVec4(1.0, 0.72, 0.40, 1.0)
 
-# light green for mbo-only parameters that have no upstream suite2p
-# equivalent (cellpose_niter, accept_all_cells, dff_*). Always rendered
-# in this color regardless of value, to flag "this isn't a vanilla
-# suite2p knob".
+# light green for mbo-only parameters with no upstream suite2p equivalent,
+# rendered in this color regardless of value (via _mbo()) to flag "this
+# isn't a vanilla suite2p knob". MBO_ONLY_FIELDS only — currently just
+# cellpose_niter. MboSuite2pExtras fields (accept_all_cells, dff_*, workers)
+# are NOT this tier; they tint orange when modified via _hi_extras.
 _MBO_ONLY_COLOR = imgui.ImVec4(0.55, 0.85, 0.55, 1.0)
 
 # orangish-yellow — reserved for the MAIN suite2p section header
@@ -427,11 +456,20 @@ def collect_modified_params(
     if s2p_extras is not None:
         import dataclasses as _dc
         for ef in _dc.fields(s2p_extras):
-            if ef.default is _dc.MISSING:
+            # resolve default + default_factory (e.g. workers) so the same
+            # default the modified-tint uses drives the summary too.
+            if ef.default is not _dc.MISSING:
+                default = ef.default
+            elif ef.default_factory is not _dc.MISSING:
+                try:
+                    default = ef.default_factory()
+                except Exception:
+                    continue
+            else:
                 continue
             cur = getattr(s2p_extras, ef.name)
-            if cur != ef.default:
-                lsp_rows.append((ef.name, cur, ef.default, "lsp"))
+            if cur != default:
+                lsp_rows.append((ef.name, cur, default, "lsp"))
         lsp_rows.sort(key=lambda t: t[0])
 
     return s2p_rows + lsp_rows
@@ -1934,6 +1972,17 @@ def _draw_section_suite2p_content(self):
             if push_color:
                 imgui.pop_style_color()
 
+    @contextmanager
+    def _mbo():
+        """Tint a widget green (_MBO_ONLY_COLOR) to flag an mbo-only field
+        sitting among suite2p widgets with no green group title above it
+        (e.g. cellpose_niter). Always green regardless of value."""
+        imgui.push_style_color(imgui.Col_.text, _MBO_ONLY_COLOR)
+        try:
+            yield
+        finally:
+            imgui.pop_style_color()
+
     def _emp_label(field: str, value, text: str) -> None:
         """Render an external label for a widget — wrapped in a thin box
         with a bold font when `field` is in _IMPORTANT_FIELDS, plain text
@@ -2496,12 +2545,15 @@ def _draw_section_suite2p_content(self):
         imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p Main Settings")
         imgui.spacing()
 
-        # Torch device class (top-level upstream setting). The GPU picker below
-        # refines a "cuda" choice to a specific device; the stored value is a
-        # single torch device string ("cpu"/"mps"/"cuda"/"cuda:N").
+        # Torch device class (cuda/cpu/mps). The GPU itself is chosen in
+        # File > Options > Compute GPU; the colored line below only reports it.
         from mbo_utilities.preferences import set_s2p_torch_device
         cur = self.s2p.torch_device or "cuda"
         cur_class = "cuda" if cur.startswith("cuda") else cur
+        # normalize a stale "cuda:N" so the device is governed by Options
+        if cur != cur_class:
+            self.s2p.torch_device = cur_class
+            set_s2p_torch_device(cur_class)
         class_options = ["cuda", "cpu", "mps"]
         class_idx = class_options.index(cur_class) if cur_class in class_options else 0
         imgui.set_next_item_width(INPUT_WIDTH)
@@ -2510,37 +2562,31 @@ def _draw_section_suite2p_content(self):
                 "Torch Device", class_idx, class_options
             )
         if class_changed:
-            new_class = class_options[new_class_idx]
-            # keep an existing cuda:N when staying on cuda; else the class name
-            self.s2p.torch_device = (
-                cur if new_class == "cuda" and cur.startswith("cuda") else new_class
-            )
+            self.s2p.torch_device = class_options[new_class_idx]
             set_s2p_torch_device(self.s2p.torch_device)
         set_tooltip(
-            "Compute backend for registration / detection / extraction / dcnv.\n"
-            "cuda falls back to cpu at runtime if allocation fails."
+            "Compute backend for suite2p.\n"
+            "\n"
+            "cuda:\n"
+            "  - Registration: GPU\n"
+            "  - Detection: GPU only if the algorithm is Cellpose;\n"
+            "    other detection algorithms run on CPU\n"
+            "  - Extraction / deconvolution: CPU\n"
+            "\n"
+            "cpu:\n"
+            "  - All steps run on CPU\n"
+            "\n"
+            "Falls back to CPU if CUDA allocation fails.\n"
+            "GPU device is set in File > Options > Compute GPU."
         )
 
-        # GPU picker — only meaningful for cuda, greyed out otherwise.
-        devices = _cached_gpu_devices()
-        gpu_values = ["cuda"] + [f"cuda:{int(d.get('index', i))}" for i, d in enumerate(devices)]
-        gpu_labels = ["auto (default)"] + [
-            f"{int(d.get('index', i))}: {d.get('name', '?')}" for i, d in enumerate(devices)
-        ]
-        cur = self.s2p.torch_device or "cuda"
-        is_cuda = cur.startswith("cuda")
-        gpu_idx = gpu_values.index(cur) if cur in gpu_values else 0
-        imgui.begin_disabled(not is_cuda)
-        imgui.set_next_item_width(hello_imgui.em_size(14))
-        gpu_changed, new_gpu_idx = imgui.combo("GPU", gpu_idx, gpu_labels)
-        imgui.end_disabled()
-        if gpu_changed and is_cuda and 0 <= new_gpu_idx < len(gpu_values):
-            self.s2p.torch_device = gpu_values[new_gpu_idx]
-            set_s2p_torch_device(self.s2p.torch_device)
-        set_tooltip(
-            "Which CUDA GPU suite2p uses. 'auto (default)' uses the device from "
-            "Options > Compute GPU. Enabled only when Torch Device = cuda."
+        # read-only line reporting which GPU the run uses (chosen in Options),
+        # in the dim descriptive color used by the other labels here.
+        imgui.text_colored(
+            imgui.ImVec4(0.6, 0.6, 0.6, 1.0),
+            _selected_compute_gpu(self.s2p.torch_device),
         )
+        set_tooltip("Compute GPU is selected in File > Options.")
 
         imgui.spacing()
         imgui.spacing()
@@ -3111,9 +3157,10 @@ def _draw_section_suite2p_content(self):
             # upstream sparsery_settings order: highpass_neuropil, max_ROIs,
             # spatial_scale, active_percentile.
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p_db.functional_chan = imgui.input_int(
-                "Functional chan", self.s2p_db.functional_chan
-            )
+            with _hi("functional_chan", self.s2p_db.functional_chan):
+                _, self.s2p_db.functional_chan = imgui.input_int(
+                    "Functional chan", self.s2p_db.functional_chan
+                )
             set_tooltip("Channel used for functional ROI extraction (1-based).")
             imgui.set_next_item_width(INPUT_WIDTH)
             with _hi("threshold_scaling", self.s2p.threshold_scaling):
@@ -3171,9 +3218,10 @@ def _draw_section_suite2p_content(self):
             # upstream sourcery_settings order: connected, max_iterations,
             # smooth_masks.
             imgui.set_next_item_width(INPUT_WIDTH)
-            _, self.s2p_db.functional_chan = imgui.input_int(
-                "Functional chan", self.s2p_db.functional_chan
-            )
+            with _hi("functional_chan", self.s2p_db.functional_chan):
+                _, self.s2p_db.functional_chan = imgui.input_int(
+                    "Functional chan", self.s2p_db.functional_chan
+                )
             set_tooltip("Channel used for functional ROI extraction (1-based).")
 
             # diameter Y/X (settings.diameter[0/1]) — used by sourcery and
@@ -3398,11 +3446,12 @@ def _draw_section_suite2p_content(self):
         # suite2p classification field — placement matches its real home).
 
         imgui.spacing()
-        imgui.text("Classifier path:")
         path_display = self.s2p.classifier_path if self.s2p.classifier_path else "(none)"
-        imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
-        imgui.text(path_display)
-        imgui.pop_text_wrap_pos()
+        with _hi("classifier_path", self.s2p.classifier_path):
+            imgui.text("Classifier path:")
+            imgui.push_text_wrap_pos(imgui.get_content_region_avail().x - 80)
+            imgui.text(path_display)
+            imgui.pop_text_wrap_pos()
         imgui.same_line()
         if imgui.button("Browse##classifier"):
             default_dir = (
@@ -4084,16 +4133,26 @@ def _draw_section_suite2p_content(self):
                             except (TypeError, ValueError, OverflowError):
                                 continue
                         setattr(_target, _f, _new)
-                    # mbo-only fields — reset every MboSuite2pExtras field
-                    # to its dataclass default. fields with no default (e.g.
-                    # those defined via field(default_factory=...)) get a
-                    # MISSING sentinel; skip those rather than resetting to
-                    # an arbitrary value.
                     import dataclasses as _dc
+                    from mbo_utilities.gui.widgets.pipelines._s2p_schema import (
+                        MBO_ONLY_FIELDS as _mbo_only,
+                    )
+                    # mbo-only fields on Suite2pSettings/Suite2pDB (e.g.
+                    # cellpose_niter) aren't in the mapping above and
+                    # get_default returns None for them; reset to the
+                    # dataclass default directly.
+                    for _obj in (self.s2p, self.s2p_db):
+                        for _df in _dc.fields(_obj):
+                            if _df.name in _mbo_only and _df.default is not _dc.MISSING:
+                                setattr(_obj, _df.name, _df.default)
+                    # MboSuite2pExtras fields — reset each to its dataclass
+                    # default, resolving default_factory (e.g. workers) the
+                    # same way the modified-tint does.
                     for _ef in _dc.fields(self.s2p_extras):
-                        if _ef.default is _dc.MISSING:
-                            continue
-                        setattr(self.s2p_extras, _ef.name, _ef.default)
+                        if _ef.default is not _dc.MISSING:
+                            setattr(self.s2p_extras, _ef.name, _ef.default)
+                        elif _ef.default_factory is not _dc.MISSING:
+                            setattr(self.s2p_extras, _ef.name, _ef.default_factory())
                 imgui.pop_style_color(3)
                 set_tooltip(
                     "Reset every parameter in this popup to its dataclass "
