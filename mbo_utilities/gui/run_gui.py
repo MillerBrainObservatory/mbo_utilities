@@ -1223,9 +1223,12 @@ def run_gui(
         apply_gpu_policy(_mbo_gpu)
     else:
         _compute = get_compute_gpu().strip()
-        # a bare device index from the System-panel picker pins that device;
+        # a bare device index from the GPU picker pins that device;
         # apply_gpu_policy would read "0" as off and "1" as unchanged.
         if _compute.isdigit():
+            # pin PCI-bus order so the index matches the nvidia-smi label the
+            # picker showed (CUDA defaults to FASTEST_FIRST).
+            _os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
             _os.environ["CUDA_VISIBLE_DEVICES"] = _compute
         else:
             apply_gpu_policy(_compute)

@@ -15,14 +15,17 @@ from imgui_bundle import imgui, imgui_ctx, ImVec2
 
 from mbo_utilities.gui._imgui_helpers import PopupAutoSize, begin_popup_size
 from mbo_utilities.gui._metadata import draw_metadata_inspector
-from mbo_utilities.gui._options_popup import _ensure_gpu_list
+from mbo_utilities.gui._options_popup import (
+    _ensure_gpu_list,
+    apply_compute_gpu,
+    compute_gpu_current_index,
+    compute_gpu_options,
+)
 from mbo_utilities.gui.panels.debug_log import draw_scope
 from mbo_utilities.gui.widgets.process_manager import get_process_manager
 from mbo_utilities.preferences import (
     get_gpu_index,
     set_gpu_index,
-    get_compute_gpu,
-    set_compute_gpu,
 )
 
 
@@ -189,35 +192,13 @@ def _draw_gpu_selectors(parent: Any, devices: list, show_render: bool) -> None:
         imgui.text_disabled("next launch")
 
     if multi_compute:
-        options = ["auto", "cpu"] + [
-            f"{int(d.get('index', i))}: {d.get('name', '?')}"
-            for i, d in enumerate(devices)
-        ]
-        cur = get_compute_gpu().strip().lower()
-        if cur.isdigit():
-            sel = next(
-                (2 + i for i, d in enumerate(devices)
-                 if str(int(d.get("index", i))) == cur),
-                0,
-            )
-        elif cur in ("cpu", "off", "false", "no", "none"):
-            sel = 1
-        else:
-            sel = 0
+        values, labels = compute_gpu_options(devices)
+        sel = compute_gpu_current_index(values)
         imgui.text_colored(_SYS_LABEL, "Compute GPU")
         imgui.set_next_item_width(bar_w)
-        changed, new_sel = imgui.combo("##sys_compute_gpu", sel, options)
-        if changed:
-            import os as _os
-            if new_sel == 0:
-                set_compute_gpu("auto")
-            elif new_sel == 1:
-                set_compute_gpu("cpu")
-                _os.environ["CUDA_VISIBLE_DEVICES"] = ""
-            else:
-                dev = str(int(devices[new_sel - 2].get("index", new_sel - 2)))
-                set_compute_gpu(dev)
-                _os.environ["CUDA_VISIBLE_DEVICES"] = dev
+        changed, new_sel = imgui.combo("##sys_compute_gpu", sel, labels)
+        if changed and 0 <= new_sel < len(values):
+            apply_compute_gpu(values[new_sel])
         imgui.same_line()
         imgui.text_disabled("new jobs")
 

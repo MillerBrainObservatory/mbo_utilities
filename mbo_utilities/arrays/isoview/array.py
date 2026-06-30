@@ -710,8 +710,9 @@ def _build_cameras_views(parsed: list[dict], common_keys: set) -> dict:
         if not cams:
             continue
         for key, val in meta.items():
-            if key == "camera":
-                continue  # "01"/"23" pair label: resolves cams, not surfaced
+            # `camera` ("01"/"23") is the pair label for this XML's view; fold
+            # it whole onto each of the view's cameras so every view carries
+            # its correct pair token (cams 0,1 -> "01"; cams 2,3 -> "23").
             per_cam = (
                 key not in _NOT_PER_CAMERA_FIELDS
                 and isinstance(val, str)
@@ -2361,7 +2362,17 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         """
         if not self._camera_metadata:
             return {}
-        shared = {k: self._metadata[k] for k in _VIEW_METADATA_FIELDS if k in self._metadata}
+        # A field that appears in any camera's metadata is per-camera and
+        # authoritative there. Never seed it from the common/top-level metadata:
+        # the raw probe leaves view-0's per-view values (illumination_arms,
+        # stack_direction, ...) lingering there, which would otherwise overwrite
+        # or list-merge with the correct per-camera values.
+        per_cam_keys = set().union(*(set(v) for v in self._camera_metadata.values()))
+        shared = {
+            k: self._metadata[k]
+            for k in _VIEW_METADATA_FIELDS
+            if k in self._metadata and k not in per_cam_keys
+        }
 
         def _entry(cams):
             merged = dict(shared)
