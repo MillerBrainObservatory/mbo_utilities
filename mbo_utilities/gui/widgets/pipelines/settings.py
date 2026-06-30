@@ -29,6 +29,24 @@ from mbo_utilities.gui._imgui_helpers import (
 from mbo_utilities.gui.widgets.pipelines._s2p_schema import is_default as _is_default
 
 
+# cached nvidia-smi compute devices for the Torch Device dropdown (the query
+# is a subprocess; the device set is static for the session). None = not yet
+# probed.
+_GPU_DEV_CACHE: list | None = None
+
+
+def _cached_gpu_devices() -> list:
+    """nvidia-smi compute devices, probed once per session. [] on no GPU."""
+    global _GPU_DEV_CACHE
+    if _GPU_DEV_CACHE is None:
+        try:
+            from mbo_utilities.gpu import gpu_devices
+            _GPU_DEV_CACHE = gpu_devices()
+        except Exception:
+            _GPU_DEV_CACHE = []
+    return _GPU_DEV_CACHE
+
+
 # light orange for parameters whose value differs from upstream suite2p
 # default. picked to read as "modified" without competing with the title
 # color (which is also orange-ish) — slightly redder, lower brightness.
@@ -2478,23 +2496,37 @@ def _draw_section_suite2p_content(self):
         imgui.text_colored(_S2P_TITLE_COLOR, "Suite2p Main Settings")
         imgui.spacing()
 
-        # torch device (top-level upstream setting)
-        device_options = ["cuda", "cpu", "mps"]
-        current_device_idx = (
-            device_options.index(self.s2p.torch_device)
-            if self.s2p.torch_device in device_options
-            else 0
-        )
+        # torch device (top-level upstream setting). List each physical GPU as
+        # "cuda, <name>" (value "cuda:N") so a specific device can be picked;
+        # fall back to the plain class names when nvidia-smi reports nothing.
+        devices = _cached_gpu_devices()
+        if devices:
+            device_values = [f"cuda:{int(d.get('index', i))}" for i, d in enumerate(devices)]
+            device_labels = [f"cuda, {d.get('name', '?')}" for d in devices]
+            device_values += ["cpu", "mps"]
+            device_labels += ["cpu", "mps"]
+        else:
+            device_values = ["cuda", "cpu", "mps"]
+            device_labels = list(device_values)
+        cur_dev = self.s2p.torch_device
+        if cur_dev in device_values:
+            current_device_idx = device_values.index(cur_dev)
+        elif cur_dev == "cuda" and devices:
+            # generic "cuda" -> the first listed GPU
+            current_device_idx = 0
+        else:
+            current_device_idx = 0
         imgui.set_next_item_width(INPUT_WIDTH)
         with _hi("torch_device", self.s2p.torch_device):
             device_changed, selected_device_idx = imgui.combo(
-                "Torch Device", current_device_idx, device_options
+                "Torch Device", current_device_idx, device_labels
             )
         if device_changed:
-            self.s2p.torch_device = device_options[selected_device_idx]
+            self.s2p.torch_device = device_values[selected_device_idx]
         set_tooltip(
             "GPU device for registration / detection / extraction / dcnv.\n"
-            "'cuda' falls back to 'cpu' at runtime if allocation fails."
+            "cuda falls back to cpu at runtime if allocation fails.\n"
+            "Options > Compute GPU sets which GPUs are visible."
         )
 
         imgui.spacing()

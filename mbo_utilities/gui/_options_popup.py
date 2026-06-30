@@ -19,6 +19,8 @@ from mbo_utilities import log as _mbo_log
 from mbo_utilities.preferences import (
     get_gpu_index,
     set_gpu_index,
+    get_compute_gpu,
+    set_compute_gpu,
     get_debug_logging,
     set_debug_logging,
     get_mem_monitor,
@@ -31,6 +33,68 @@ from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 
 _COL_ACCENT = imgui.ImVec4(0.20, 0.50, 0.85, 1.0)
 _COL_DIM = imgui.ImVec4(0.75, 0.75, 0.77, 1.0)
+
+
+def compute_gpu_devices() -> list:
+    """nvidia-smi compute devices (cached per call site). Empty on no GPU."""
+    try:
+        from mbo_utilities.gpu import gpu_devices
+        return gpu_devices()
+    except Exception:
+        return []
+
+
+def compute_gpu_options(devices: list) -> tuple[list[str], list[str]]:
+    """(values, labels) for the compute-GPU combo.
+
+    Values are the persisted `compute_gpu` tokens — "auto", "cpu", or a device
+    index string (which `run_gui` pins via CUDA_VISIBLE_DEVICES). One entry per
+    physical GPU governs cellpose + suite2p compute uniformly.
+    """
+    values = ["auto", "cpu"]
+    labels = ["auto", "cpu"]
+    for i, d in enumerate(devices):
+        idx = int(d.get("index", i))
+        values.append(str(idx))
+        labels.append(f"{idx}: {d.get('name', '?')}")
+    return values, labels
+
+
+def compute_gpu_current_index(values: list[str]) -> int:
+    """Index into `values` for the persisted compute-GPU choice.
+
+    A digit pref is a device index (run_gui pins it via CUDA_VISIBLE_DEVICES),
+    so it resolves to that device's option — not "auto".
+    """
+    cur = get_compute_gpu().strip().lower()
+    if cur in ("cpu", "off", "false", "no", "none"):
+        return 1
+    if cur in ("", "auto"):
+        return 0
+    try:
+        return values.index(cur)
+    except ValueError:
+        return 0
+
+
+def apply_compute_gpu(value: str) -> None:
+    """Persist a compute-GPU choice and apply it live for newly spawned jobs.
+
+    Workers copy os.environ at spawn, so set CUDA_VISIBLE_DEVICES now: a device
+    index pins it, "cpu" forces CPU, "auto" restores full visibility.
+    """
+    set_compute_gpu(value)
+    if value == "auto":
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    elif value == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    else:
+        # the index came from the nvidia-smi-ordered list; pin that ordering
+        # (CUDA defaults to FASTEST_FIRST) so the CUDA device the worker uses
+        # matches the GPU label the user picked. setdefault respects a
+        # user-set order. Mirrors gpu.apply_gpu_policy.
+        os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+        os.environ["CUDA_VISIBLE_DEVICES"] = value
 
 
 def _live_render_adapter(parent: Any) -> Any | None:
@@ -122,6 +186,8 @@ def draw_options_popup(parent: Any) -> None:
         parent._options_mem = get_mem_monitor()
     if not hasattr(parent, "_options_mem_interval"):
         parent._options_mem_interval = get_mem_monitor_interval()
+    if not hasattr(parent, "_options_compute_devices"):
+        parent._options_compute_devices = []
 
     if parent._show_options_popup:
         # re-sync from prefs each open so changes from the CLI or another
@@ -130,6 +196,9 @@ def draw_options_popup(parent: Any) -> None:
         parent._options_debug = get_debug_logging()
         parent._options_mem = get_mem_monitor()
         parent._options_mem_interval = get_mem_monitor_interval()
+        # nvidia-smi is a subprocess; refresh the compute-device list once per
+        # open, not per frame.
+        parent._options_compute_devices = compute_gpu_devices()
         parent._options_sizer.before_open()
         imgui.open_popup("Options##options_popup")
         parent._show_options_popup = False
@@ -174,6 +243,24 @@ def draw_options_popup(parent: Any) -> None:
             note = {"live": "", "preference": "  (selected)",
                     "auto": "  (auto)"}.get(rg.get("source"), "")
             imgui.text_colored(_COL_DIM, f"  using: {rg['summary']}{note}")
+
+        imgui.dummy(imgui.ImVec2(0, 8))
+
+        # Compute GPU: governs suite2p + cellpose (CUDA_VISIBLE_DEVICES).
+        imgui.text_colored(_COL_DIM, "Compute GPU (suite2p / cellpose)")
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Which GPU suite2p and cellpose run on. 'auto' uses all "
+                "visible GPUs, 'cpu' forces CPU. Applies to newly started "
+                "jobs; the suite2p Torch Device can still override per run."
+            )
+        devices = getattr(parent, "_options_compute_devices", []) or []
+        values, labels = compute_gpu_options(devices)
+        sel = compute_gpu_current_index(values)
+        imgui.set_next_item_width(hello_imgui.em_size(20))
+        changed, new_sel = imgui.combo("##compute_gpu", sel, labels)
+        if changed and 0 <= new_sel < len(values):
+            apply_compute_gpu(values[new_sel])
 
         imgui.dummy(imgui.ImVec2(0, 4))
         imgui.separator()
