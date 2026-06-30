@@ -928,8 +928,10 @@ def info(input_path, metadata, show_all):
         _info_kv("Stack type", _info_md(md, "stack_type"))
 
         if is_isoview:
-            views = getattr(data, "views", None) or []
-            view_str = ", ".join(str(v) for v in views) or _info_num(
+            # view_names are the VW labels (VW00, VW90, ...); `views` holds
+            # raw camera keys, so prefer the labels for display.
+            view_labels = getattr(data, "view_names", None) or getattr(data, "views", None) or []
+            view_str = ", ".join(str(v) for v in view_labels) or _info_num(
                 getattr(data, "num_views", None) or sizes.get("C")
             )
             if is_tiled:
@@ -1311,6 +1313,9 @@ def gpu(watch, show_processes, as_json):
       mbo gpu --json        # machine-readable
     """
     from mbo_utilities import gpu as gpu_mod
+
+    # reflect the GPU picked in the GUI's File > Options (persisted pref)
+    gpu_mod.apply_persisted_compute_gpu()
 
     if as_json:
         import json as _json

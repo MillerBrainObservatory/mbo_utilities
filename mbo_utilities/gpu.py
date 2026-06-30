@@ -381,6 +381,31 @@ def apply_gpu_policy(value: str | int | bool | None = None) -> str | None:
     return None
 
 
+def apply_persisted_compute_gpu() -> str | None:
+    """Apply the saved ``compute_gpu`` preference to CUDA_VISIBLE_DEVICES.
+
+    Single source for resolving the GUI's File > Options compute-GPU choice:
+    ``MBO_GPU`` env wins; otherwise the persisted pref — a digit pins that
+    device (PCI-bus order so it matches nvidia-smi), 'cpu' forces CPU, 'auto'
+    leaves visibility unchanged. Lets ``mbo gpu`` (and any CLI) report the GPU
+    picked in the GUI. Returns the CUDA_VISIBLE_DEVICES string set, or None.
+    """
+    raw = os.environ.get("MBO_GPU")
+    if raw:
+        return apply_gpu_policy(raw)
+    try:
+        from mbo_utilities.preferences import get_compute_gpu
+        pref = get_compute_gpu().strip()
+    except Exception:
+        return None
+    # a bare device index pins it (apply_gpu_policy would misread "0"/"1")
+    if pref.isdigit():
+        os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+        os.environ["CUDA_VISIBLE_DEVICES"] = pref
+        return pref
+    return apply_gpu_policy(pref)
+
+
 def format_gpu_report(show_processes: bool = False, top: int = 12) -> str:
     """Human-readable report: render GPU, compute GPU, device memory.
 
