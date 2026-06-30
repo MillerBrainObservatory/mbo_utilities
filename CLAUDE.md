@@ -147,6 +147,15 @@ combinations, not just the one in front of you.
   and stack type is detected. `detect_stack_type` → lbm / piezo / single_plane /
   pollen drives which array subclass and z-plane semantics apply. **For LBM
   stacks `dz` is user-supplied** (no reliable acquisition value).
+- **`num_channels` means light beads, not color channels.** ScanImage's saved
+  "channels" (`nchannels` = `len(channelSave)`; registry aliases it with
+  `num_channels`/`nc`/`C`) are the light beads, which for LBM *are* the z-planes
+  (`num_zplanes`). The true color/detector count is **`num_color_channels`** = the
+  5D `C` axis = `arr.nc` (usually 1 for LBM) — read that for C, never `num_channels`.
+- `OutputMetadata.to_dict` deliberately stamps `num_channels = num_zplanes`
+  (`output.py`, "lbm: z-planes as channels"), so that dict key carries the
+  bead/plane count. It's an inert legacy key downstream — suite2p/lsp read only
+  their own `nchannels`, never `num_channels`/`num_color_channels`.
 - **`query_tiff_pages`** gets page count **O(1)** from the IFD stride + file size.
   **Never `len(tf.pages)` or walk the IFD chain** — large raw files (≈730k pages)
   take minutes.
