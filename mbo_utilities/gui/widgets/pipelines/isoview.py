@@ -942,7 +942,7 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_fuse_view_selector(self) -> None:
         """Per-view editor switcher.
 
-        Only the boxes tagged "editing VW##" follow this combo — Fusion,
+        Only the boxes tagged "Target view: VW##" follow this combo — Fusion,
         View transforms, and Registration search. I/O options and
         Microscope overrides are dataset-wide.
         """
@@ -954,7 +954,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         except (ValueError, TypeError):
             idx = 0
             self._fuse_active_view = self._fuse_view_ids[0]
-        imgui.text_colored(_SUBSECTION_COLOR, "Per-view edits target:")
+        imgui.text_colored(_SUBSECTION_COLOR, "Reference view:")
         imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
         imgui.set_next_item_width(_input_w())
         with tooltip_marks_right():
@@ -981,10 +981,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         """
         if scope == "per_view":
             view = self._fuse_active_view
-            text = (
-                f"editing VW{view:02d}" if view is not None
-                else "per-view (no view loaded)"
-            )
+            if view is not None:
+                # Transforms apply to the mirrored (opposing) view of the pair:
+                # the selector picks the reference, this is its target (ref+180).
+                text = f"Target view: VW{(view + 180) % 360:02d}"
+            else:
+                text = "per-view (no view loaded)"
             color = _SUBSECTION_COLOR
         elif scope == "all_views":
             text = "edits all views"
