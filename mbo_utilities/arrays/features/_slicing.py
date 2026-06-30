@@ -540,4 +540,24 @@ def read_chunk(
     else:
         z_sel = z_indices
 
-    return np.asarray(arr[t_sel, c_sel, z_sel, :, :])
+    # numpy broadcasts multiple advanced (list) indices against each other, so a
+    # single arr[t_list, c, z_list] read fails when two axes are non-contiguous.
+    # With 0-1 list indices one combined read is correct and minimal; with 2+ we
+    # apply T (plus any slice subsets) first, then peel each list axis in turn.
+    advanced = [not isinstance(s, slice) for s in (t_sel, c_sel, z_sel)]
+    if sum(advanced) <= 1:
+        return np.asarray(arr[t_sel, c_sel, z_sel, :, :])
+
+    first = (
+        t_sel,
+        c_sel if isinstance(c_sel, slice) else slice(None),
+        z_sel if isinstance(z_sel, slice) else slice(None),
+        slice(None),
+        slice(None),
+    )
+    out = np.asarray(arr[first])
+    if not isinstance(c_sel, slice):
+        out = out[:, c_sel]
+    if not isinstance(z_sel, slice):
+        out = out[:, :, z_sel]
+    return out

@@ -657,18 +657,29 @@ _TILE_STRIDE_KEYS = (
 
 # Per-view fields shown in the GUI "Views" panel: per-camera intrinsics plus
 # per-view acquisition settings shared across views. Dropped from the top-level
-# reported metadata (they live under metadata["views"] instead).
+# reported metadata (they live under metadata["views"] instead). `angle` is the
+# specimen rotation (constant across views) and stays in acquisition.
 _VIEW_METADATA_FIELDS = (
     "stack_direction", "wavelength", "magnification", "laser_power",
     "illumination_filter", "illumination_arms", "exposure_time",
     "detection_filter", "detection_objective", "camera_type", "camera_roi",
-    "camera_pixel_pitch_um", "angle", "camera",
+    "camera_pixel_pitch_um", "pixel_resolution_um", "camera",
 )
-# Duplicated / synonymous fields dropped from the reported metadata entirely.
-# y_step is the axial step for Y-scan views (reported as dz); camera_pixel_size_um
-# duplicates camera_pixel_pitch_um.
+# Fields dropped from the reported metadata entirely. Either duplicates of a
+# canonical field (z_step/y_step/axial_step -> dz; objective_mag -> magnification;
+# camera_pixel_size_um -> camera_pixel_pitch_um; specimen_XYZT -> stage_x/y/z;
+# tile_name -> specimen_name; dimensions/planes -> shape) or unused synthetic
+# helpers with no consumer (camera_pair/view/channel identifiers,
+# camera_channel_map, channel_idx_by_xml_ch). The piezo-offset calibration
+# strings (z/y_offset_planes) are large and unused. Processing-only identifiers
+# that ARE consumed (specimen, timepoint, camera_view_map) are kept and only
+# hidden from the GUI viewer.
 _DROPPED_METADATA_FIELDS = (
-    "view", "y_step", "min_intensity", "channel", "camera_pixel_size_um",
+    "view", "channel", "camera_pair", "min_intensity", "camera_pixel_size_um",
+    "z_step", "y_step", "axial_step", "objective_mag",
+    "dimensions", "planes", "z_offset_planes", "y_offset_planes",
+    "specimen_XYZT", "tile_name",
+    "camera_channel_map", "channel_idx_by_xml_ch",
 )
 # Per-tile fields surfaced in the GUI "Tiles" panel.
 _TILE_METADATA_FIELDS = (
@@ -1307,11 +1318,11 @@ def _scan_corrected(spm_dir: Path):
         timelapse: <root>.corrected/SPM##/TM######/SPM##_TM######_CM##(_VW##)?.<ext>
         tiled:     <root>.corrected/SPM##/SPM##_CM##(_VW##|_CHN##)?.<ext>
 
-    Returns ``(tp_paths, view_keys, channel_names, is_tiled)`` where:
+    Returns ``(tp_paths, view_keys, view_names, is_tiled)`` where:
       - tp_paths: dict[int, dict[int, Path]] keyed by timepoint index
         then camera index.
       - view_keys: sorted list of camera indices.
-      - channel_names: ``["CM00", "CM01", ...]``.
+      - view_names: ``["CM00", "CM01", ...]``.
       - is_tiled: True when the .corrected/ root has multiple SPM##
         siblings (tiled acquisition); False otherwise.
 
@@ -1360,8 +1371,8 @@ def _scan_corrected(spm_dir: Path):
             _read_cams(tm, ti)
 
     view_keys = sorted(cams)
-    channel_names = [camera_view_label(c) for c in view_keys]
-    return tp_paths, view_keys, channel_names, is_tiled
+    view_names = [camera_view_label(c) for c in view_keys]
+    return tp_paths, view_keys, view_names, is_tiled
 
 
 def _scan_fused(method_dir: Path):
@@ -1372,7 +1383,7 @@ def _scan_fused(method_dir: Path):
         timelapse: <method>/TM######/SPM##_TM######_CM##_CM##_VW##(.fusedStack)?.<ext>
         tiled:     <method>/SPM##/SPM##_CM##_CM##_VW##(_CHN##)?.<ext>   (no TM)
 
-    Returns ``(tp_paths, view_keys, channel_names, is_tiled)`` where
+    Returns ``(tp_paths, view_keys, view_names, is_tiled)`` where
     ``view_keys`` are ``(cam0, cam1, vw, chn)`` tuples (``chn=-1`` when
     the filename omits the trailing ``_CHN##``) and channel names are
     ``["VW00_fused", "VW00_CHN01_fused", ...]``. ``is_tiled`` is True
@@ -1411,12 +1422,12 @@ def _scan_fused(method_dir: Path):
 
     tp_paths = {ti: by_tm[tm] for ti, tm in enumerate(sorted(by_tm))}
     view_keys = sorted(views)
-    channel_names = [
+    view_names = [
         (f"VW{a0:02d}_VW{a1:02d}_CH{chn:02d}_fused" if a1 >= 0
          else f"VW{a0:02d}_CH{chn:02d}_fused")
         for a0, a1, chn in view_keys
     ]
-    return tp_paths, view_keys, channel_names, is_tiled
+    return tp_paths, view_keys, view_names, is_tiled
 
 
 def _scan_raw(base_path: Path):
@@ -1464,8 +1475,8 @@ def _scan_raw(base_path: Path):
     sorted_keys = sorted(by_key)
     tp_paths = {ti: by_key[k] for ti, k in enumerate(sorted_keys)}
     view_keys = sorted(views)
-    channel_names = [camera_view_label(cm) for cm, ch in view_keys]
-    return tp_paths, view_keys, channel_names, use_spc
+    view_names = [camera_view_label(cm) for cm, ch in view_keys]
+    return tp_paths, view_keys, view_names, use_spc
 
 
 def _scan_klb_tm(base_path: Path):
@@ -1494,8 +1505,8 @@ def _scan_klb_tm(base_path: Path):
             views.add(key)
 
     view_keys = sorted(views)
-    channel_names = [camera_view_label(cm) for cm, ch in view_keys]
-    return tp_paths, view_keys, channel_names, False
+    view_names = [camera_view_label(cm) for cm, ch in view_keys]
+    return tp_paths, view_keys, view_names, False
 
 
 _PIPELINE_INFOS = (
@@ -1935,7 +1946,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         if self._kind_cfg["needs_raw_dims"]:
             self._probe_raw_xml()
 
-        tp_paths, view_keys, channel_names, is_tiled = self._kind_cfg["scan"](scan_root)
+        tp_paths, view_keys, view_names, is_tiled = self._kind_cfg["scan"](scan_root)
         if not tp_paths or not view_keys:
             raise ValueError(
                 f"No {self.stack_type} volumes discovered under {scan_root}"
@@ -1943,7 +1954,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
 
         self._tp_paths = tp_paths
         self._view_keys = list(view_keys)
-        self._channel_names = list(channel_names)
+        self._view_names = list(view_names)
         self._is_tiled: bool = bool(is_tiled)
         self._timepoints = sorted(tp_paths.keys())
         self._cache: dict[tuple[int, int], np.ndarray] = {}
@@ -2297,8 +2308,8 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
         return list(self._view_keys)
 
     @property
-    def channel_names(self) -> list[str]:
-        return list(self._channel_names)
+    def view_names(self) -> list[str]:
+        return list(self._view_names)
 
     @property
     def camera_metadata(self) -> dict[int, dict]:
@@ -2423,7 +2434,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
             meta["nframes"] = nt
             meta["num_frames"] = nt
         meta["num_color_channels"] = self.num_color_channels
-        meta["channel_names"] = list(self._channel_names)
+        meta["view_names"] = list(self._view_names)
         meta["num_views"] = self.num_views
         meta["dtype"] = str(self._dtype)
         meta["stack_type"] = self.stack_type
@@ -2704,7 +2715,7 @@ class IsoviewArray(ReductionMixin, Shape5DMixin):
     def __repr__(self):
         return (
             f"IsoviewArray(kind={self.kind!r}, shape={self.shape}, "
-            f"dtype={self.dtype}, channels={self._channel_names})"
+            f"dtype={self.dtype}, views={self._view_names})"
         )
 
 
