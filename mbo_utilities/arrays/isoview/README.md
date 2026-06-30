@@ -47,7 +47,7 @@ Construction steps (in order):
 3. If the kind needs `.stack` dimensions (raw only), call `_probe_raw_xml` to
    read the XML sidecar **before** trying to probe the binary's shape.
 4. Run the per-kind scanner (`_scan_corrected` / `_scan_fused` /
-   `_scan_raw` / `_scan_klb_tm`). Each returns `(tp_paths, view_keys, channel_names)`
+   `_scan_raw` / `_scan_klb_tm`). Each returns `(tp_paths, view_keys, view_names)`
    where `tp_paths[t][view_key] = Path`.
 5. Probe the first volume via `LazyVolume` to capture `dtype`, `(nz, ny, nx)`,
    and any embedded OME-Zarr / ImageJ scale metadata.
@@ -64,7 +64,7 @@ Construction steps (in order):
 | `kind`                | `"corrected"`, `"fused"`, `"raw"`, or `"clusterpt"`.                            |
 | `stack_type`          | `"isoview-<kind>"`. Used by the GUI's projections widget.                       |
 | `views`               | List of view keys (cam int for corrected, tuples for fused/raw/clusterpt).      |
-| `channel_names`       | Human-readable labels per channel.                                              |
+| `view_names`          | Human-readable VW labels per view (VW00, VW90, …). NOT color channels.          |
 | `num_timepoints`      | `T` size (tile count for tiled stacks; the metadata dict reports `1` + `num_tiles`). |
 | `num_planes`          | `Z` size.                                                                       |
 | `num_views`           | `C` size (cameras: 4 raw/corrected, 2 views after fuse). C-axis consumers use this. |
@@ -97,7 +97,7 @@ Construction steps (in order):
 | ----------------- | -------------- | --------------------------------------------------------------------------------------------------- |
 | `stack_type`      | `str`          | Public label (`"isoview-corrected"` etc.) surfaced via `metadata["stack_type"]`.                    |
 | `resolve`         | `Path -> Path` | Maps a user-supplied path to the directory the scanner should walk.                                 |
-| `scan`            | `Path -> (tp_paths, view_keys, channel_names)` | The discovery function for this kind.                                     |
+| `scan`            | `Path -> (tp_paths, view_keys, view_names)` | The discovery function for this kind.                                     |
 | `projections`     | `IsoviewArray -> dict \| None` | Locates the projection TIFFs for this stack, or returns `None`.                       |
 | `needs_raw_dims`  | `bool`         | Set on `raw` only; tells `__init__` to read the XML sidecar before probing shape.                   |
 
@@ -130,10 +130,10 @@ A file path is normalized to its parent directory before testing.
 
 | Scanner                       | Returns                                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `_scan_corrected(spm_dir)`    | `tp_paths[t][cam] = Path`, view_keys = sorted cam ints, channel_names = `["CM00", "CM01", …]`.        |
-| `_scan_fused(method_dir)`     | `tp_paths[t][(cam0, cam1, vw)] = Path`, channel_names = `["VW00_fused", …]`.                          |
-| `_scan_raw(base)`             | `tp_paths[t][(cam, chn)] = Path`, channel_names = `["CM0_CHN00", …]`.                                 |
-| `_scan_klb_tm(base)`          | `tp_paths[t][(cam, chn)] = Path`, channel_names = `["CM00_CHN00", …]`.                                |
+| `_scan_corrected(spm_dir)`    | `tp_paths[t][cam] = Path`, view_keys = sorted cam ints, view_names = `["CM00", "CM01", …]`.        |
+| `_scan_fused(method_dir)`     | `tp_paths[t][(cam0, cam1, vw)] = Path`, view_names = `["VW00_fused", …]`.                          |
+| `_scan_raw(base)`             | `tp_paths[t][(cam, chn)] = Path`, view_names = `["CM0_CHN00", …]`.                                 |
+| `_scan_klb_tm(base)`          | `tp_paths[t][(cam, chn)] = Path`, view_names = `["CM00_CHN00", …]`.                                |
 
 All four scanners return `({}, [], [])` when no volumes are found.
 
@@ -173,7 +173,7 @@ The `IsoviewArray.metadata` property merges:
 2. Fields from `_parse_isoview_xml` (only on the raw kind).
 3. Shape-derived fields: `Ly`, `Lx`, `num_zplanes` / `nplanes` / `num_planes`,
    `num_timepoints` / `nframes` / `num_frames`, `num_color_channels`, `num_views`.
-4. Stack-identifying fields: `stack_type`, `pipeline_stage`, `dtype`, `shape`, `views`, `channel_names`.
+4. Stack-identifying fields: `stack_type`, `pipeline_stage`, `dtype`, `shape`, `views`, `view_names`.
 5. Convenience aliases: `pixel_resolution_um` → `dx`, `dy`; `z_step` → `dz`; `fps` → `fs`.
 
 ## Pure utilities

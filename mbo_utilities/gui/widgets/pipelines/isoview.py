@@ -827,7 +827,8 @@ class IsoviewPipelineWidget(PipelineWidget):
             mode = self._selected_mode
             imgui.text_colored(
                 _SUBSECTION_COLOR,
-                f"Mode: {mode}    Dataset: {Path(arr.scan_root).name}",
+                f"Mode: {mode}    Dataset: "
+                f"{Path(getattr(arr, 'base_path', None) or arr.scan_root).name}",
             )
             imgui.spacing()
             imgui.separator()
@@ -928,12 +929,11 @@ class IsoviewPipelineWidget(PipelineWidget):
         self._draw_fuse_view_selector()
         self._draw_popup_columns([
             ("I/O options", self._draw_fuse_io_box),
-            ("Fusion", self._draw_fuse_blending_box),
-            ("View transforms", self._draw_fuse_transforms_box),
+            ("Fusion", self._draw_fuse_fusion_box),
+            ("Background", self._draw_fuse_background_box),
         ])
         imgui.spacing()
         self._draw_popup_columns([
-            ("Background", self._draw_fuse_background_box),
             ("Registration search", self._draw_fuse_search_box, True),
             ("Acquisition (override XML)",
              self._draw_microscope_overrides_box, True),
@@ -942,7 +942,7 @@ class IsoviewPipelineWidget(PipelineWidget):
     def _draw_fuse_view_selector(self) -> None:
         """Per-view editor switcher.
 
-        Only the boxes tagged "editing VW##" follow this combo — Fusion,
+        Only the boxes tagged "Target view: VW##" follow this combo — Fusion,
         View transforms, and Registration search. I/O options and
         Microscope overrides are dataset-wide.
         """
@@ -954,7 +954,7 @@ class IsoviewPipelineWidget(PipelineWidget):
         except (ValueError, TypeError):
             idx = 0
             self._fuse_active_view = self._fuse_view_ids[0]
-        imgui.text_colored(_SUBSECTION_COLOR, "Per-view edits target:")
+        imgui.text_colored(_SUBSECTION_COLOR, "Reference view:")
         imgui.same_line(0, imgui.get_style().item_inner_spacing.x)
         imgui.set_next_item_width(_input_w())
         with tooltip_marks_right():
@@ -964,11 +964,6 @@ class IsoviewPipelineWidget(PipelineWidget):
             set_tooltip(
                 "Each view (camera pair) carries its own blending, "
                 "transforms, and registration-search params.\n"
-                "Follows this combo:  Fusion · View transforms · "
-                "Registration search.\n"
-                "I/O options + Microscope are dataset-wide.\n"
-                "The active view's blending method names the fused "
-                "output sub-folder."
             )
         imgui.spacing()
 
@@ -981,10 +976,12 @@ class IsoviewPipelineWidget(PipelineWidget):
         """
         if scope == "per_view":
             view = self._fuse_active_view
-            text = (
-                f"editing VW{view:02d}" if view is not None
-                else "per-view (no view loaded)"
-            )
+            if view is not None:
+                # Transforms apply to the mirrored (opposing) view of the pair:
+                # the selector picks the reference, this is its target (ref+180).
+                text = f"Target view: VW{(view + 180) % 360:02d}"
+            else:
+                text = "per-view (no view loaded)"
             color = _SUBSECTION_COLOR
         elif scope == "all_views":
             text = "edits all views"
@@ -1419,32 +1416,23 @@ class IsoviewPipelineWidget(PipelineWidget):
             "Off = one chunk per file."
         )
 
-        def _zyx(label, z, y, x, tip):
-            # Fit the 3-field input within the box so its label + (?) marker
-            # never overrun the right edge. Reserve room for the trailing
-            # label and the right-aligned (?).
-            style = imgui.get_style()
-            avail = imgui.get_content_region_avail().x
-            reserve = (
-                imgui.calc_text_size(label).x
-                + imgui.calc_text_size("(?)").x
-                + 2 * style.item_spacing.x
-                + 4
-            )
-            imgui.set_next_item_width(max(_input_w(), avail - reserve))
-            _, vals = imgui.input_int3(label, [int(z), int(y), int(x)])
+        def _zyx(header, ident, z, y, x, tip):
+            # Header above the three Z/Y/X fields (white, like other param names).
+            imgui.text(header)
+            imgui.set_next_item_width(_input_w())
+            _, vals = imgui.input_int3(ident, [int(z), int(y), int(x)])
             set_tooltip(tip)
             return [max(0, int(v)) for v in vals]
 
         self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x = _zyx(
-            "Chunk Z,Y,X",
+            "Chunk [Z, Y, X]", "##chunk_zyx",
             self._zarr_chunk_z, self._zarr_chunk_y, self._zarr_chunk_x,
             "Inner chunk decompressed per read. Set all three; 0 = auto "
             "(one Y×X plane).",
         )
         if self._zarr_sharded:
             self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x = _zyx(
-                "Shard Z,Y,X",
+                "Shards [Z, Y, X]", "##shard_zyx",
                 self._zarr_shard_z, self._zarr_shard_y, self._zarr_shard_x,
                 "Outer shard file size. Set all three; 0 = auto "
                 "(memory-bounded Z-slab).",
@@ -1721,8 +1709,19 @@ class IsoviewPipelineWidget(PipelineWidget):
                     "< 64 px."
                 )
 
-    def _draw_fuse_blending_box(self) -> None:
+    def _draw_fuse_fusion_box(self) -> None:
+        """Per-view fusion box: blending + view transforms under one
+        shared Target-view badge."""
         self._draw_view_scope_badge("per_view")
+        self._draw_fuse_blending_box()
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+        imgui.text_colored(_TITLE_COLOR, "View transforms")
+        imgui.spacing()
+        self._draw_fuse_transforms_box()
+
+    def _draw_fuse_blending_box(self) -> None:
         with tooltip_marks_right():
             methods = ["geometric", "adaptive", "average"]
             try:
@@ -1818,7 +1817,6 @@ class IsoviewPipelineWidget(PipelineWidget):
                 )
 
     def _draw_fuse_transforms_box(self) -> None:
-        self._draw_view_scope_badge("per_view")
         with tooltip_marks_right():
             _, new_fz = imgui.checkbox("Flip Z", bool(self._fv("flip_z")))
             self._set_fv("flip_z", new_fz)

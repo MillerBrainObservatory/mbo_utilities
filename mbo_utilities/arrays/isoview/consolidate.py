@@ -496,7 +496,7 @@ def _multiscales_block(
     }
 
 
-def _omero_block(channel_names: list[str], cam_metadata: dict, default_z: int) -> dict:
+def _omero_block(view_names: list[str], cam_metadata: dict, default_z: int) -> dict:
     """Build a per-channel omero block.
 
     ``label`` is the CM## name, ``window.min/max`` come from the dtype
@@ -506,7 +506,7 @@ def _omero_block(channel_names: list[str], cam_metadata: dict, default_z: int) -
     without colliding with the OMERO schema.
     """
     channels = []
-    for c_idx, label in enumerate(channel_names):
+    for c_idx, label in enumerate(view_names):
         cm = cam_metadata.get(c_idx, {})
         ch = {
             "label": label,
@@ -840,8 +840,8 @@ def _write_disk_xy_projections(
         return
 
     nt = iso_arr.num_timepoints
-    channel_names = list(iso_arr.channel_names)
-    nc = len(channel_names)
+    view_names = list(iso_arr.view_names)
+    nc = len(view_names)
 
     # discover ny, nx, dtype from the first available file
     sample_path = next(iter(projections["files"].values()))
@@ -883,7 +883,7 @@ def _write_disk_xy_projections(
                 # projections["files"] is keyed by (axis, view_label, tm_int);
                 # view labels for corrected/raw flat scans are "CM##".
                 for ci in range(nc):
-                    label = channel_names[ci]
+                    label = view_names[ci]
                     p = projections["files"].get(("xy", label, tm_int))
                     if p is None:
                         continue
@@ -1394,7 +1394,7 @@ def _consolidate_corrected(
             _multiscales_block(spm_dir.name, _AXES_5D, img_paths, img_scales)
         ],
         "omero": _omero_block(
-            iso.channel_names, iso._camera_metadata, default_z=nz // 2
+            iso.view_names, iso._camera_metadata, default_z=nz // 2
         ),
     }
     root.attrs["isoview"] = {
@@ -1515,7 +1515,7 @@ def _consolidate_fused(
             _multiscales_block(method_dir.name, _AXES_5D, img_paths, img_scales)
         ],
         "omero": _omero_block(
-            iso.channel_names, iso._camera_metadata, default_z=nz // 2
+            iso.view_names, iso._camera_metadata, default_z=nz // 2
         ),
     }
     root.attrs["isoview"] = {

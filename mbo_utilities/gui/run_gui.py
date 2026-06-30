@@ -1215,23 +1215,8 @@ def run_gui(
     # resolve compute-GPU policy -> CUDA_VISIBLE_DEVICES before any torch/cupy
     # import or worker spawn; detached workers inherit this environment. Env
     # MBO_GPU overrides the persisted GUI preference.
-    import os as _os
-    from mbo_utilities.gpu import apply_gpu_policy
-    from mbo_utilities.preferences import get_compute_gpu
-    _mbo_gpu = _os.environ.get("MBO_GPU")
-    if _mbo_gpu:
-        apply_gpu_policy(_mbo_gpu)
-    else:
-        _compute = get_compute_gpu().strip()
-        # a bare device index from the GPU picker pins that device;
-        # apply_gpu_policy would read "0" as off and "1" as unchanged.
-        if _compute.isdigit():
-            # pin PCI-bus order so the index matches the nvidia-smi label the
-            # picker showed (CUDA defaults to FASTEST_FIRST).
-            _os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
-            _os.environ["CUDA_VISIBLE_DEVICES"] = _compute
-        else:
-            apply_gpu_policy(_compute)
+    from mbo_utilities.gpu import apply_persisted_compute_gpu
+    apply_persisted_compute_gpu()
     return _run_gui_impl(
         data_in=data_in,
         roi=roi,

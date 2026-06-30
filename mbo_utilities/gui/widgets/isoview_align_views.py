@@ -143,7 +143,7 @@ class IsoviewAlignViews(Widget):
         the underlying camera int that keys the CM->VW00 alignment table.
         """
         kind = str(getattr(arr, "kind", "") or "").lower()
-        names = list(getattr(arr, "channel_names", []) or [])
+        names = list(getattr(arr, "view_names", []) or [])
         out: list[dict] = []
         seen: set[str] = set()
         if kind == "fused":

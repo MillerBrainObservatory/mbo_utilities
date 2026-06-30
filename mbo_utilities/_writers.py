@@ -362,6 +362,82 @@ def _write_plane(
         _close_specific_npy_writer(fname)
 
 
+def _scanphase_raw_source(arr):
+    """(dir, file_list) the source array read from, for replay re-open."""
+    files = [str(f) for f in getattr(arr, "filenames", []) or []]
+    src = None
+    if files:
+        parents = {str(Path(f).parent) for f in files}
+        if len(parents) == 1:
+            src = next(iter(parents))
+    return src, files
+
+
+def _scanphase_record(arr, written_frames_0, channel_index, plane_index):
+    """Per-frame scan-phase offsets the writer applied to (channel, plane).
+
+    Returns a replay record (offsets aligned to written frame order, raw
+    source, frame map) or None when the source applied no phase correction.
+    """
+    get_off = getattr(arr, "get_offset_at", None)
+    if get_off is None or not getattr(arr, "fix_phase", False):
+        return None
+    offs = [
+        float(get_off(int(t), int(channel_index), int(plane_index)) or 0.0)
+        for t in written_frames_0
+    ]
+    src, files = _scanphase_raw_source(arr)
+    return {
+        "scanphase_applied": True,
+        "offsets": np.asarray(offs, dtype=np.float32),
+        "frame_map": np.asarray(written_frames_0, dtype=np.int64),
+        "use_fft": bool(getattr(arr, "use_fft", True)),
+        "raw_source": src,
+        "raw_files": files,
+        "plane_index": int(plane_index),
+        "channel_index": int(channel_index),
+    }
+
+
+def _write_scanphase_sidecar(plane_dir, record):
+    """Persist a scan-phase replay record next to the binaries (scanphase.npy)."""
+    if record is None:
+        return
+    np.save(Path(plane_dir) / "scanphase.npy", record, allow_pickle=True)
+
+
+def _scanphase_zarr_attrs(data, frames, planes, channels):
+    """JSON-able per-(channel, plane) scan-phase offsets for zarr group attrs.
+
+    Provenance of the bidirectional offset baked into the zarr pixels; returns
+    None when the source applied no phase correction.
+    """
+    get_off = getattr(data, "get_offset_at", None)
+    if get_off is None or not getattr(data, "fix_phase", False):
+        return None
+    s5 = data._shape5d()
+    T, C, Z = int(s5[0]), int(s5[1]), int(s5[2])
+    fr0 = [f - 1 for f in frames] if frames else list(range(T))
+    z0 = [p - 1 for p in planes] if planes else list(range(Z))
+    c0 = [c - 1 for c in channels] if channels else list(range(C))
+    recs = []
+    for ci in c0:
+        for zi in z0:
+            offs = [float(get_off(int(t), int(ci), int(zi)) or 0.0) for t in fr0]
+            recs.append(
+                {"channel_index": int(ci), "plane_index": int(zi), "offsets": offs}
+            )
+    src, files = _scanphase_raw_source(data)
+    return {
+        "scanphase_applied": True,
+        "use_fft": bool(getattr(data, "use_fft", True)),
+        "frame_map": [int(f) for f in fr0],
+        "raw_source": src,
+        "raw_files": files,
+        "planes": recs,
+    }
+
+
 def _get_file_writer(ext, overwrite):
     if ext.startswith("."):
         ext = ext.lstrip(".")
@@ -1645,6 +1721,12 @@ def _write_volumetric_zarr(
     finally:
         if pbar:
             pbar.close()
+
+    # record the scan-phase offsets baked into these pixels as group-level
+    # provenance (cheap; mirrors the .bin sidecar).
+    _sp_attrs = _scanphase_zarr_attrs(data, frames, planes, channels)
+    if _sp_attrs is not None:
+        root.attrs["scanphase"] = _make_json_serializable(_sp_attrs)
 
     # generate pyramid levels from level 0 data
     if pyramid_mags and len(pyramid_mags) > 1:

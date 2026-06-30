@@ -218,6 +218,9 @@ class FileDialog:
         self.mem_monitor: bool = get_mem_monitor()
         self.mem_monitor_interval: float = get_mem_monitor_interval()
         self._show_options_popup: bool = False
+        # nvidia-smi compute devices for the Compute GPU combo; refreshed once
+        # per popup-open (subprocess), not per frame.
+        self._compute_devices: list = []
 
         # start dependency check immediately in background
         self._start_dependency_check()
@@ -249,6 +252,11 @@ class FileDialog:
         change so the choice survives restarts.
         """
         if self._show_options_popup:
+            try:
+                from mbo_utilities.gpu import gpu_devices
+                self._compute_devices = gpu_devices()
+            except Exception:
+                self._compute_devices = []
             imgui.open_popup("##options_popup")
             self._show_options_popup = False
 
@@ -278,6 +286,28 @@ class FileDialog:
             if changed:
                 self.selected_gpu_index = new_ui_idx - 1
                 set_gpu_index(self.selected_gpu_index)
+
+            imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
+
+            # Compute GPU (suite2p / cellpose) — persisted + applied to new runs.
+            from mbo_utilities.gui._options_popup import (
+                compute_gpu_options,
+                compute_gpu_current_index,
+                apply_compute_gpu,
+            )
+            imgui.text_colored(COL_TEXT_DIM, "Compute GPU (suite2p / cellpose)")
+            if imgui.is_item_hovered():
+                wrapped_tooltip(
+                    "Which GPU suite2p and cellpose run on. 'auto' uses all "
+                    "visible GPUs, 'cpu' forces CPU. Saved and applied to the "
+                    "next run."
+                )
+            values, labels = compute_gpu_options(self._compute_devices)
+            sel = compute_gpu_current_index(values)
+            imgui.set_next_item_width(hello_imgui.em_size(20))
+            c_changed, new_c = imgui.combo("##compute_gpu", sel, labels)
+            if c_changed and 0 <= new_c < len(values):
+                apply_compute_gpu(values[new_c])
 
             imgui.dummy(hello_imgui.em_to_vec2(0, 0.3))
             imgui.separator()

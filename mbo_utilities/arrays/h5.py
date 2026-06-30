@@ -79,6 +79,9 @@ class H5Array(ReductionMixin, Shape5DMixin):
         self.filenames = [Path(filenames)]
         path = self.filenames[0]
         self._f = h5py.File(path, "r")
+        # file is read-only; metadata writes (e.g. imwrite stamping the source)
+        # accumulate here and shadow the on-disk attrs.
+        self._metadata_overlay: dict = {}
 
         # Auto-detect dataset if not specified
         if dataset is None:
@@ -183,20 +186,17 @@ class H5Array(ReductionMixin, Shape5DMixin):
 
     @property
     def metadata(self) -> dict:
-        """File-level attributes as metadata dictionary. Always returns dict, never None."""
-        return dict(self._f.attrs) if self._f.attrs else {}
+        """On-disk attributes merged with any in-memory overrides. Always a dict."""
+        md = dict(self._f.attrs) if self._f.attrs else {}
+        md.update(self._metadata_overlay)
+        return md
 
     @metadata.setter
     def metadata(self, value: dict):
         if not isinstance(value, dict):
             raise TypeError(f"metadata must be a dict, got {type(value)}")
-        # Update file-level attributes
-        for k, v in value.items():
-            try:
-                self._f.attrs[k] = v
-            except (TypeError, ValueError):
-                # Skip values that can't be stored in HDF5 attrs
-                pass
+        # the file is opened read-only; keep overrides in memory.
+        self._metadata_overlay.update(value)
 
     def _imwrite(
         self,
