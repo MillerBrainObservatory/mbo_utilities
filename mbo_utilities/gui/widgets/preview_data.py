@@ -48,6 +48,7 @@ from mbo_utilities.arrays.features import PhaseCorrectionFeature
 from mbo_utilities.preferences import get_last_dir
 from mbo_utilities.arrays import ScanImageArray
 from mbo_utilities.gui._availability import HAS_SUITE2P
+from mbo_utilities.gui._imgui_helpers import push_font_safe
 from mbo_utilities.gui.widgets.gui_logger import GuiLogger, GuiLogHandler
 from mbo_utilities.gui.widgets.progress_bar import start_output_capture
 from mbo_utilities.gui.widgets import get_supported_widgets, draw_all_widgets
@@ -198,6 +199,14 @@ class PreviewDataWidget(EdgeWindow):
             title=title,
             window_flags=flags,
         )
+
+        # fastplotlib's ImguiFigure builds a second ImguiRenderer for its FPS
+        # overlay, and ImguiRenderer.__init__ leaves *its* context current. Every
+        # imgui/implot call below — implot context, style, fonts, io flags —
+        # must target the context the figure actually renders with, or it lands
+        # in an atlas nothing ever draws and pushing those fonts later kills the
+        # render loop.
+        imgui.set_current_context(iw.figure.imgui_renderer.imgui_context)
 
         # Initialize logging
         self._init_logging()
@@ -383,23 +392,7 @@ class PreviewDataWidget(EdgeWindow):
             )
         else:
             self._bold_font = None
-        # imgui >=1.92 rasterizes glyphs on first use and grows the atlas
-        # texture at that moment. When a secondary font's first use is inside
-        # an implot plot (the summary-stats plots push _bold_font), the new
-        # atlas texture isn't registered with the wgpu backend yet and drawing
-        # raises `KeyError: 0`. Baking the printable-ASCII range here grows the
-        # atlas once, during init, so later use is an in-place texture update
-        # on an already-registered id.
-        for _font in (self._default_imgui_font, self._bold_font):
-            if _font is None:
-                continue
-            try:
-                _baked = _font.get_font_baked(_font.legacy_size)
-                for _cp in range(0x20, 0x7F):
-                    _baked.find_glyph(_cp)
-            except Exception:
-                self.logger.debug("font prebake skipped", exc_info=True)
-        imgui.push_font(self._default_imgui_font, self._default_imgui_font.legacy_size)
+        push_font_safe(self._default_imgui_font)
 
     def _init_state(self):
         """Initialize widget state."""

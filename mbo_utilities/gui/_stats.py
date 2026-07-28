@@ -22,7 +22,11 @@ from mbo_utilities.arrays.features._summary_stats import (
     build_summary_stats_spec,
     stats_signature,
 )
-from mbo_utilities.gui._imgui_helpers import set_tooltip, style_seaborn_dark
+from mbo_utilities.gui._imgui_helpers import (
+    push_font_safe,
+    set_tooltip,
+    style_seaborn_dark,
+)
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
 from mbo_utilities.reader import imread
 
@@ -1057,11 +1061,7 @@ def _draw_combined_zplane_plot(
     # bold font was loaded — implot doesn't support per-tick font styling,
     # so this is the cleanest way to render the bracketed active label
     # `[N]` in bold along with the rest of the axis.
-    bold = getattr(parent, "_bold_font", None)
-    pushed_bold = False
-    if bold is not None:
-        imgui.push_font(bold, bold.legacy_size)
-        pushed_bold = True
+    pushed_bold = push_font_safe(getattr(parent, "_bold_font", None))
     if implot.begin_plot(
         "Z-Plane Plot (Combined)",
         imgui.ImVec2(plot_width, 350),
@@ -1174,11 +1174,9 @@ def _draw_zplane_signal_plot(
     style_seaborn_dark()
     imgui.text(f"{stat_label} Signal: Mean ± Std")
     plot_width = imgui.get_content_region_avail().x
-    bold = getattr(parent, "_bold_font", None) if parent is not None else None
-    pushed_bold = False
-    if bold is not None:
-        imgui.push_font(bold, bold.legacy_size)
-        pushed_bold = True
+    pushed_bold = push_font_safe(
+        getattr(parent, "_bold_font", None) if parent is not None else None
+    )
     if implot.begin_plot(
         f"Z-Plane Signal {array_idx}",
         imgui.ImVec2(plot_width, 350),
