@@ -102,6 +102,20 @@ def draw_toolbar_row(items: list) -> None:
             draw()
 
 
+def push_font_safe(font) -> bool:
+    """Push `font` for rendering; return whether it was pushed.
+
+    A font belonging to another ImGui context's atlas produces draw commands
+    whose texture id is unknown to the renderer's backend, which raises inside
+    the render pass and stops the canvas presenting for the rest of the
+    session. Skipping the push degrades to unstyled text instead.
+    """
+    if font is None or font.owner_atlas is not imgui.get_io().fonts:
+        return False
+    imgui.push_font(font, font.legacy_size)
+    return True
+
+
 def draw_boxed_label(
     text: str,
     *,
@@ -122,8 +136,7 @@ def draw_boxed_label(
     sizing, and text rendering — pass a bold font here for "bold + box"
     emphasis.
     """
-    if font is not None:
-        imgui.push_font(font, font.legacy_size)
+    pushed = push_font_safe(font)
     try:
         text_size = imgui.calc_text_size(text)
         origin = imgui.get_cursor_screen_pos()
@@ -144,7 +157,7 @@ def draw_boxed_label(
             ImVec2(origin.x + pad_x, origin.y + pad_y), col, text
         )
     finally:
-        if font is not None:
+        if pushed:
             imgui.pop_font()
 
 _IMGUI_OPAQUE_APPLIED = False
