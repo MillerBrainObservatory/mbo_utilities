@@ -1322,6 +1322,7 @@ def gpu(watch, show_processes, as_json):
         click.echo(_json.dumps({
             "render_gpu": gpu_mod.render_gpu(),
             "compute_gpu": gpu_mod.compute_gpu(),
+            "torch_cuda": gpu_mod.torch_cuda_status(),
             "devices": gpu_mod.gpu_devices(),
             "processes": gpu_mod.gpu_processes() if show_processes else [],
             "compute_disabled": gpu_mod.gpu_compute_disabled(),

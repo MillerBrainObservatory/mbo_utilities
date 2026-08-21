@@ -1215,8 +1215,11 @@ def run_gui(
     # resolve compute-GPU policy -> CUDA_VISIBLE_DEVICES before any torch/cupy
     # import or worker spawn; detached workers inherit this environment. Env
     # MBO_GPU overrides the persisted GUI preference.
-    from mbo_utilities.gpu import apply_persisted_compute_gpu
+    from mbo_utilities.gpu import apply_persisted_compute_gpu, warm_torch_cuda_status
     apply_persisted_compute_gpu()
+    # probe CUDA usability off-thread so the suite2p panel can report an
+    # unusable install without the imgui frame paying for a subprocess
+    warm_torch_cuda_status()
     return _run_gui_impl(
         data_in=data_in,
         roi=roi,

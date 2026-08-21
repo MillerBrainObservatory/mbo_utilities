@@ -19,6 +19,7 @@ import traceback
 from pathlib import Path
 
 from mbo_utilities.gui.tasks import TASKS
+from mbo_utilities.log import _run_key, condense
 
 # max minutes with no progress change before worker self-terminates
 MAX_STALL_MINUTES = 120
@@ -45,6 +46,10 @@ def setup_logging(log_file: str | None = None) -> logging.Logger:
     # apply the unified format to the package handler too
     for h in logger.handlers + logging.getLogger("mbo").handlers:
         h.setFormatter(fmt)
+        # the package handler bound sys.stderr at import time, before main()
+        # wrapped it in _CollapseRepeats; re-point it at the wrapper
+        if type(h) is logging.StreamHandler:
+            h.setStream(sys.stderr)
 
     if log_file:
         try:
@@ -362,6 +367,78 @@ def _contain_in_job():
         return None
 
 
+class _CollapseRepeats:
+    """stdio wrapper that collapses runs of near-identical lines.
+
+    A single torch ``load_state_dict`` failure prints one
+    ``While copying the parameter named ...`` line per tensor - thousands of
+    lines saying the same thing. Consecutive lines with the same
+    ``log._run_key`` are printed ``KEEP`` times, then counted and summarized.
+    """
+
+    KEEP = 3
+
+    def __init__(self, stream):
+        self._stream = stream
+        self._pending = ""
+        self._key = None
+        self._count = 0
+
+    def write(self, text: str) -> int:
+        if not text:
+            return 0
+        self._pending += text
+        # carriage-return progress output is passed through untouched
+        if "\r" in self._pending:
+            self._close_run()
+            self._stream.write(self._pending)
+            self._pending = ""
+            return len(text)
+        while "\n" in self._pending:
+            line, self._pending = self._pending.split("\n", 1)
+            self._emit(line)
+        if len(self._pending) > 8192:
+            self._close_run()
+            self._stream.write(self._pending)
+            self._pending = ""
+        return len(text)
+
+    def _emit(self, line: str) -> None:
+        key = _run_key(line)
+        if key and key == self._key:
+            self._count += 1
+            if self._count <= self.KEEP:
+                self._stream.write(line + "\n")
+            return
+        self._close_run()
+        self._key = key
+        self._count = 1
+        self._stream.write(line + "\n")
+
+    def _close_run(self) -> None:
+        if self._count > self.KEEP:
+            self._stream.write(
+                f"... {self._count - self.KEEP} more similar lines suppressed\n"
+            )
+        self._key = None
+        self._count = 0
+
+    def flush(self) -> None:
+        if self._pending:
+            self._close_run()
+            self._stream.write(self._pending)
+            self._pending = ""
+        self._close_run()
+        self._stream.flush()
+
+    def writelines(self, lines) -> None:
+        for line in lines:
+            self.write(line)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 def main():
     """Main entry point for worker subprocess."""
     # force line buffering so print() output appears in logs immediately,
@@ -373,6 +450,11 @@ def main():
 
     # disable tqdm dynamic display for file output (no terminal = no \r updates)
     os.environ["TQDM_DISABLE"] = "1"
+
+    # collapse repeated-line floods (e.g. torch's per-parameter state_dict
+    # errors) so one failure costs a few lines, not a few thousand
+    sys.stdout = _CollapseRepeats(sys.stdout)
+    sys.stderr = _CollapseRepeats(sys.stderr)
 
     # early print so we can see the process started even if logging fails
     print(f"Worker starting (pid={os.getpid()})", file=sys.stderr, flush=True)
@@ -450,8 +532,15 @@ def main():
             logger.error("memory at failure: " + format_mem_line(mem_snapshot()))
         except Exception:
             pass
-        logger.exception(f"Task failed: {e}")
-        _update_status(os.getpid(), "error", message=str(e), details=traceback.format_exc(), uuid=uuid)
+        logger.error("Task failed: " + condense(str(e), max_lines=12))
+        logger.debug(traceback.format_exc())
+        _update_status(
+            os.getpid(),
+            "error",
+            message=condense(str(e), max_lines=12),
+            details=condense(traceback.format_exc()),
+            uuid=uuid,
+        )
         sys.exit(1)
 
 

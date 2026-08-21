@@ -113,6 +113,15 @@ class TaskMonitor:
         self.update(1.0, message, state="completed")
 
     def fail(self, error: str, details: str | dict | None = None):
+        # error text can be enormous (a torch state_dict failure is one line
+        # per tensor); the sidecar and the GUI only need the gist
+        from mbo_utilities.log import condense
+
+        error = condense(str(error), max_lines=12)
+        if isinstance(details, dict):
+            details = {k: condense(str(v)) for k, v in details.items()}
+        elif details is not None:
+            details = condense(str(details))
         self.update(0.0, f"Error: {error}", state="error", details=details)
 
 
@@ -557,6 +566,21 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         reader_kwargs["channel"] = int(channel) - 1
         logger.info(f"Single-channel extraction: channel {channel} (zero-based: {channel - 1})")
 
+    # Preflight the compute device. suite2p's cellpose call hardcodes
+    # gpu=torch.cuda.is_available(), so an unusable CUDA install (wrong
+    # arch for this GPU) only fails inside the model load, as thousands of
+    # lines of per-parameter torch errors. resolve_torch_device probes in a
+    # subprocess and clears CUDA_VISIBLE_DEVICES for the plane workers.
+    from mbo_utilities.gpu import resolve_torch_device
+
+    requested_device = ops.get("torch_device") or s2p_settings.get("torch_device")
+    device = resolve_torch_device(requested_device, logger)
+    if device == "cpu" and requested_device != "cpu":
+        ops["torch_device"] = "cpu"
+        if "torch_device" in s2p_settings:
+            s2p_settings = dict(s2p_settings)
+            s2p_settings["torch_device"] = "cpu"
+
     # Resolve workers: pass-through user choice, but honour 0/None as
     # "auto" using hardware capacity. lsp also has its own auto path,
     # but ours additionally bounds by available RAM and respects a GPU
@@ -569,9 +593,6 @@ def task_suite2p(args: dict, logger: logging.Logger) -> None:
         # the env policy forces CPU; GPU workers contend for one device so
         # _auto_workers caps them. Key off the real device, not rastermap.
         from mbo_utilities.gpu import gpu_compute_disabled
-        device = str(
-            ops.get("torch_device") or s2p_settings.get("torch_device") or "cuda"
-        ).lower()
         use_gpu = (not gpu_compute_disabled()) and not device.startswith("cpu")
         resolved = _auto_workers(n_planes, use_gpu=use_gpu)
         if resolved != raw_workers:

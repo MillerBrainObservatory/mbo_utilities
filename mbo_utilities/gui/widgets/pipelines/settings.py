@@ -71,8 +71,20 @@ def _selected_compute_gpu(torch_device: str) -> str:
         return f"GPU {idx}"
 
     if cvd and cvd.split(",")[0].strip().isdigit():
-        return f"Compute GPU: {_name(int(cvd.split(',')[0].strip()))}"
-    return "Compute GPU: auto (default device)"
+        label = f"Compute GPU: {_name(int(cvd.split(',')[0].strip()))}"
+    else:
+        label = "Compute GPU: auto (default device)"
+
+    # the startup probe (warm_torch_cuda_status) may have found torch has no
+    # kernels for this GPU; the run falls back to CPU, so say so here
+    from mbo_utilities.gpu import cached_torch_cuda_status
+
+    status = cached_torch_cuda_status()
+    if status is not None and not status["ok"] and status["reason"] in (
+        "unsupported_arch", "error"
+    ):
+        label += "  -> UNUSABLE, will run on CPU"
+    return label
 
 
 # light orange for parameters whose value differs from upstream suite2p
@@ -4695,6 +4707,16 @@ def _run_plane_worker_thread(config):
     # settings.npy siblings for every ops.npy write.
     settings_dict = config["s2p_settings_dict"]
     db_dict = config["s2p_db_dict"]
+
+    # Preflight the compute device before writing the binary. suite2p's
+    # cellpose call hardcodes gpu=torch.cuda.is_available(), so an unusable
+    # CUDA install (wrong arch for this GPU) would otherwise fail deep inside
+    # the model load with thousands of lines of per-parameter torch errors.
+    from mbo_utilities.gpu import resolve_torch_device
+
+    _requested = settings_dict.get("torch_device")
+    if resolve_torch_device(_requested, config["logger"]) == "cpu":
+        settings_dict["torch_device"] = "cpu"
 
     # Merge reactive metadata (fs/dz/dx/dy plus per-plane bookkeeping)
     # into the right halves. Keys that map to upstream go into the

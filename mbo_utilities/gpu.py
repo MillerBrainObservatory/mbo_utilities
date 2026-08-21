@@ -339,6 +339,186 @@ def compute_gpu() -> dict[str, Any]:
             "index": phys, "torch_index": torch_index}
 
 
+_TORCH_STATUS: dict[str, Any] | None = None
+
+# probing torch must not touch CUDA in *this* process: once a CUDA context
+# exists here, clearing CUDA_VISIBLE_DEVICES no longer forces the CPU
+# fallback. So the probe runs in a throwaway subprocess.
+_PROBE = (
+    "import json,sys;"
+    "from mbo_utilities.gpu import _probe_torch_cuda;"
+    "sys.stdout.write('MBO_PROBE'+json.dumps(_probe_torch_cuda()))"
+)
+
+
+def _parse_arch(name: str) -> tuple[int, int] | None:
+    """'sm_86'/'compute_120' -> (major, minor). Last digit is the minor."""
+    m = re.fullmatch(r"(?:sm|compute)_(\d{2,3})", name.strip())
+    if not m:
+        return None
+    digits = m.group(1)
+    return int(digits[:-1]), int(digits[-1])
+
+
+def _probe_torch_cuda() -> dict[str, Any]:
+    """Import torch and launch one kernel. Runs in the probe subprocess."""
+    status: dict[str, Any] = {
+        "ok": False, "reason": "error", "message": "", "hint": "",
+        "device": None, "capability": None, "arch_list": [],
+        "torch_version": None,
+    }
+
+    import warnings
+
+    try:
+        # torch warns about an unsupported capability in several paragraphs
+        # at init; one line replaces it below.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import torch
+
+            status["torch_version"] = torch.__version__
+            if not torch.cuda.is_available() or torch.cuda.device_count() == 0:
+                status.update(reason="no_device", message="No CUDA device visible to torch")
+                return status
+            idx = torch.cuda.current_device()
+            status["device"] = torch.cuda.get_device_name(idx)
+            status["capability"] = list(torch.cuda.get_device_capability(idx))
+            status["arch_list"] = list(torch.cuda.get_arch_list())
+            # definitive check: compile and launch a kernel on the device
+            torch.zeros(1, device="cuda").add_(1).cpu()
+    except ImportError as e:
+        status.update(reason="no_torch", message=f"torch not installed ({e})")
+        return status
+    except Exception as e:
+        cap = status["capability"]
+        archs = status["arch_list"]
+        built = [a for a in (_parse_arch(x) for x in archs) if a]
+        supported = bool(cap) and any(
+            major == cap[0] and minor <= cap[1] for major, minor in built
+        )
+        first = str(e).strip().splitlines()
+        text = first[0] if first else type(e).__name__
+        if cap and archs and not supported:
+            status.update(
+                reason="unsupported_arch",
+                message=(
+                    f"{status['device']} (sm_{cap[0]}{cap[1]}) has no kernels in "
+                    f"torch {status['torch_version']} (built for {' '.join(archs)})."
+                ),
+                hint=(
+                    "Install a torch build for this GPU, e.g. "
+                    "`uv pip install --force-reinstall torch torchvision "
+                    "--index-url https://download.pytorch.org/whl/cu128` "
+                    "(pick the CUDA version at pytorch.org/get-started/locally)."
+                ),
+            )
+        else:
+            status.update(reason="error", message=f"CUDA unusable: {text}")
+        return status
+
+    status.update(ok=True, reason="ok", message=f"{status['device']} usable")
+    return status
+
+
+def torch_cuda_status(refresh: bool = False) -> dict[str, Any]:
+    """Whether torch can actually launch kernels on the visible CUDA device.
+
+    ``torch.cuda.is_available()`` is True even when the installed wheel has
+    no kernels compiled for the GPU's compute capability; the failure only
+    surfaces later, mid model load, as a multi-thousand-line "no kernel image
+    is available for execution on the device" dump. Probing up front lets
+    callers fall back to CPU with one actionable message.
+
+    Keys: ``ok``, ``reason`` (ok / disabled / no_torch / no_device /
+    unsupported_arch / error / probe_failed), ``message``, ``hint``,
+    ``device``, ``capability``, ``arch_list``, ``torch_version``. Cached;
+    pass ``refresh=True`` to redo. A probe that cannot run reports
+    ``ok=True`` so a flaky probe never disables a working GPU.
+    """
+    global _TORCH_STATUS
+    if _TORCH_STATUS is not None and not refresh:
+        return _TORCH_STATUS
+
+    if gpu_compute_disabled():
+        _TORCH_STATUS = {
+            "ok": False, "reason": "disabled",
+            "message": "CUDA compute off (MBO_GPU / CUDA_VISIBLE_DEVICES)",
+            "hint": "", "device": None, "capability": None,
+            "arch_list": [], "torch_version": None,
+        }
+        return _TORCH_STATUS
+
+    if not has_nvidia_smi():
+        _TORCH_STATUS = {
+            "ok": False, "reason": "no_device",
+            "message": "No NVIDIA driver detected", "hint": "",
+            "device": None, "capability": None,
+            "arch_list": [], "torch_version": None,
+        }
+        return _TORCH_STATUS
+
+    out = _run([sys.executable, "-c", _PROBE], timeout=180)
+    marker = "MBO_PROBE"
+    if out and marker in out:
+        import json
+
+        try:
+            _TORCH_STATUS = json.loads(out[out.index(marker) + len(marker):])
+            return _TORCH_STATUS
+        except ValueError:
+            pass
+
+    _TORCH_STATUS = {
+        "ok": True, "reason": "probe_failed",
+        "message": "Could not probe torch CUDA support", "hint": "",
+        "device": None, "capability": None, "arch_list": [],
+        "torch_version": None,
+    }
+    return _TORCH_STATUS
+
+
+def warm_torch_cuda_status() -> None:
+    """Populate the torch_cuda_status cache on a daemon thread.
+
+    The probe spawns a subprocess; GUI callers need the answer without
+    blocking a frame on it. Callers read the cache via ``cached_torch_cuda_status``.
+    """
+    import threading
+
+    threading.Thread(target=torch_cuda_status, daemon=True).start()
+
+
+def cached_torch_cuda_status() -> dict[str, Any] | None:
+    """The probe result if it has already run, else None. Never blocks."""
+    return _TORCH_STATUS
+
+
+def resolve_torch_device(requested: str | None, logger: Any = None) -> str:
+    """Requested torch device, downgraded to 'cpu' when CUDA cannot run.
+
+    Preflights the device once (``torch_cuda_status``) so an unusable CUDA
+    install fails here with one line instead of thousands of lines deep in a
+    cellpose/suite2p model load. Non-CUDA requests pass through untouched.
+    """
+    device = (requested or "cuda").strip().lower()
+    if not device.startswith("cuda"):
+        return device
+
+    status = torch_cuda_status()
+    # only an install that is present but broken warrants the CPU fallback;
+    # for the rest torch's own device handling is already correct
+    if status["ok"] or status["reason"] not in ("unsupported_arch", "error"):
+        return device
+
+    warn = getattr(logger, "warning", None) or print
+    warn(f"GPU unavailable: {status['message']} Running on CPU (slower).")
+    if status["hint"]:
+        warn(status["hint"])
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    return "cpu"
+
+
 def gpu_compute_disabled() -> bool:
     """True if CUDA compute is turned off via env (CVD empty/-1 or MBO_GPU off)."""
     cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -424,6 +604,11 @@ def format_gpu_report(show_processes: bool = False, top: int = 12) -> str:
         lines.append(
             f"Compute GPU (suite2p/cellpose/cupy): {cg['name']}  (cuda:{cg['torch_index']})"
         )
+        ts = torch_cuda_status()
+        if not ts["ok"] and ts["reason"] not in ("disabled", "no_torch"):
+            lines.append(f"  UNUSABLE: {ts['message']}")
+            if ts["hint"]:
+                lines.append(f"  {ts['hint']}")
     else:
         lines.append(f"Compute GPU (suite2p/cellpose/cupy): {cg['name']}")
 

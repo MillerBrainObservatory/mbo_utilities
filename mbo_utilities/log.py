@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 
 _level_override: int | None = None
 
@@ -54,3 +55,50 @@ def get_package_loggers():
         if name.startswith("mbo.")
         and isinstance(logging.Logger.manager.loggerDict[name], logging.Logger)
     ]
+
+
+def _run_key(line: str) -> str:
+    """Similarity key for consecutive log lines: leading text, digits masked.
+
+    Masking digits makes indexed lines ("...blocks.0...", "...blocks.1...")
+    compare equal, which is what makes per-tensor error floods collapse.
+    """
+    return re.sub(r"\d+", "#", line[:48]).strip()
+
+
+def condense(text: str, keep: int = 3, max_lines: int = 40) -> str:
+    """Collapse runs of near-identical lines, then cap the total.
+
+    Bounds error text headed for a status sidecar or the GUI log: a single
+    torch ``load_state_dict`` failure is one near-identical line per tensor,
+    thousands of them.
+    """
+    if not text:
+        return text
+
+    out: list[str] = []
+    key: str | None = None
+    count = 0
+
+    def close_run() -> None:
+        nonlocal key, count
+        if count > keep:
+            out.append(f"... {count - keep} more similar lines suppressed")
+        key, count = None, 0
+
+    for line in text.splitlines():
+        this = _run_key(line)
+        if this and this == key:
+            count += 1
+            if count <= keep:
+                out.append(line)
+            continue
+        close_run()
+        key, count = this, 1
+        out.append(line)
+    close_run()
+
+    if len(out) > max_lines:
+        hidden = len(out) - max_lines
+        out = out[:max_lines] + [f"... {hidden} more lines truncated"]
+    return "\n".join(out)
