@@ -39,7 +39,7 @@ def draw_menu_bar(parent: Any):
                     parent._file_dialog = pfd.open_file(
                         "Select Data File(s)",
                         start_dir,
-                        ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin", "All Files", "*"],
+                        ["All Files", "*", "Image Files", "*.tif *.tiff *.zarr *.npy *.bin"],
                         pfd.opt.multiselect
                     )
                 # Open Folder - iw-array API

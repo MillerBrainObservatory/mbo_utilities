@@ -698,8 +698,8 @@ class FileDialog:
                 self._open_multi = pfd.open_file(
                     "Select files",
                     self._default_dir,
-                    ["Image Files", "*.tif *.tiff *.zarr *.npy *.bin",
-                     "All Files", "*"],
+                    ["All Files", "*",
+                     "Image Files", "*.tif *.tiff *.zarr *.npy *.bin"],
                     pfd.opt.multiselect
                 )
 
