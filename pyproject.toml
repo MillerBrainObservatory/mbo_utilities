@@ -40,9 +40,11 @@ dependencies = [
 	"llvmlite>=0.43.0",
 	"numba>=0.60.0",
 	"mbo-fastplotlib>=0.7.3",
-	"rendercanvas>=2.4.2,<2.5",
-	"imgui-bundle==1.92.5",
-	"wgpu>=0.28.1,<0.29",
+	"rendercanvas>=2.4.2",
+	# <1.92.900: newer imgui-bundle drops ImDrawData.cmd_lists_count, which
+	# breaks the imgui backend of every released wgpu
+	"imgui-bundle>=1.92.5,<1.92.900",
+	"wgpu>=0.28.1",
 	"submitit>=1.5.0",
 	"imagecodecs>=2026.6.6",
 ]
