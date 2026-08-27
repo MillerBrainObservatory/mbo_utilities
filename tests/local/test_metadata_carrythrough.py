@@ -82,7 +82,10 @@ class TestMetadataCarryThrough:
         work.joinpath("_zpath.txt").write_text(str(zpath))
 
     def test_axial_then_tiff_bakes_and_hides_shifts(self, work):
-        zpath = Path(work.joinpath("_zpath.txt").read_text())
+        zfile = work.joinpath("_zpath.txt")
+        if not zfile.exists():
+            pytest.skip("zarr hop did not run (no ScanImage source)")
+        zpath = Path(zfile.read_text())
         za = mbo.imread(zpath)
         view = mbo.with_axial_shifts(za)
         assert view.dims == ("T", "C", "Z", "Y", "X")
@@ -101,7 +104,9 @@ class TestMetadataCarryThrough:
 
     def test_bin_hop_is_suite2p_ready(self, work):
         tdir = work / "tiff"
-        tps = sorted(tdir.rglob("*.tif*"))
+        tps = sorted(tdir.rglob("*.tif*")) if tdir.exists() else []
+        if not tps:
+            pytest.skip("tiff hop did not run (no ScanImage source)")
         ta = mbo.imread(tdir if len(tps) > 1 else tps[0])
         bdir = work / "bin"
         mbo.imwrite(ta, bdir, ext=".bin", planes=[PLANE], overwrite=True, show_progress=False)
