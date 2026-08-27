@@ -309,6 +309,105 @@ def _imagej_to_metadata(tiff_file) -> dict:
     return md
 
 
+# OME unit symbols -> µm / seconds. OME defaults are µm and s when the
+# *Unit attribute is absent.
+_OME_LENGTH_TO_UM = {
+    "pm": 1e-6,
+    "nm": 1e-3,
+    "µm": 1.0,
+    "μm": 1.0,
+    "um": 1.0,
+    "micron": 1.0,
+    "mm": 1e3,
+    "cm": 1e4,
+    "m": 1e6,
+}
+_OME_TIME_TO_S = {
+    "ns": 1e-9,
+    "µs": 1e-6,
+    "μs": 1e-6,
+    "us": 1e-6,
+    "ms": 1e-3,
+    "s": 1.0,
+    "min": 60.0,
+    "h": 3600.0,
+}
+
+
+def _ome_to_metadata(tiff_file) -> dict:
+    """Deposit OME-XML Pixels attributes as raw source keys.
+
+    ``SizeX/Y/Z/T/C``, ``DimensionOrder``, ``PhysicalSize*`` and
+    ``TimeIncrement`` resolve through the metadata registry (SizeZ ->
+    num_zplanes, PhysicalSizeX -> dx, TimeIncrement -> finterval -> fs).
+    Values are kept raw; only units are converted (physical sizes to µm,
+    TimeIncrement to seconds) when the XML declares a non-default unit.
+    """
+    import xml.etree.ElementTree as ET
+
+    xml_text = getattr(tiff_file, "ome_metadata", None)
+    if not xml_text:
+        return {}
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return {}
+
+    def _local(el):
+        return el.tag.rsplit("}", 1)[-1]
+
+    pixels = next((el for el in root.iter() if _local(el) == "Pixels"), None)
+    if pixels is None:
+        return {}
+
+    md: dict = {"is_ome": True}
+    page0 = tiff_file.pages.first
+    if page0 is not None:
+        md["Ly"] = int(page0.shape[-2])
+        md["Lx"] = int(page0.shape[-1])
+        md["dtype"] = str(page0.dtype)
+
+    attrs = pixels.attrib
+    for key in ("SizeX", "SizeY", "SizeZ", "SizeT", "SizeC"):
+        if attrs.get(key):
+            md[key] = int(attrs[key])
+    if attrs.get("DimensionOrder"):
+        md["DimensionOrder"] = attrs["DimensionOrder"]
+
+    for key in ("PhysicalSizeX", "PhysicalSizeY", "PhysicalSizeZ"):
+        value = attrs.get(key)
+        if not value:
+            continue
+        scale = _OME_LENGTH_TO_UM.get(attrs.get(f"{key}Unit", "µm"))
+        if scale is not None:
+            md[key] = float(value) * scale
+    value = attrs.get("TimeIncrement")
+    if value:
+        scale = _OME_TIME_TO_S.get(attrs.get("TimeIncrementUnit", "s"))
+        if scale is not None:
+            md["TimeIncrement"] = float(value) * scale
+
+    # "channel_names", not "channels": that key is a layout-count alias
+    names = [
+        el.attrib["Name"]
+        for el in pixels
+        if _local(el) == "Channel" and el.attrib.get("Name")
+    ]
+    if names:
+        md["channel_names"] = names
+
+    image = next((el for el in root.iter() if _local(el) == "Image"), None)
+    if image is not None:
+        if image.attrib.get("Name"):
+            md["image_name"] = image.attrib["Name"]
+        for el in image:
+            if _local(el) == "AcquisitionDate" and el.text and el.text.strip():
+                md["acquisition_date"] = el.text.strip()
+            elif _local(el) == "Description" and el.text and el.text.strip():
+                md["description"] = el.text.strip()
+    return md
+
+
 def get_metadata_single(file: Path):
     """
     Extract metadata from a single TIFF file produced by ScanImage or processed via the save_as function.
@@ -383,6 +482,20 @@ def get_metadata_single(file: Path):
                 meta.update(tag_meta)
                 meta.update(layout)
             return meta
+
+        # OME-TIFF: deposit the OME-XML Pixels attributes so dims and
+        # dx/dy/dz/fs resolve through the registry. Embedded mbo metadata
+        # supplements, but the OME dimension counts stay authoritative.
+        if getattr(tiff_file, "is_ome", False):
+            meta = _ome_to_metadata(tiff_file)
+            if meta:
+                if isinstance(tag_meta, dict):
+                    layout = {
+                        k: meta[k] for k in ("SizeT", "SizeZ", "SizeC") if k in meta
+                    }
+                    meta.update(tag_meta)
+                    meta.update(layout)
+                return meta
 
         if isinstance(tag_meta, dict):
             return tag_meta
@@ -646,13 +759,11 @@ def query_tiff_pages(file_path):
         # Go to first IFD
         f.seek(first_ifd_offset)
 
-        # Read tag count
+        # Read tag count, then the whole tag block
         tag_count = struct.unpack(tag_count_fmt, f.read(tag_count_size))[0]
+        tag_block = f.read(tag_count * tag_size)
 
-        # Skip all tags to get to next IFD offset
-        f.seek(first_ifd_offset + tag_count_size + (tag_count * tag_size))
-
-        # Read second IFD offset
+        # Read second IFD offset (follows the tag block)
         second_ifd_offset = struct.unpack(offset_fmt, f.read(offset_size))[0]
 
         if second_ifd_offset == 0:
@@ -661,11 +772,102 @@ def query_tiff_pages(file_path):
         # Calculate page size (IFD + image data for one page)
         page_size = second_ifd_offset - first_ifd_offset
 
+        # The estimate assumes [IFD][data][IFD][data]... layout. Writers that
+        # cluster IFDs apart from the pixel data (Femtonics / Bio-Formats
+        # OME-TIFFs) have an IFD stride far smaller than one page of data,
+        # inflating the estimate ~1000x. Bound the stride by the first page's
+        # uncompressed data size; when it can't hold a page, count the IFD
+        # chain directly instead.
+        bigtiff = version == 43
+        width = height = None
+        bits, spp, compression = 8, 1, 1
+        for i in range(tag_count):
+            tag, value = _ifd_inline_value(
+                tag_block[i * tag_size : (i + 1) * tag_size], bo, bigtiff
+            )
+            if value is None:
+                continue
+            if tag == 256:
+                width = value
+            elif tag == 257:
+                height = value
+            elif tag == 258:
+                bits = value
+            elif tag == 259:
+                compression = value
+            elif tag == 277:
+                spp = value
+
+        min_page_bytes = width * height * spp * bits // 8 if width and height else None
+        if (
+            page_size <= 0
+            or compression != 1
+            or (min_page_bytes is not None and page_size < min_page_bytes)
+        ):
+            return _count_ifd_chain(
+                f,
+                first_ifd_offset,
+                file_size,
+                tag_count_fmt,
+                tag_count_size,
+                tag_size,
+                offset_fmt,
+                offset_size,
+            )
+
         # Calculate total pages
         data_size = file_size - header_size
         num_pages = data_size // page_size
 
         return int(num_pages)
+
+
+def _ifd_inline_value(entry: bytes, bo: str, bigtiff: bool) -> tuple[int, int | None]:
+    """(tag, value) for a single-count SHORT/LONG/LONG8 IFD entry, else (tag, None)."""
+    if bigtiff:
+        tag, typ = struct.unpack(f"{bo}HH", entry[:4])
+        count = struct.unpack(f"{bo}Q", entry[4:12])[0]
+        raw = entry[12:20]
+    else:
+        tag, typ, count = struct.unpack(f"{bo}HHI", entry[:8])
+        raw = entry[8:12]
+    if count != 1:
+        return tag, None
+    if typ == 3:
+        return tag, struct.unpack(f"{bo}H", raw[:2])[0]
+    if typ == 4:
+        return tag, struct.unpack(f"{bo}I", raw[:4])[0]
+    if typ == 16 and bigtiff:
+        return tag, struct.unpack(f"{bo}Q", raw[:8])[0]
+    return tag, None
+
+
+def _count_ifd_chain(
+    f,
+    first_ifd_offset,
+    file_size,
+    tag_count_fmt,
+    tag_count_size,
+    tag_size,
+    offset_fmt,
+    offset_size,
+) -> int:
+    """Exact page count by following next-IFD offsets (2 small reads per page)."""
+    count = 0
+    offset = first_ifd_offset
+    while 0 < offset < file_size and count < 4_000_000:
+        f.seek(offset)
+        data = f.read(tag_count_size)
+        if len(data) < tag_count_size:
+            break
+        n_tags = struct.unpack(tag_count_fmt, data)[0]
+        f.seek(offset + tag_count_size + n_tags * tag_size)
+        data = f.read(offset_size)
+        if len(data) < offset_size:
+            break
+        count += 1
+        offset = struct.unpack(offset_fmt, data)[0]
+    return count
 
 
 def clean_scanimage_metadata(meta: dict) -> dict:

@@ -3,6 +3,9 @@
 - never git push or add yourself to github or any attributions in git related tasks.
 - Before proposing changes review the relevant codebase sections first.
 - No fluff comments that restate what the code already says.
+- Minimal to no code comments; docstrings 1-3 lines. Never write multiline
+  comments/docstrings explaining temporary state (compat shims, version
+  workarounds, migration notes). Prefer fewer functions over small helpers.
 - UI/CLI text: status + action only, minimum words. Don't explain *why* a feature exists.
 
 ## Structure
