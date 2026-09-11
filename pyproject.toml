@@ -146,6 +146,11 @@ torch = [
 torchvision = [
   { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+# TEMPORARY: pin to the local sibling checkout so `uv run mbo` picks up
+# isoview fixes not yet released to PyPI (2026-09-11, VW90/VW270 CM00
+# orientation). Remove this override once isoview publishes a release
+# containing them, and bump the `isoview>=` constraint above instead.
+isoview = { path = "../isoview", editable = true }
 
 [tool.ruff]
 line-length = 88
@@ -245,7 +250,9 @@ dev = [
     "pygetwindow>=0.0.9",
     "pytest>=8.4.2",
 ]
-# Local-only; auto-synced via default-groups so `uv run mbo` uses ../isoview.
+# Auto-synced via default-groups; the [tool.uv.sources] override above
+# points this at the local ../isoview checkout while its PyPI release
+# lags behind master (see that entry's comment).
 isoview = [
     "isoview",
 ]
