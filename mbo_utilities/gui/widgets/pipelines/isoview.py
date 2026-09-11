@@ -433,7 +433,11 @@ class IsoviewPipelineWidget(PipelineWidget):
         # run opposite to the baked Z stride). On: adjacent z-blocks join
         # contiguously (first plane of the lower block meets the last of the
         # upper). Forwarded to generate_bigstitcher_xml(reverse_z=...).
-        self._stitcher_reverse_z: bool = True
+        # Default False: confirmed via BigDataViewer that True mis-stacks
+        # tiles for a per-camera export against the corrected CM00
+        # orientation/offset (_CM_ALIGN_DEFAULT) -- toggle on per-dataset if
+        # a mounting genuinely needs it.
+        self._stitcher_reverse_z: bool = False
 
         # Link the existing .corrected zarrs in the dataset.xml instead of
         # writing a converted copy (no conversion step). On by default; uncheck
