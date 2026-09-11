@@ -171,12 +171,29 @@ _MODE_PREFIX = {
 
 # Default per-camera reorientation onto CM00 for a Normal acquisition, as
 # editable rotation/flip UI state (matches isoview _CAMERA_TO_CM00_NORMAL:
-# CM01 = flip X, CM02 = +90 about Y, CM03 = +90 about Y then flip Z). CM00 is
-# the reference (no transform). Pre-selected when raw/.corrected (per-camera).
+# CM01 = flip X; CM02/CM03 (the Y-scanning pair) = +90 about Y then an extra
+# +180 about Y -- confirmed empirically via BigDataViewer cross-view
+# comparison, on top of the base rot-90-about-Y / rot-90-about-Y+flip-Z that
+# bead alignment alone gave). CM00 is the reference (no transform).
+# Pre-selected when raw/.corrected (per-camera). Rotations compose in list
+# order (innermost first) and always precede flips (_compose_orientation_ops),
+# so appending the +180 here lands outermost regardless of CM03's flip.
 _CM_ALIGN_DEFAULT: dict[int, dict] = {
     1: {"rotations": [], "flips": ["X"]},
-    2: {"rotations": [{"sign": "+", "axis": "Y", "deg": 90}], "flips": []},
-    3: {"rotations": [{"sign": "+", "axis": "Y", "deg": 90}], "flips": ["Z"]},
+    2: {
+        "rotations": [
+            {"sign": "+", "axis": "Y", "deg": 90},
+            {"sign": "+", "axis": "Y", "deg": 180},
+        ],
+        "flips": [],
+    },
+    3: {
+        "rotations": [
+            {"sign": "+", "axis": "Y", "deg": 90},
+            {"sign": "+", "axis": "Y", "deg": 180},
+        ],
+        "flips": ["Z"],
+    },
 }
 
 # Per-camera CM->CM00 for a Rotated acquisition (every camera mounted 90deg on
@@ -416,7 +433,11 @@ class IsoviewPipelineWidget(PipelineWidget):
         # run opposite to the baked Z stride). On: adjacent z-blocks join
         # contiguously (first plane of the lower block meets the last of the
         # upper). Forwarded to generate_bigstitcher_xml(reverse_z=...).
-        self._stitcher_reverse_z: bool = True
+        # Default False: confirmed via BigDataViewer that True mis-stacks
+        # tiles for a per-camera export against the corrected CM00
+        # orientation/offset (_CM_ALIGN_DEFAULT) -- toggle on per-dataset if
+        # a mounting genuinely needs it.
+        self._stitcher_reverse_z: bool = False
 
         # Link the existing .corrected zarrs in the dataset.xml instead of
         # writing a converted copy (no conversion step). On by default; uncheck
