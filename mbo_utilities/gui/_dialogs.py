@@ -347,29 +347,11 @@ def load_new_data(parent: Any, path: str):
             new_data = raw_data
         new_data = _ScrubTimingProxy(new_data)
 
-        # Reset stale per-data display state via the standalone helper
-        # so the reset contract can be tested in isolation.
         _reset_per_data_state(parent)
-
-        # Drop stale closures *before* swapping data. The processor's
-        # spatial_func is a closure that captured the previous dataset's
-        # mean_img, so the next render after data[0] = new_data would crash
-        # if the new shape differs. _reset_per_data_state already cleared
-        # _mean_subtraction and _gaussian_sigma, so _rebuild_spatial_func
-        # will install the identity passthrough. Window funcs/sizes get
-        # cleared too since they're bound to the old t-rank.
+        # the swap clears window and spatial funcs and starts every slider at 0
+        parent.image_widget.data[0] = new_data
         if hasattr(parent, "_rebuild_spatial_func"):
             parent._rebuild_spatial_func()
-        if hasattr(parent, "image_widget") and parent.image_widget is not None:
-            parent.image_widget.window_funcs = None
-
-        # iw-array API: use data indexer for replacing data
-        # data[0] = new_array triggers _reset_dimensions() automatically
-        parent.image_widget.data[0] = new_data
-
-        # reset indices to start of data using public API
-        if parent.image_widget.n_sliders > 0:
-            parent.image_widget.indices = [0] * parent.image_widget.n_sliders
 
         # Update internal state
         parent.fpath = path

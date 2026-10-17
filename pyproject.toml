@@ -207,6 +207,9 @@ mbo_utilities = ["assets/**/*"]
 [tool.setuptools.exclude-package-data]
 "*" = ["data/*"]
 
+[tool.pytest.ini_options]
+markers = ["critical: contracts kept when the test suite is pruned"]
+
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",

@@ -305,13 +305,8 @@ def _show_metadata_viewer(metadata: dict) -> None:
 
 
 class _SqueezeSingletonDims:
-    """wraps a 5D TCZYX array, dropping every singleton non-spatial dim.
-
-    fastplotlib's ImageWidget derives its slider count from ndim-2 and
-    doesn't handle singleton sliders, so any T/C/Z with size 1 must be
-    removed before handoff. get_slider_dims filters by the same
-    size>1 predicate; this wrapper keeps the shape in lockstep so
-    len(slider_dim_names) always equals wrapped.ndim - 2.
+    """A 5D TCZYX array without its size-1 T, C, Z axes, so the viewer gets one
+    slider per ``get_slider_dims`` entry.
     """
 
     def __init__(self, arr):
@@ -364,61 +359,35 @@ class _SqueezeSingletonDims:
         return self._shape[0]
 
     def __array__(self, dtype=None, copy=None):
-        # materialize through __getitem__ so the squeezed shape is honored.
-        # without this, np.asarray() / .astype() / etc. fall through
-        # __getattr__ to the underlying array and leak the unsqueezed rank.
+        # the first (Y, X) frame, never the whole array
         import numpy as np
-        arr = np.asarray(self[tuple(slice(None) for _ in range(self.ndim))])
+        arr = np.asarray(self[(0,) * (self.ndim - 2)])
         if dtype is not None:
             arr = arr.astype(dtype)
         return arr
 
     def astype(self, dtype, *args, **kwargs):
-        # fastplotlib's TextureArray._fix_data calls data.astype(np.float32).
-        # route through __array__ so the cast sees the squeezed shape.
         import numpy as np
         return np.asarray(self).astype(dtype, *args, **kwargs)
 
     def __getattr__(self, name):
-        # IMPORTANT: do not forward numpy-array-protocol methods here
-        # (__array__, astype, reshape, etc.) — those must be defined
-        # explicitly above so they respect the squeezed shape. this
-        # fallback exists only for domain-specific attributes like
-        # `metadata`, `stack_type`, `num_beamlets`, etc.
+        # reader attributes only; numpy protocol methods are defined above
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
         return getattr(self._arr, name)
 
 
 class _ScrubTimingProxy:
-    """Logs per-frame __getitem__ time at DEBUG level.
+    """The array the viewer reads, logging each read's time at DEBUG.
 
-    Applied by `_squeeze_for_viewer` to every array handed to fastplotlib
-    so scrub timing surfaces uniformly across reader types
-    (IsoviewArray, LBMArray, Suite2pArray, ZarrArray, …) without
-    per-class edits. Zero-cost when DEBUG is filtered out: the
-    `isEnabledFor` check short-circuits before perf_counter.
-
-    `_arr` deliberately points to the *innermost* reader (peeling any
-    `_SqueezeSingletonDims`) so existing `getattr(x, "_arr", x)` patterns
-    in `_dialogs.py` / `preview_data.py` continue to surface a real
-    ScanImageArray / TiffArray for isinstance checks. Indexing routes
-    through `_wrapped` instead, which preserves the squeeze layer's
-    shape transform.
-
-    Must define `__array__` and `astype` explicitly — fastplotlib's
-    TextureArray._fix_data calls `.astype(np.float32)`, and without an
-    explicit hook here `__getattr__` would silently forward to the
-    underlying array and bypass our timing.
+    ``_arr`` is the innermost reader, for isinstance checks; reads go through
+    ``_wrapped``.
     """
 
     def __init__(self, arr):
         import numpy as np
         from mbo_utilities.log import get as get_logger
         self._wrapped = arr
-        # peel every wrapper layer (_SqueezeSingletonDims, AxialShiftView,
-        # _ChannelView, ...) so isinstance checks downstream see the real
-        # reader. No reader class defines `_arr`, so this terminates there.
         inner = arr
         while hasattr(inner, "_arr"):
             inner = inner._arr
@@ -448,11 +417,7 @@ class _ScrubTimingProxy:
     def __getitem__(self, key):
         import logging
         np = self._np
-        # fastplotlib's subsample_array probes the histogram range with a
-        # bare `arr[0]`. On a >3D lazy array that pulls every non-leading
-        # dim into memory (IsoviewArray TCZYX `arr[0]` = all cameras x all
-        # Z-planes, several GB). Collapse a bare-int probe to one
-        # representative 2D frame so it reads a single plane.
+        # a bare int reads one frame, not every camera and plane of a timepoint
         if isinstance(key, (int, np.integer)) and self._wrapped.ndim > 3:
             key = (int(key),) + (0,) * (self._wrapped.ndim - 3) + (slice(None), slice(None))
         if not self._logger.isEnabledFor(logging.DEBUG):
@@ -494,7 +459,6 @@ def _create_image_widget(data_array, widget: bool = True, figure_kwargs_override
     scripts/capture_docs.py to build an offscreen viewer for headless capture).
     """
     import copy
-    import numpy as np
     from mbo_utilities.gui._ndviewer import MboNDViewer
 
     try:
@@ -543,16 +507,6 @@ def _create_image_widget(data_array, widget: bool = True, figure_kwargs_override
         slider_dim_names = tuple(custom_labels)
     else:
         slider_dim_names = get_slider_dims(data_array)
-
-    # window_funcs/window_sizes must match slider_dim_names length
-    if slider_dim_names:
-        n_sliders = len(slider_dim_names)
-        # apply mean to first dim (usually t), None for rest
-        window_funcs = (np.mean,) + (None,) * (n_sliders - 1)
-        window_sizes = (1,) + (None,) * (n_sliders - 1)
-    else:
-        window_funcs = None
-        window_sizes = None
 
     def _is_isoview(arr) -> bool:
         """IsoviewArray has a `kind` attribute set to raw/corrected/fused."""
@@ -606,8 +560,6 @@ def _create_image_widget(data_array, widget: bool = True, figure_kwargs_override
             data=arrays,
             names=names,
             slider_dim_names=slider_dim_names,
-            window_funcs=window_funcs,
-            window_sizes=window_sizes,
             cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,
@@ -617,8 +569,6 @@ def _create_image_widget(data_array, widget: bool = True, figure_kwargs_override
         iw = MboNDViewer(
             data=_squeeze_for_viewer(data_array),
             slider_dim_names=slider_dim_names,
-            window_funcs=window_funcs,
-            window_sizes=window_sizes,
             cmap="gnuplot2",
             histogram_widget=True,
             figure_kwargs=figure_kwargs,

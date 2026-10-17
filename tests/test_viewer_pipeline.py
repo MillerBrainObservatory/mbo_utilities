@@ -6,8 +6,8 @@ of any actual fastplotlib/qt rendering. Each test is a regression for a
 bug we shipped between the 5D refactor and now.
 
 Coverage:
-- `_SqueezeSingletonDims`: leak-proof against numpy protocol calls
-  (`np.asarray`, `astype`), correct shape across all 8 singleton patterns
+- `_SqueezeSingletonDims`: `np.asarray` and `astype` read one squeezed
+  frame, correct shape across all 8 singleton patterns
 - Window/Spatial widget feature gating across rank patterns
 """
 
@@ -87,11 +87,7 @@ class TestSqueezeWrapperShape:
 
 
 class TestSqueezeWrapperNumpyLeak:
-    """Regression: `_SqueezeSingletonDims.__getattr__` previously delegated
-    `astype` and `__array__` to the underlying array, leaking the original
-    5D shape to fastplotlib's TextureArray. Pin every numpy entry point so
-    the leak can't come back.
-    """
+    """numpy entry points see the squeezed shape and read one frame."""
 
     def test_np_asarray_honors_squeeze(self):
         arr = FakeArr((1, 1, 1, 64, 48), ("T", "C", "Z", "Y", "X"))
@@ -109,9 +105,6 @@ class TestSqueezeWrapperNumpyLeak:
         assert out.dtype == np.float32
 
     def test_isolated_buffer_assignment(self):
-        """fastplotlib's TextureArray._fix_data path: allocate zeros at
-        wrapper.shape, then assign wrapper[:] into it. Both ends must agree.
-        """
         arr = FakeArr((1, 1, 1, 64, 48), ("T", "C", "Z", "Y", "X"))
         w = _SqueezeSingletonDims(arr)
         buf = np.zeros(w.shape, dtype=w.dtype)
