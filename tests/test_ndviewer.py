@@ -1098,3 +1098,31 @@ class TestClose:
         iw.close()  # offscreen: Figure._output is None; must not raise
         assert all(ex._shutdown for ex in executors)
         iw.close()  # idempotent
+
+
+class TestSidePanelShortcut:
+    def test_the_shortcut_collapses_and_restores_the_side_panel(self, tmp_path):
+        from mbo_utilities import imread
+        from mbo_utilities.gui._keyboard import toggle_side_panel
+        from mbo_utilities.gui.run_gui import _create_image_widget
+
+        np.save(tmp_path / "movie.npy", make_base_5d())
+        iw = _create_image_widget(
+            imread(tmp_path / "movie.npy"),
+            widget=True,
+            figure_kwargs_override={"size": (900, 600)},
+        )
+        panel = iw.figure.imgui_windows["right"]
+        width = panel.size
+        toggle_side_panel(panel)
+        assert panel.collapsed
+        assert panel.size < width
+        toggle_side_panel(panel)
+        assert not panel.collapsed
+        assert panel.size == width
+        # let signal quality finish so its reads don't land in the next test
+        deadline = time.time() + 60
+        while not all(panel._zstats_done) and time.time() < deadline:
+            iw.figure.canvas.draw()
+            time.sleep(0.02)
+        iw.close()

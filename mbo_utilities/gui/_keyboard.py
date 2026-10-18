@@ -162,9 +162,15 @@ def toggle_playback(parent: Any, dim_index: int = 0) -> None:
 
 def toggle_side_panel(parent: Any) -> None:
     """Toggle collapse state of the side panel."""
-    with contextlib.suppress(Exception):
-        parent.collapsed = not parent.collapsed
-        parent.logger.info("Shortcut: collapse toggled")
+    # fastplotlib's collapsed flag doesn't resize; shrink to the separator like a double-click
+    if parent.collapsed:
+        parent.size = parent._old_size
+        parent.collapsed = False
+    else:
+        parent._old_size = parent.size
+        parent.size = int(parent._separator_thickness)
+        parent.collapsed = True
+    parent.logger.info("Shortcut: collapse toggled")
 
 
 def rebind_space_to_playback(parent: Any) -> None:
