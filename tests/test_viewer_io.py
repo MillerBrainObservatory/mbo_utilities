@@ -3,7 +3,7 @@
 Every read the viewer makes of a recording is counted in frames, one (Y, X)
 plane per T, C, Z position. Opening a file reads one frame and one bounded
 contrast sample; moving a slider reads one frame (a window's span with a
-window function on); nothing else reads.
+window function on); Signal Quality and Mean Subtraction read only when on.
 """
 
 import time
@@ -15,9 +15,11 @@ import pytest
 from mbo_utilities import imread
 from mbo_utilities.arrays.features._summary_stats import SubsampleBudget
 from mbo_utilities.arrays.numpy import NumpyArray
+from mbo_utilities.gui import _stats
 from mbo_utilities.gui._dialogs import load_new_data
 from mbo_utilities.gui._ndviewer import VMINMAX_SAMPLE_COUNTS
 from mbo_utilities.gui.run_gui import _create_image_widget
+from mbo_utilities.gui.widgets import preview_data
 
 pytestmark = pytest.mark.critical
 
@@ -61,12 +63,17 @@ def of(reads, wanted) -> list[int]:
     return [n for k, n in reads if k == wanted]
 
 
-def wait_for_stats(iw, panel):
+def settle(iw, panel):
+    """Draw until no stats or mean image is computing."""
     deadline = time.time() + 60
-    while not all(panel._zstats_done) and time.time() < deadline:
+    while time.time() < deadline and (
+        any(panel._zstats_running) or panel.mean_image_progress() is not None
+    ):
         iw.figure.canvas.draw()
         time.sleep(0.02)
-    assert all(panel._zstats_done)
+    iw.figure.canvas.draw()
+    assert not any(panel._zstats_running)
+    assert panel.mean_image_progress() is None
 
 
 @pytest.fixture
@@ -80,7 +87,10 @@ def reads(monkeypatch):
 
 
 @pytest.fixture
-def viewer(tmp_path, reads):  # noqa: ARG001  reads records from the first frame on
+def viewer(request, tmp_path, monkeypatch, reads):  # noqa: ARG001  reads from the first frame on
+    on = getattr(request, "param", False)
+    monkeypatch.setattr(_stats, "signal_quality_enabled", lambda: on)
+    monkeypatch.setattr(preview_data, "signal_quality_enabled", lambda: on)
     data = np.random.default_rng(0).integers(0, 1000, SHAPE, dtype=np.int16)
     np.save(tmp_path / "movie.npy", data)
     np.save(tmp_path / "other.npy", data[: OTHER[0], :, : OTHER[2]])
@@ -96,17 +106,23 @@ def viewer(tmp_path, reads):  # noqa: ARG001  reads records from the first frame
 
 def test_opening_a_file_reads_one_frame_and_one_sample(viewer, reads):
     iw, panel = viewer
-    wait_for_stats(iw, panel)
+    settle(iw, panel)
     assert of(reads, "display") == [1]
     assert 0 < len(of(reads, "sample")) <= SAMPLE_FRAMES
-    # Signal Quality: one strided read per z-plane, within its budget
+    assert of(reads, "stats") == []
+
+
+@pytest.mark.parametrize("viewer", [True], indirect=True)
+def test_signal_quality_reads_its_budget_per_plane(viewer, reads):
+    iw, panel = viewer
+    settle(iw, panel)
     assert len(of(reads, "stats")) == SHAPE[2]
     assert max(of(reads, "stats")) <= STATS_FRAMES
 
 
 def test_a_slider_step_reads_one_frame(viewer, reads):
     iw, panel = viewer
-    wait_for_stats(iw, panel)
+    settle(iw, panel)
     reads.clear()
     steps = list(product(range(10, 15), range(SHAPE[2])))
     for t, z in steps:
@@ -116,7 +132,7 @@ def test_a_slider_step_reads_one_frame(viewer, reads):
 
 def test_a_window_reads_its_span_once_per_step(viewer, reads):
     iw, panel = viewer
-    wait_for_stats(iw, panel)
+    settle(iw, panel)
     iw.indices = [50, 0]
     reads.clear()
     panel.window_size = 5
@@ -129,9 +145,26 @@ def test_a_window_reads_its_span_once_per_step(viewer, reads):
     assert reads[-1] == ("display", 1)
 
 
+def test_mean_subtraction_reads_the_recording_once(viewer, reads):
+    iw, panel = viewer
+    settle(iw, panel)
+    reads.clear()
+    panel.mean_subtraction = True
+    settle(iw, panel)
+    # one pass over every frame for the mean, then the frame on screen again
+    assert sum(of(reads, "display")) == int(np.prod(SHAPE[:3])) + reads.count(
+        ("display", 1)
+    )
+    reads.clear()
+    panel.mean_subtraction = False
+    panel.mean_subtraction = True
+    settle(iw, panel)
+    assert set(reads) <= {("display", 1)}
+
+
 def test_contrast_from_the_frame_on_screen_reads_nothing(viewer, reads):
     iw, panel = viewer
-    wait_for_stats(iw, panel)
+    settle(iw, panel)
     reads.clear()
     iw.reset_vmin_vmax_frame()
     iw.figure.canvas.draw()
@@ -140,12 +173,11 @@ def test_contrast_from_the_frame_on_screen_reads_nothing(viewer, reads):
 
 def test_opening_another_file_reads_one_frame_and_one_sample(viewer, reads, tmp_path):
     iw, panel = viewer
-    wait_for_stats(iw, panel)
+    settle(iw, panel)
     panel.window_size = 5
     reads.clear()
     load_new_data(panel, str(tmp_path / "other.npy"))
-    wait_for_stats(iw, panel)
+    settle(iw, panel)
     assert of(reads, "display") == [1]
     assert 0 < len(of(reads, "sample")) <= SAMPLE_FRAMES
-    assert len(of(reads, "stats")) == OTHER[2]
-    assert max(of(reads, "stats")) <= STATS_FRAMES
+    assert of(reads, "stats") == []

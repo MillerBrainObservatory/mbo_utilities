@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui, imgui_ctx
 
+from mbo_utilities.gui._stats import signal_quality_enabled
+
 from . import BaseViewer
 
 if TYPE_CHECKING:
@@ -46,17 +48,18 @@ class TimeSeriesViewer(BaseViewer):
                     imgui.pop_style_var(2)
                 imgui.end_tab_item()
 
-            imgui.begin_disabled(not all(self.parent._zstats_done))
-            if imgui.begin_tab_item("Signal Quality")[0]:
-                imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
-                imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
-                try:
-                    with imgui_ctx.begin_child("##StatsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
-                        self.parent.draw_stats_section()
-                finally:
-                    imgui.pop_style_var(2)
-                imgui.end_tab_item()
-            imgui.end_disabled()
+            if signal_quality_enabled():
+                imgui.begin_disabled(not all(self.parent._zstats_done))
+                if imgui.begin_tab_item("Signal Quality")[0]:
+                    imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(8, 8))
+                    imgui.push_style_var(imgui.StyleVar_.frame_padding, imgui.ImVec2(4, 3))
+                    try:
+                        with imgui_ctx.begin_child("##StatsContent", imgui.ImVec2(0, 0), imgui.ChildFlags_.none):
+                            self.parent.draw_stats_section()
+                    finally:
+                        imgui.pop_style_var(2)
+                    imgui.end_tab_item()
+                imgui.end_disabled()
 
             if self._has_pipeline is None:
                 from mbo_utilities.gui.widgets.pipelines import any_pipeline_available

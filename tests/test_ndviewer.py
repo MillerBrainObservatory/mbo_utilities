@@ -1122,7 +1122,7 @@ class TestSidePanelShortcut:
         assert panel.size == width
         # let signal quality finish so its reads don't land in the next test
         deadline = time.time() + 60
-        while not all(panel._zstats_done) and time.time() < deadline:
+        while any(panel._zstats_running) and time.time() < deadline:
             iw.figure.canvas.draw()
             time.sleep(0.02)
         iw.close()

@@ -27,6 +27,8 @@ from mbo_utilities.preferences import (
     set_mem_monitor,
     get_mem_monitor_interval,
     set_mem_monitor_interval,
+    get_signal_quality,
+    set_signal_quality,
 )
 from mbo_utilities.gui._imgui_helpers import PopupAutoSize
 
@@ -282,6 +284,18 @@ def draw_options_popup(parent: Any) -> None:
             _mbo_log.set_global_level(
                 logging.DEBUG if new_debug else logging.INFO
             )
+
+        changed, on = imgui.checkbox("Signal Quality", get_signal_quality())
+        if imgui.is_item_hovered():
+            imgui.set_tooltip(
+                "Per-plane signal-quality stats, read from up to 30 frames per "
+                "plane when a file opens. Off, nothing is read for them."
+            )
+        if changed:
+            set_signal_quality(on)
+            start = getattr(parent, "start_zstats", None)
+            if on and start is not None:
+                start()
 
         changed, new_mem = imgui.checkbox("Log memory usage", parent._options_mem)
         if imgui.is_item_hovered():

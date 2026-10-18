@@ -12,10 +12,13 @@ import pytest
 from imgui_bundle import imgui
 
 from mbo_utilities import imread
+from mbo_utilities.gui import _stats
 from mbo_utilities.gui._colormaps import listed_name
 from mbo_utilities.gui._dialogs import load_new_data
 from mbo_utilities.gui._ndviewer import MboNDViewer
 from mbo_utilities.gui.run_gui import _create_image_widget
+from mbo_utilities.gui.viewers import time_series
+from mbo_utilities.gui.widgets import preview_data
 from mbo_utilities.gui.widgets.preview_data import PreviewDataWidget
 
 FIGURE = {"size": (1100, 760)}
@@ -52,7 +55,10 @@ def select_tab(real, wanted, label, p_open=None, flags=0):
 
 
 @pytest.fixture
-def viewer(tmp_path):
+def viewer(request, tmp_path, monkeypatch):
+    on = getattr(request, "param", False)
+    for module in (_stats, preview_data, time_series):
+        monkeypatch.setattr(module, "signal_quality_enabled", lambda: on)
     arr = imread(movie(tmp_path / "movie.npy", (12, 1, 3, 48, 64)))
     iw = _create_image_widget(arr, widget=True, figure_kwargs_override=FIGURE)
     panel = iw.figure.imgui_windows["right"]
@@ -123,6 +129,7 @@ def test_the_panels_popups_are_drawn_every_frame(viewer):
     assert errors.messages == []
 
 
+@pytest.mark.parametrize("viewer", [True], indirect=True)
 def test_the_signal_quality_tab_plots(viewer, monkeypatch):
     iw, panel, errors = viewer
     deadline = time.time() + 60
