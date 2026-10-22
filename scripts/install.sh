@@ -796,6 +796,9 @@ install_dev_environment() {
     # --reinstall rewrites files for all packages in the resolution, clobbering
     # stale transitive-dep files from prior installs (e.g. the mbo-fpl ->
     # mbo-fastplotlib rename where two packages owned overlapping modules).
+    # mbo-fastplotlib owned the `fastplotlib` module before the viewer moved to
+    # the official release; remove it first so the two never share that directory.
+    uv pip uninstall --python "$python_path" mbo-fastplotlib >/dev/null 2>&1 || true
     if uv pip install --python "$python_path" --reinstall "$full_spec"; then
         # GPU torch + cupy into the env, post-install (warns on failure).
         local torch_index=$(get_pytorch_index_url)

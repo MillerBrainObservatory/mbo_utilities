@@ -79,7 +79,7 @@ def _build_viewer(data_in: Path, size: tuple[int, int]):
         widget=True,
         figure_kwargs_override={"canvas": "offscreen", "size": size},
     )
-    gui = next((g for g in iw.figure.guis.values() if g is not None), None)
+    gui = iw.figure.imgui_windows["right"]
     return iw, gui
 
 

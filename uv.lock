@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12.7, <3.15"
 resolution-markers = [
     "(python_full_version >= '3.14' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform == 'win32')",
@@ -740,6 +740,27 @@ wheels = [
 ]
 
 [[package]]
+name = "fastplotlib"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cmap" },
+    { name = "numpy" },
+    { name = "pygfx" },
+    { name = "wgpu" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/88/9ce8cc41cde1d57ac6051dddaa0ea986437752b88caec8a19a6ccc85a63d/fastplotlib-0.7.0.tar.gz", hash = "sha256:6c77270ddb7480454c36384a4c178d5c12f1eccb37414ca547723f48a8361ac0", size = 305878, upload-time = "2026-09-24T01:08:38.666Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/68/ffed6fe5bd0d8af90128dd48033636b42d120d8aa7254cb014676f87c655/fastplotlib-0.7.0-py3-none-any.whl", hash = "sha256:a7af7c4ba06a296e5b517909f256a5a18e2ae58d191f5d8ea8ba28d686ea351d", size = 359653, upload-time = "2026-09-24T01:08:37.317Z" },
+]
+
+[package.optional-dependencies]
+imgui = [
+    { name = "imgui-bundle" },
+    { name = "wgpu", extra = ["imgui"] },
+]
+
+[[package]]
 name = "fastremap"
 version = "1.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1229,28 +1250,32 @@ wheels = [
 
 [[package]]
 name = "imgui-bundle"
-version = "1.92.5"
+version = "1.92.801"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/f9/8290be29e2fa5c3d7b431bd8c8144726a20ac82908cfb7fa8605911c6793/imgui_bundle-1.92.5.tar.gz", hash = "sha256:b11826b3805cff6064b8aca98def827ff36489128eac8d4f7859a3e155f6aefd", size = 41348284, upload-time = "2025-11-25T22:56:16.306Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/b9/4217165c5fa832dbe662c2d96f0810aa7280eb2cc3bcae2b7ac4260e3f08/imgui_bundle-1.92.801.tar.gz", hash = "sha256:7d790708affe7476969d397784b40eb91760a201ce752131e5bedf4d514e3a45", size = 48343289, upload-time = "2026-05-13T13:34:13.972Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/7e/2ac14f99a8464ffadc753b21047ef9932d2c74b4a3706dcaecaeff4fdc3e/imgui_bundle-1.92.5-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:6add8e3fd87e46e763c3ef471ff51f9ee31f59c82c4d97847945f339860d21f1", size = 12531659, upload-time = "2025-11-25T22:55:38.75Z" },
-    { url = "https://files.pythonhosted.org/packages/2b/12/1b05988231ccf5bcf1d391a9d0a29acd18b871ad24a7fe2c3ca9ca54c83a/imgui_bundle-1.92.5-cp312-cp312-macosx_14_0_x86_64.whl", hash = "sha256:b5f8d29a77cd0611aa4ccd445858fb255f0b8b34dbce0ea85a94dfd67f434607", size = 13230004, upload-time = "2025-11-25T22:55:40.98Z" },
-    { url = "https://files.pythonhosted.org/packages/19/2f/7b0bd3074fb906d668bc733641d7ff24729ebeeab7bbfbaeb4d6b5052890/imgui_bundle-1.92.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7d7dc7f0c090fc27cfdc5b055a235864f8d948d8de64dba42fdfd100b017d728", size = 22083759, upload-time = "2025-11-25T22:55:43.57Z" },
-    { url = "https://files.pythonhosted.org/packages/02/4c/c3f4f603c77fe696727c66b1c891bad477d2bf6dd615006eabf922ed03d6/imgui_bundle-1.92.5-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:adabaf188c44f03028fff08e28f0f09a09aeea0707665340b196a3d688136560", size = 23791248, upload-time = "2025-11-25T22:55:45.979Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/e1/ed6c166a42c71d1da03a47e93441e2cecc7405d377be1a54c4e87d42277c/imgui_bundle-1.92.5-cp312-cp312-win_amd64.whl", hash = "sha256:6012d907ccded2a0abacd4f361eb0b3ee4a4d37ab41be8cf05eb6f27d8ffe679", size = 34875065, upload-time = "2025-11-25T22:55:48.834Z" },
-    { url = "https://files.pythonhosted.org/packages/1c/9d/f490ac25d03bf3d914535ce95cfa5f390403fbc2519dd777e27f8ec0459a/imgui_bundle-1.92.5-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:16529e6ecaa7f7f6259361c6738a7e935eeaa0921fb9646db39d8acf7978529b", size = 12531996, upload-time = "2025-11-25T22:55:52.038Z" },
-    { url = "https://files.pythonhosted.org/packages/0a/1c/c3052f2d9c3958f6b22c248af349a01c5f4917e290734bbbffd37cc122ca/imgui_bundle-1.92.5-cp313-cp313-macosx_14_0_x86_64.whl", hash = "sha256:f369d2a76f877d5f1e0bd65b6942fff9461fcaab8027a080a811efe32121f999", size = 13229835, upload-time = "2025-11-25T22:55:54.417Z" },
-    { url = "https://files.pythonhosted.org/packages/e1/a7/ff3c10d708f543092fab73f553a86e9cd12cb70dd4461f28ecacf8becb97/imgui_bundle-1.92.5-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e9e4d1bf090294279ab3e3541a31cb47da98d22fb50cb9f05b07d4a8dbabdd48", size = 22083947, upload-time = "2025-11-25T22:55:57.078Z" },
-    { url = "https://files.pythonhosted.org/packages/68/16/ca4cba27f8952193947d30130e70da0a0fce87515e5b0bb8bc8e2eeee50e/imgui_bundle-1.92.5-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:eac798605e88dbdb717f02efc5371639d4c72f5f2ced08983b177230ea7f4a80", size = 23791259, upload-time = "2025-11-25T22:55:59.382Z" },
-    { url = "https://files.pythonhosted.org/packages/bd/e6/52a2731e43bc092040ed4fbf9a2438d3f03e4e6e592c1fcd567da5a94ef0/imgui_bundle-1.92.5-cp313-cp313-win_amd64.whl", hash = "sha256:d99f50f9f55e945f0c96b85db466cf46e0902adf8aef14c32f5966f930e6067d", size = 34874510, upload-time = "2025-11-25T22:56:02.224Z" },
-    { url = "https://files.pythonhosted.org/packages/00/1c/fb495669914483d81af938bf1968cf3b642a0432fa8086ec9d9ef2563e62/imgui_bundle-1.92.5-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:5c2c6f2adde152b2d35767886a83a4f5ab1f5076d89887c63ea77aadd4d4c787", size = 12534116, upload-time = "2025-11-25T22:56:04.706Z" },
-    { url = "https://files.pythonhosted.org/packages/23/a7/94063bfdd8a2d227aedb1893bb4bac3d1a8cfe0f50a93ce9040929015aa0/imgui_bundle-1.92.5-cp314-cp314-macosx_14_0_x86_64.whl", hash = "sha256:5ffc641ad8257e6ebb22ff3d507012cfcbb9d7ffb8d02afbe2c1649746d23303", size = 13233693, upload-time = "2025-11-25T22:56:06.738Z" },
-    { url = "https://files.pythonhosted.org/packages/64/26/9fc81b06590b145fe5f56c020febb01bf366851038f2992673b794ebf196/imgui_bundle-1.92.5-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8261ca81a6b0b4e287fe211d30f663efd4bd3bafb8a6cc6d8bd33234e008b6b9", size = 22084727, upload-time = "2025-11-25T22:56:08.903Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/8e/a2a9c6892987c9eb938abf51b65484a04f810d00ffd591c3ebd466d0b77b/imgui_bundle-1.92.5-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:8b30c64a398d11aa0e64bf41aa3d291abb2581265bff06bdfed84eff707bfc40", size = 23791655, upload-time = "2025-11-25T22:56:11.17Z" },
-    { url = "https://files.pythonhosted.org/packages/21/92/d3d7879b3819f99b78f3fa7557d92522eec8fe5790a53adae441b8bdfed5/imgui_bundle-1.92.5-cp314-cp314-win_amd64.whl", hash = "sha256:be17de926933fde550e27a6fb3253c1318c9f0a701977910ab51c9c356a65995", size = 35919254, upload-time = "2025-11-25T22:56:13.584Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/6e/6c3410fe48ff09e1a37d122e57177e1ea4a2eed0728f2650cb3f68cc2c84/imgui_bundle-1.92.801-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:bab99cc3f65febca9fdc58b62ebdd57a387ab5ae1b2923b9734ad23bfb5af8bd", size = 10160297, upload-time = "2026-05-13T13:33:09.037Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/fb/ade9538a47d8ace618cebd447de2d7c2c540a03eede908fb800f54ca9b76/imgui_bundle-1.92.801-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:a325c52ab7bf13db0be807c8bcdce333f6c8233ef230cdc2c216b42392e04f42", size = 12239382, upload-time = "2026-05-13T13:33:12.226Z" },
+    { url = "https://files.pythonhosted.org/packages/17/c4/4ff13f08b54c0acb804b549a130b9c35491be04aa333b8cd1cc5197d9738/imgui_bundle-1.92.801-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:236821210d1afad1db51a01a54149a346040866e288cf42429208693b63fc686", size = 13337854, upload-time = "2026-05-13T13:33:15.283Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/43/0429c1cd9b55912b67fa7dec8ce4bfeb18412a2a95e70f6e8449c93e241f/imgui_bundle-1.92.801-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:7ce5d9f5240fb37134d8f93bde3466d8b2dc1b7461166d8db7b4e88beeb9864a", size = 13292818, upload-time = "2026-05-13T13:33:18.461Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/51/ac98270731facf697f1dd867a8e5cec651651c487f1c8ceba888c695561b/imgui_bundle-1.92.801-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:bdba78cc0383648dbce5784131c7f3ebcf7c9be2114f33096c67d0987ed5ba2f", size = 14198585, upload-time = "2026-05-13T13:33:21.63Z" },
+    { url = "https://files.pythonhosted.org/packages/20/e8/2dd88ec1d8e4557b04b2393b545cbaa74138eaae03a394eb790ca19030cd/imgui_bundle-1.92.801-cp312-cp312-win_amd64.whl", hash = "sha256:266518a51510d5a37168a5ab156fb116424b141eb8fc21cbfd6f659b7245f40b", size = 11219820, upload-time = "2026-05-13T13:33:24.852Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/c8/2bef9dfab0a295bf95ca1104406e1337affd96b95749fc8da4dfd88844d8/imgui_bundle-1.92.801-cp312-cp312-win_arm64.whl", hash = "sha256:c199f36e85f2953ad1f618e18e68580b4c00dc8ec90a0d0823d22b1ee9a78621", size = 10730354, upload-time = "2026-05-13T13:33:27.697Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/2f/53d5919e489b4571d22317052a400d8fc41cfbda299bcea56d95ec0cf10e/imgui_bundle-1.92.801-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:8e68c07cd22ad1111305d9b6f941b7209114e88a0ad491c1fe026a1100d04f34", size = 10159870, upload-time = "2026-05-13T13:33:30.694Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/62/1792def915510f082d1db778b46ef65e5c1099e7e956f64408f87126a263/imgui_bundle-1.92.801-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:63297b62894236c3fc623113529a70cabce51ed8138e1a5f45d2f6d77507e70e", size = 12239091, upload-time = "2026-05-13T13:33:33.968Z" },
+    { url = "https://files.pythonhosted.org/packages/52/0e/63ed0e6f4305304442617b7885b4d51e01f1104a761ac44da8d0ccf919d6/imgui_bundle-1.92.801-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:9b6c04334446cbdc7b1875ceecb762485bc40e8341cd15c5406ba70346a5c6bb", size = 13338348, upload-time = "2026-05-13T13:33:37.263Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/d1/18d277fcc6cea9cd14cd3518446ab2d8fd1158327946cffef383f17bb949/imgui_bundle-1.92.801-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:1fae28d67b0b5cb59d618d8ff228d110b07d052c3304e190c02eb8578fe7852c", size = 13292470, upload-time = "2026-05-13T13:33:40.44Z" },
+    { url = "https://files.pythonhosted.org/packages/82/ec/8f6d373797c071527888c03fc20ddf4106e42e87cf5e61e43bfc0a50bcab/imgui_bundle-1.92.801-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5241038ceeeb6f0e8c869c5d70cf32c6a92e9fe037e18422e3cc4c242a586b96", size = 14198396, upload-time = "2026-05-13T13:33:43.546Z" },
+    { url = "https://files.pythonhosted.org/packages/02/44/32997bb445e132086e60d890c8d823312b479bb0a3dcff02403c2b6b5a92/imgui_bundle-1.92.801-cp313-cp313-win_amd64.whl", hash = "sha256:72d9760d82ec680450f0156232e15435eaaf6e14c5b6723dcf42ea4134bc505b", size = 11219721, upload-time = "2026-05-13T13:33:46.454Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/5c/00f3b34d260ffe5a8915fb188923f358e21621c9f4bf1f8a1d821e83490d/imgui_bundle-1.92.801-cp313-cp313-win_arm64.whl", hash = "sha256:1309ce1dcadab0f02d2a91d94895569fdca33baadbb530224d148884977c4e70", size = 10730090, upload-time = "2026-05-13T13:33:49.198Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/9e/482dcc3df4d8fcb46fbdbed52b055b5de07eab82d9bec0a1b3c5d280f7fd/imgui_bundle-1.92.801-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:1a13952a7420794666abafbbfadf0e755b6b18e0b677b7f3f744469b71066c73", size = 10162464, upload-time = "2026-05-13T13:33:52.194Z" },
+    { url = "https://files.pythonhosted.org/packages/29/93/470e3e9a71aeb1559c84651196e93678ccdf1729d5c6365051346a771356/imgui_bundle-1.92.801-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:57e7e3bc18ac4d93ae796cd6f403b82c0a28be105848376a70b3a7075385d91d", size = 12244332, upload-time = "2026-05-13T13:33:54.821Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/44/b9eb9da81b7dd74eaba8b39af07d8d95717c2b2e251b6c3475d8f95a6195/imgui_bundle-1.92.801-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:74a4ab84bc4336c9025c6c96033f44904a667a285ad188f31ca2c595f4fea1f0", size = 13339617, upload-time = "2026-05-13T13:33:57.848Z" },
+    { url = "https://files.pythonhosted.org/packages/82/55/fe08eec7a64989beb2e970a775e279b4d6ab11d113849a4fc60d56154766/imgui_bundle-1.92.801-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:5f56121d0ea45a92a291722ae235e8d8ad00eecf4afbbe5fa683b20dc4d077ed", size = 13297473, upload-time = "2026-05-13T13:34:00.843Z" },
+    { url = "https://files.pythonhosted.org/packages/70/00/cab90cfb276a7843091a92899f4ec1d8289daf8add6a48322cd7d6b20b2c/imgui_bundle-1.92.801-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:93e07d4623292b4cb8b0d7d62f5bc066d544c3d1f0902213c9713d9739e21ecf", size = 14199832, upload-time = "2026-05-13T13:34:03.852Z" },
+    { url = "https://files.pythonhosted.org/packages/82/f3/6c3d3e031169bc07244d212f2ba81c52d9d77e53c56881f2c738bbc9f5ff/imgui_bundle-1.92.801-cp314-cp314-pyemscripten_2026_0_wasm32.whl", hash = "sha256:dbfeb4dcd766d8622f76f0f115fe96021e02435dfc98539516de2af1c93f42ba", size = 4962249, upload-time = "2026-06-12T15:31:12.173Z" },
+    { url = "https://files.pythonhosted.org/packages/00/b9/5e625a50ff71773752e45145f39452bf2988dc6440089414941341b30bc1/imgui_bundle-1.92.801-cp314-cp314-win_amd64.whl", hash = "sha256:555d37df1fdde62d4d6bfaf985de90cbac6618358d65f1050d0a33269e88e230", size = 11384993, upload-time = "2026-05-13T13:34:06.62Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/4c/dbf7b4141694e4841450db778a8f68e98b2bde48d05e985e372cd3b21b06/imgui_bundle-1.92.801-cp314-cp314-win_arm64.whl", hash = "sha256:d0c73b38860996a7e6608d83e9d8d6a4d40f84968085583de58ecf89de479bd8", size = 10937072, upload-time = "2026-05-13T13:34:09.193Z" },
 ]
 
 [[package]]
@@ -2055,27 +2080,13 @@ wheels = [
 ]
 
 [[package]]
-name = "mbo-fastplotlib"
-version = "0.7.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cmap" },
-    { name = "numpy" },
-    { name = "pygfx" },
-    { name = "wgpu" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/f4/8b5e59a7efa88f703f0f898f3e64e73bdb98a78c9e2b31c384c1723b0070/mbo_fastplotlib-0.7.3.tar.gz", hash = "sha256:9ee6d2a4e65b11594ae1a31e966e79712f1720c3911fcb10b4a84f7d22af59fc", size = 169728, upload-time = "2025-12-17T15:49:07.08Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/e3/6d559cf03942af1931e00120e4b4dd68bac6ff8c03f33d04111bdf253579/mbo_fastplotlib-0.7.3-py3-none-any.whl", hash = "sha256:d1c6aa29b967ac2a628853dc11371cdc0248ad2fd6b66e7718745f7818b2f16d", size = 204649, upload-time = "2025-12-17T15:49:05.895Z" },
-]
-
-[[package]]
 name = "mbo-utilities"
 version = "3.3.4"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "dask" },
+    { name = "fastplotlib", extra = ["imgui"] },
     { name = "ffmpeg-python" },
     { name = "glfw", marker = "sys_platform != 'linux'" },
     { name = "h5py" },
@@ -2085,12 +2096,10 @@ dependencies = [
     { name = "imgui-bundle" },
     { name = "llvmlite" },
     { name = "matplotlib" },
-    { name = "mbo-fastplotlib" },
     { name = "numba" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "pandas" },
-    { name = "pygfx" },
     { name = "pyqt6", marker = "sys_platform == 'linux'" },
     { name = "pyqt6-sip", marker = "sys_platform == 'linux'" },
     { name = "rendercanvas" },
@@ -2223,13 +2232,14 @@ requires-dist = [
     { name = "click" },
     { name = "dask", specifier = ">=2025.3.0" },
     { name = "docutils", marker = "extra == 'docs'", specifier = ">=0.19" },
+    { name = "fastplotlib", extras = ["imgui"], specifier = ">=0.7.0,<0.8" },
     { name = "ffmpeg-python" },
     { name = "glfw", marker = "sys_platform != 'linux'" },
     { name = "h5py" },
     { name = "icecream", specifier = ">=2.1.4" },
     { name = "imagecodecs", specifier = ">=2026.6.6" },
     { name = "imageio", extras = ["ffmpeg"] },
-    { name = "imgui-bundle", specifier = "==1.92.5" },
+    { name = "imgui-bundle", specifier = ">=1.92.801,<1.92.900" },
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipykernel", marker = "extra == 'notebooks'" },
     { name = "ipywidgets", marker = "extra == 'notebooks'", specifier = ">=8.0.0,<9" },
@@ -2240,7 +2250,6 @@ requires-dist = [
     { name = "lbm-suite2p-python", marker = "extra == 'suite2p'", specifier = ">=3.3.1" },
     { name = "llvmlite", specifier = ">=0.43.0" },
     { name = "matplotlib", specifier = ">=3.10.1" },
-    { name = "mbo-fastplotlib", specifier = ">=0.7.3" },
     { name = "mbo-utilities", extras = ["suite2p", "napari", "notebooks", "isoview"], marker = "extra == 'all'" },
     { name = "mkl-fft", marker = "extra == 'suite2p'", specifier = ">=2.0.0" },
     { name = "myst-nb", marker = "extra == 'docs'" },
@@ -2253,7 +2262,6 @@ requires-dist = [
     { name = "numpydoc", marker = "extra == 'docs'" },
     { name = "opencv-python-headless" },
     { name = "pandas" },
-    { name = "pygfx", specifier = ">=0.15.2" },
     { name = "pygfx", marker = "extra == 'docs'", specifier = ">=0.14.0" },
     { name = "pyqt6", marker = "sys_platform == 'linux'", specifier = ">=6.7" },
     { name = "pyqt6", marker = "extra == 'napari'", specifier = ">=6.7" },
@@ -2264,7 +2272,7 @@ requires-dist = [
     { name = "qtpy", marker = "extra == 'napari'" },
     { name = "qtpy", marker = "extra == 'suite2p'" },
     { name = "rastermap", marker = "extra == 'suite2p'" },
-    { name = "rendercanvas", specifier = ">=2.4.2,<2.5" },
+    { name = "rendercanvas", specifier = ">=2.7.2" },
     { name = "scikit-image" },
     { name = "scipy" },
     { name = "seaborn", marker = "extra == 'notebooks'", specifier = ">=0.13.2" },
@@ -2288,7 +2296,7 @@ requires-dist = [
     { name = "torchvision", marker = "(sys_platform == 'linux' and extra == 'suite2p') or (sys_platform == 'win32' and extra == 'suite2p')", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torchvision", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'suite2p'" },
     { name = "tqdm" },
-    { name = "wgpu", specifier = ">=0.28.1,<0.29" },
+    { name = "wgpu", specifier = ">=0.30.1" },
     { name = "zarr", specifier = ">=3.1.3" },
 ]
 provides-extras = ["suite2p", "napari", "notebooks", "isoview", "docs", "all"]
@@ -3543,7 +3551,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/e1/70/c7a4f46dbf06048c6
 
 [[package]]
 name = "pygfx"
-version = "0.15.3"
+version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "freetype-py" },
@@ -3555,9 +3563,9 @@ dependencies = [
     { name = "uharfbuzz" },
     { name = "wgpu" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/ac/0cb5ed3e8fe2e4865cc6fa113cccac78c60e47d5e8774f24b1530029950d/pygfx-0.15.3.tar.gz", hash = "sha256:917d05b9a636c81af4754aeca50af8f95f6a29612c6341f64b5a8f069522edc3", size = 1137501, upload-time = "2025-11-14T09:54:37.419Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/53/cd5d8a4852c2209db6978d6d8d064e098958d74459ded659ff5c8d26c536/pygfx-0.17.0.tar.gz", hash = "sha256:97759f7e4e8a35b278dab04426fd1b89a32499b117035d3e6074f69990b31553", size = 1149585, upload-time = "2026-07-19T15:50:54.528Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/43/417fdd78aba02fc305c28eb355c8fc1b48c521c95f204b20a7ad32c3b5b3/pygfx-0.15.3-py3-none-any.whl", hash = "sha256:df1f1248a885db4674e3b099a4e8b5d853de360200a96005569945793ab916dd", size = 1219433, upload-time = "2025-11-14T09:54:34.975Z" },
+    { url = "https://files.pythonhosted.org/packages/20/c2/c3e1261089bc2368a33a617a37f9f31022961e6097fda6e6eea595d44da5/pygfx-0.17.0-py3-none-any.whl", hash = "sha256:cea9776c75e9925ed5ce9dd8890ee365644ad911919d79a7e8f8de843dc69f59", size = 1233312, upload-time = "2026-07-19T15:50:52.573Z" },
 ]
 
 [[package]]
@@ -3985,14 +3993,14 @@ wheels = [
 
 [[package]]
 name = "rendercanvas"
-version = "2.4.2"
+version = "2.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "sniffio" },
+    { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4e/44/e938d7d178c69159f88944c0d22a3dd1c68388e335e0033a3af94c2d3f2c/rendercanvas-2.4.2.tar.gz", hash = "sha256:21bdc6fdfc36de207a29497ac580ba4cd64de920bc46ecdafd29a8b689ad8601", size = 76273, upload-time = "2025-11-19T15:33:11.461Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/eb/b263fd2f1bbc3ebc6ce54d21e5a0b08f0dbb38dab6af08a37cf217cbfce7/rendercanvas-2.7.2.tar.gz", hash = "sha256:061507e379aefad390d066969bf3797f8d92f54c5943934dc43ab77d0f8bd690", size = 117944, upload-time = "2026-07-21T08:09:24.678Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/49/559e40b25b35c02c81bb9deb46914d8d1ba0012e1ab6100bbb63dac3b66e/rendercanvas-2.4.2-py3-none-any.whl", hash = "sha256:c7af9ae8ac86c79f8b773f19e9127fa2a5c901f605b07cf0fdfc460eaf6813df", size = 90251, upload-time = "2025-11-19T15:33:10.271Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/4e/492bc856902c7fa9e10e00e5f3136afc8890f37a5b838f4fc52847af100a/rendercanvas-2.7.2-py3-none-any.whl", hash = "sha256:0d98ca3f59fdf90c2601b6162f239d3beeced64d27d44bacb15c4253b21c4784", size = 138119, upload-time = "2026-07-21T08:09:23.376Z" },
 ]
 
 [[package]]
@@ -4401,15 +4409,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
-]
-
-[[package]]
-name = "sniffio"
-version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
 ]
 
 [[package]]
@@ -5182,23 +5181,27 @@ wheels = [
 
 [[package]]
 name = "wgpu"
-version = "0.28.1"
+version = "0.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cffi" },
     { name = "rendercanvas" },
     { name = "rubicon-objc", marker = "sys_platform == 'darwin'" },
-    { name = "sniffio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b0/06/1cc3dde2f7aa0cae599d1e54f383b83acaf6a84a6a033663cbc39f864df0/wgpu-0.28.1.tar.gz", hash = "sha256:4393962cba6b22ecc93b5709acddfad17b03fce9495d43729705ea882f694af1", size = 156923, upload-time = "2025-11-14T09:31:47.394Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/60/52/b7d5ef9c29bbb9f4e40bff9a5027482857fb225f962acec9c5bb6a2d4e44/wgpu-0.32.0.tar.gz", hash = "sha256:cb23b2f225594258ccc8ba97458381e46c18e561c5d2d6fc25213e68a6d89985", size = 197152, upload-time = "2026-07-19T14:53:00.792Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/17/9d8c96639ddbac16f60030684d0f54ebbc457c0bc6dac0e58552ef57e871/wgpu-0.28.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:4a529ffe0fc8aa3f6499c959ac677f06b1ead686a97f9867cdf57da93a82a44b", size = 2834274, upload-time = "2025-11-14T09:31:32.038Z" },
-    { url = "https://files.pythonhosted.org/packages/1b/20/603383d47c2116c952e0c9aa65072f5451843b14c52d7dfd02e674ec4a29/wgpu-0.28.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:a78b16e54354e468b73b68e075e9c268fc288bb0b1cfcf9d00454748eb38800e", size = 2715097, upload-time = "2025-11-14T09:31:34.765Z" },
-    { url = "https://files.pythonhosted.org/packages/06/bc/7f30c1b91b3e67dff5dfd7f1b156b3e1cb567ff7ac48adc08bebd7bcef6c/wgpu-0.28.1-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:73c9211900b08e24db2f1d2dfcda7ff15a370de77af22d1129260ba1e6f5265c", size = 3436123, upload-time = "2025-11-14T09:31:36.74Z" },
-    { url = "https://files.pythonhosted.org/packages/81/a9/1a4a64a1f034e86d9f17cff5de9b1af3efb5b5618cf8f321ae24f5fa15c6/wgpu-0.28.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:1ec39c34d0f13a6687a4c4ba3f6fbba07f791cb6746ed6bfad0b118ff2f7d0f3", size = 3442478, upload-time = "2025-11-14T09:31:38.505Z" },
-    { url = "https://files.pythonhosted.org/packages/cf/d7/12e68f9236bb5c213dbff3a35a1a5d3e9e4e7120c1a5d52c9911cab3cdbe/wgpu-0.28.1-py3-none-win32.whl", hash = "sha256:c87c92f993af45a01bfe5c122f376267060b61c52ab6aa00a9fc9b9c9fe64786", size = 3087157, upload-time = "2025-11-14T09:31:40.12Z" },
-    { url = "https://files.pythonhosted.org/packages/13/df/921bf6a5fb977047b279870fc8d2c670e5c6221cb7a19a39bbfe440cbc3d/wgpu-0.28.1-py3-none-win_amd64.whl", hash = "sha256:8beddf015e27b714a4c42cdfef67dcac8d2897b5fe9d29032a5b1404c1748a2a", size = 3304834, upload-time = "2025-11-14T09:31:42.265Z" },
-    { url = "https://files.pythonhosted.org/packages/e6/4a/de0b0c6f6ff6f2205a049a1d10acc692caf817c1e3138ddc184d51911aa0/wgpu-0.28.1-py3-none-win_arm64.whl", hash = "sha256:c0df0b356036ab6ba54940cf360280886b5b831cfce7f4143d31dc3c41d97736", size = 3091126, upload-time = "2025-11-14T09:31:45.358Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/4b/173e7685a22edf2d33ed330a038c8859d2c62bff900eb637a702661333ff/wgpu-0.32.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:cfd3967616a3c42e2b7a234407df38668c697f5aa505d56e0814d647b6746302", size = 2944358, upload-time = "2026-07-19T14:52:48.745Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/3b/a21ac5d2c5fcc13c2709123f497f5e008726221c56dc83ba0850fc2d230d/wgpu-0.32.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:6c3f654ea01ab2de8a2903354ced02a3c6ef161d0fba1aa4fea60aa86d021908", size = 2838856, upload-time = "2026-07-19T14:52:50.92Z" },
+    { url = "https://files.pythonhosted.org/packages/40/52/36819230b805b07fc4c3e92242aba7b73a0ce25e03b124992af79a6b1d4d/wgpu-0.32.0-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:00454ba1bc794d38c8365f4ad29f381b88ce0a7f115133bfaa6f1dfad7eb2764", size = 3504842, upload-time = "2026-07-19T14:52:52.568Z" },
+    { url = "https://files.pythonhosted.org/packages/99/a9/8b00e9d0cbd1ec0766e5b3c8063e61f0335262afe07cef82c307899bcf01/wgpu-0.32.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:6499a31b5a29a10b4f1089fea4a0806411f42605fa86b6c0b543a07ca0de8568", size = 3499105, upload-time = "2026-07-19T14:52:54.264Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/a8/fca88e53ef7439bbb01d58c33e722508af19d762b9f8bf8810e208882af6/wgpu-0.32.0-py3-none-win32.whl", hash = "sha256:d51a17dbbeb37ef20d1c900d7c51bc71abba145792ad428763666a1bb91cf986", size = 3272433, upload-time = "2026-07-19T14:52:55.907Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/5a/92d8ebd91d2e6e772a4d90656231472a8dad6ab050174336510fa9dff978/wgpu-0.32.0-py3-none-win_amd64.whl", hash = "sha256:493c8a0425c7d3cc728a2489bce40d1a016d800306e59763ff1b21e176e66323", size = 3457977, upload-time = "2026-07-19T14:52:57.648Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/16/4b097baac7c8d6e013e67f1483d100847b9ea350eb393c301a28a95c4bd5/wgpu-0.32.0-py3-none-win_arm64.whl", hash = "sha256:cb0414107825bd94538220cf3f329c83697b99b8e39c6e16e4e6726e427de75c", size = 3264513, upload-time = "2026-07-19T14:52:59.126Z" },
+]
+
+[package.optional-dependencies]
+imgui = [
+    { name = "imgui-bundle" },
 ]
 
 [[package]]

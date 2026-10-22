@@ -818,6 +818,11 @@ function Install-DevEnvironment {
         # napari/app-model/vispy version-skew where the lockfile version
         # differs from what's already on disk. for a "refresh" flow we
         # want every file rewritten to match the current resolution.
+        #
+        # mbo-fastplotlib owned the `fastplotlib` module before the viewer
+        # moved to the official release; remove it first so the two never
+        # share that directory.
+        uv pip uninstall --python $pythonPath mbo-fastplotlib 2>&1 | Out-Null
         uv pip install --python $pythonPath --reinstall $fullSpec 2>&1 | ForEach-Object { Write-Host $_ }
 
         if ($LASTEXITCODE -ne 0) {

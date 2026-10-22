@@ -20,6 +20,7 @@ import numpy as np
 import tifffile
 from imgui_bundle import imgui, portable_file_dialogs as pfd
 
+from mbo_utilities.gui._colormaps import listed_name
 from mbo_utilities.gui._imgui_helpers import (
     button_width,
     draw_toolbar_row,
@@ -206,7 +207,7 @@ class ProjectionsViewer(Widget):
         if not graphics:
             return
         try:
-            cmap_name = str(graphics[0].cmap)
+            cmap_name = listed_name(graphics[0].cmap)
         except Exception:
             return
         if not cmap_name:

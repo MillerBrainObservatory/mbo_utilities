@@ -9,8 +9,13 @@ Usage:
     KEEP_TEST_OUTPUT=1 pytest tests/    # Keep output files for inspection
 """
 
+import os
 import shutil
 from pathlib import Path
+
+# the viewer tests draw on an offscreen canvas; rendercanvas picks its backend
+# on first import, so this must be set before any test imports fastplotlib
+os.environ.setdefault("RENDERCANVAS_FORCE_OFFSCREEN", "1")
 
 import numpy as np
 import pytest

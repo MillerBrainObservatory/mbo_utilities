@@ -765,6 +765,6 @@ def _draw_view_preview(
     rect_p0 = imgui.ImVec2(p0.x + x0 * sx, p0.y + y0 * sy)
     rect_p1 = imgui.ImVec2(p0.x + x1 * sx, p0.y + y1 * sy)
     col = imgui.get_color_u32(imgui.ImVec4(*color))
-    draw_list.add_rect(rect_p0, rect_p1, col, 0.0, 0, 2.0)
+    draw_list.add_rect(rect_p0, rect_p1, col, 0.0, 2.0)
 
     imgui.dummy(imgui.ImVec2(disp_w, disp_h))

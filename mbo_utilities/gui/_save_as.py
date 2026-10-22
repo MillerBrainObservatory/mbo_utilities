@@ -19,6 +19,7 @@ from mbo_utilities.metadata import get_param
 from mbo_utilities.arrays import _sanitize_suffix
 from mbo_utilities.arrays.features import DimensionTag, TAG_REGISTRY, parse_timepoint_selection, TimeSelection
 from mbo_utilities.preferences import get_last_dir, set_last_dir
+from mbo_utilities.gui._colormaps import listed_name
 from mbo_utilities.gui._imgui_helpers import (
     PopupAutoSize,
     set_tooltip,
@@ -550,10 +551,9 @@ def _preview_fps(parent: Any) -> float | None:
 
 def _preview_cmap(parent: Any) -> str | None:
     try:
-        c = str(parent.image_widget.graphics[0].cmap or "")
+        return listed_name(parent.image_widget.graphics[0].cmap)
     except Exception:
         return None
-    return c or None
 
 
 def _preview_vmin_vmax(parent: Any) -> tuple[float, float] | None:
@@ -622,49 +622,23 @@ def _sync_video_options_from_preview(parent: Any) -> None:
 
 
 def _write_mean_subtract_stack(parent: Any) -> str | None:
-    """If mean-subtract is enabled and zstats are computed, write a (C, Z, Y, X)
-    npy file and return its path. Returns None if not applicable / unavailable.
-
-    ``_zstats_means[i]`` is a dict keyed by the breakout-combo tuple; this
-    writer picks the combo currently shown in the stats tab (which follows
-    the sliders) so the saved stack matches what the user sees in the GUI.
+    """Write the viewer's (C, Z, Y, X) mean image to a temp .npy for the video
+    writer and return its path; None when off or still computing.
     """
     if not getattr(parent, "_saveas_video_mean_subtract", False):
         return None
-    means = getattr(parent, "_zstats_means", None)
-    done = getattr(parent, "_zstats_done", None)
-    if not means or not done:
+    mean = parent._mean_image(0)
+    if mean is None:
         return None
-    import numpy as np
+    import os
     import tempfile
 
-    from mbo_utilities.gui._stats import current_breakout_key
+    import numpy as np
 
-    stacks = []
-    for i in range(getattr(parent, "num_graphics", len(means))):
-        if i >= len(done) or not done[i]:
-            return None
-        slot = means[i]
-        if not isinstance(slot, dict) or not slot:
-            return None
-        arr = slot.get(current_breakout_key(parent, i))
-        if arr is None:
-            arr = slot.get(())
-        if arr is None:
-            arr = next(iter(slot.values()))
-        if arr is None:
-            return None
-        stacks.append(np.asarray(arr, dtype=np.float32))
-    if not stacks:
-        return None
-    stack = np.stack(stacks, axis=0)  # (C, Z, Y, X)
     fd, path = tempfile.mkstemp(prefix="mbo_meansub_", suffix=".npy")
-    import os
     os.close(fd)
-    np.save(path, stack)
+    np.save(path, mean)
     return path
-
-
 
 
 def _draw_video_options(parent: Any):
@@ -740,12 +714,14 @@ def _draw_video_options(parent: Any):
         set_tooltip("Max intensity value (clipped to white).")
 
     imgui.spacing()
-    _, parent._saveas_video_mean_subtract = imgui.checkbox(
+    changed, parent._saveas_video_mean_subtract = imgui.checkbox(
         "Mean subtract", parent._saveas_video_mean_subtract
     )
+    if changed and parent._saveas_video_mean_subtract:
+        parent._mean_image(0)
     set_tooltip(
-        "Subtract the per-(channel, plane) mean image from every frame before "
-        "contrast scaling. Requires z-stats to be computed."
+        "Subtract each pixel's mean over the recording from every frame before "
+        "contrast scaling (the viewer's Mean Subtraction image)."
     )
 
     _, parent._saveas_video_time_overlay = imgui.checkbox(
@@ -1357,7 +1333,7 @@ def _draw_save_button(parent: Any):
                         save_kwargs["mean_subtract_path"] = mean_sub_path
                     elif parent._saveas_video_mean_subtract:
                         parent.logger.warning(
-                            "Mean subtract enabled but z-stats not computed — skipping."
+                            "Mean subtract on but the mean image is still computing; skipping."
                         )
 
                 n_frames = len(frames) if frames else max_timepoints
@@ -1414,7 +1390,7 @@ def _draw_save_button(parent: Any):
                             video_kwargs["mean_subtract_path"] = mean_sub_path
                         elif parent._saveas_video_mean_subtract:
                             parent.logger.warning(
-                                "Mean subtract enabled but z-stats not computed — skipping."
+                                "Mean subtract on but the mean image is still computing; skipping."
                             )
 
                     worker_args = {

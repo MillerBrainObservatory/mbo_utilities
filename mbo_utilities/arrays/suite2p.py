@@ -892,7 +892,7 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         )
 
     def imshow(self, **kwargs):
-        """Display array using fastplotlib ImageWidget."""
+        """Display the array in the viewer (fastplotlib NDWidget)."""
         arrays = []
         names = []
 
@@ -944,9 +944,9 @@ class Suite2pArray(ReductionMixin, Shape5DMixin):
         histogram_widget = kwargs.get("histogram_widget", True)
         window_funcs = kwargs.get("window_funcs")
 
-        import fastplotlib as fpl
+        from mbo_utilities.gui._ndviewer import MboNDViewer
 
-        return fpl.ImageWidget(
+        return MboNDViewer(
             data=arrays,
             names=names,
             histogram_widget=histogram_widget,

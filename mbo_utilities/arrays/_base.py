@@ -691,6 +691,28 @@ def _imwrite_base(
     return outpath
 
 
+def temporal_mean(arr, progress_callback=None) -> np.ndarray:
+    """``arr``'s per-pixel mean over T as ``(C, Z, Y, X)`` float32.
+
+    Uses the array's own ``temporal_mean`` when it has one (a reader that can
+    read its source in one pass, like `MescArray`), else streams T blocks.
+    """
+    own = getattr(arr, "temporal_mean", None)
+    if own is not None:
+        return own(progress_callback=progress_callback)
+    nt, nc, nz, ny, nx = arr._shape5d() if hasattr(arr, "_shape5d") else arr.shape
+    frame_bytes = nc * nz * ny * nx * np.dtype(arr.dtype).itemsize
+    step = max(1, (64 * 1024 * 1024) // max(1, frame_bytes))
+    acc = np.zeros((nc, nz, ny, nx), dtype=np.float64)
+    for t0 in range(0, nt, step):
+        t1 = min(t0 + step, nt)
+        block = np.asarray(arr[t0:t1]).reshape(t1 - t0, nc, nz, ny, nx)
+        acc += block.sum(axis=0, dtype=np.float64)
+        if progress_callback is not None:
+            progress_callback(t1 / nt)
+    return (acc / max(nt, 1)).astype(np.float32)
+
+
 class TiffReaderMixin:
     """
     Mixin providing common functionality for all TIFF array readers.
@@ -766,13 +788,13 @@ class TiffReaderMixin:
         return self._imwrite(outpath, **kwargs)
 
     def imshow(self, **kwargs):
-        """Display array using fastplotlib ImageWidget."""
-        import fastplotlib as fpl
+        """Display the array in the viewer (fastplotlib NDWidget)."""
+        from mbo_utilities.gui._ndviewer import MboNDViewer
 
         histogram_widget = kwargs.get("histogram_widget", True)
         figure_kwargs = kwargs.get("figure_kwargs", {"size": (800, 1000)})
         window_funcs = kwargs.get("window_funcs")
-        return fpl.ImageWidget(
+        return MboNDViewer(
             data=self,
             cmap="gnuplot2",
             histogram_widget=histogram_widget,

@@ -1477,7 +1477,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, PhaseCorr
         return self._metadata.get("page_width")
 
     def imshow(self, **kwargs):
-        import fastplotlib as fpl
+        from mbo_utilities.gui._ndviewer import MboNDViewer
 
         arrays = []
         names = []
@@ -1500,7 +1500,7 @@ class ScanImageArray(TiffReaderMixin, RoiFeatureMixin, ReductionMixin, PhaseCorr
         sample_frame = arrays[0][0]
         vmin, vmax = float(sample_frame.min()), float(sample_frame.max())
 
-        return fpl.ImageWidget(
+        return MboNDViewer(
             data=arrays,
             names=names,
             histogram_widget=histogram_widget,

@@ -456,6 +456,16 @@ def set_debug_logging(enabled: bool) -> None:
     _set_option("debug_logging", bool(enabled))
 
 
+def get_signal_quality() -> bool:
+    """Return whether Signal Quality's stats are computed (default False)."""
+    return bool(_get_options().get("signal_quality", False))
+
+
+def set_signal_quality(enabled: bool) -> None:
+    """Persist whether Signal Quality's stats are computed."""
+    _set_option("signal_quality", bool(enabled))
+
+
 def get_mem_monitor() -> bool:
     """Return the persisted memory-monitor flag (default False)."""
     return bool(_get_options().get("mem_monitor", False))

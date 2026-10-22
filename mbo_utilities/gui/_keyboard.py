@@ -74,8 +74,7 @@ def handle_keyboard_shortcuts(parent: Any):
         toggle_side_panel(parent)
 
     # space is handled via the renderer-level handler installed by
-    # rebind_space_to_playback; fpl's ImguiFigure registers its own
-    # space=collapse handler which our imgui-layer shortcut can't intercept.
+    # rebind_space_to_playback
 
     # v: reset vmin/vmax (no modifiers)
     if not io.key_ctrl and not io.key_shift and imgui.is_key_pressed(imgui.Key.v, False):
@@ -124,46 +123,58 @@ def handle_keyboard_shortcuts(parent: Any):
 
 
 def _get_sliders_ui(parent: Any):
-    """Return fpl's ImageWidgetSliders instance, or None."""
-    iw = getattr(parent, "image_widget", None)
-    if iw is None:
-        return None
-    sliders = getattr(iw, "_sliders_ui", None)
-    if sliders is not None:
-        return sliders
-    figure = getattr(iw, "figure", None)
-    guis = getattr(figure, "guis", None) or {}
-    for gui in (guis.values() if hasattr(guis, "values") else guis):
-        if gui is not None and gui.__class__.__name__ == "ImageWidgetSliders":
-            return gui
-    return None
+    """The viewer's playback-bar adapter, or None."""
+    return getattr(getattr(parent, "image_widget", None), "_sliders_ui", None)
 
 
 def toggle_playback(parent: Any, dim_index: int = 0) -> None:
-    """Toggle play/pause on the given slider dim (default T=0) via fpl's sliders widget."""
+    """Toggle play/pause on the given slider dim (default 0 = T).
+
+    Playback state is keyed by dim name; ``dim_index`` is resolved to a
+    name by iterating the playing mapping (slider order), falling back to
+    ``iw.slider_dims`` when that mapping is still unpopulated.
+    """
     sliders = _get_sliders_ui(parent)
     if sliders is None or not hasattr(sliders, "_playing"):
         return
     playing = sliders._playing
-    if dim_index >= len(playing):
+    try:
+        dims = list(playing)
+    except TypeError:
+        dims = []
+    if dim_index >= len(dims):
+        iw = getattr(parent, "image_widget", None)
+        dims = list(getattr(iw, "slider_dims", None) or ())
+    if not 0 <= dim_index < len(dims):
         return
-    playing[dim_index] = not playing[dim_index]
-    if hasattr(sliders, "_last_frame_time") and dim_index < len(sliders._last_frame_time):
-        sliders._last_frame_time[dim_index] = 0
-    state = "PLAY" if playing[dim_index] else "PAUSE"
+    dim = dims[dim_index]
+    try:
+        playing[dim] = not playing[dim]
+    except (KeyError, IndexError):
+        return
+    last = getattr(sliders, "_last_frame_time", None)
+    if last is not None:
+        with contextlib.suppress(Exception):
+            last[dim] = 0
+    state = "PLAY" if playing[dim] else "PAUSE"
     parent.logger.info(f"Shortcut: 'Space' ({state})")
 
 
 def toggle_side_panel(parent: Any) -> None:
     """Toggle collapse state of the side panel."""
-    with contextlib.suppress(Exception):
-        parent.collapsed = not parent.collapsed
-        parent.logger.info("Shortcut: collapse toggled")
+    # fastplotlib's collapsed flag doesn't resize; shrink to the separator like a double-click
+    if parent.collapsed:
+        parent.size = parent._old_size
+        parent.collapsed = False
+    else:
+        parent._old_size = parent.size
+        parent.size = int(parent._separator_thickness)
+        parent.collapsed = True
+    parent.logger.info("Shortcut: collapse toggled")
 
 
 def rebind_space_to_playback(parent: Any) -> None:
-    """Remove fpl's built-in space=collapse-right-gui handler and install our
-    own space=play/pause handler on the renderer. Idempotent."""
+    """Install the space=play/pause handler on the renderer. Idempotent."""
     if getattr(parent, "_space_rebound", False):
         return
     try:
@@ -171,10 +182,6 @@ def rebind_space_to_playback(parent: Any) -> None:
         renderer = figure.renderer
     except Exception:
         return
-
-    # remove fpl's bound method handler that toggles right-gui collapse on space
-    with contextlib.suppress(Exception):
-        renderer.remove_event_handler(figure._toggle_right_gui_collapse, "key_down")
 
     # debounce to suppress OS key-repeat and any duplicate dispatch
     parent._last_space_time = 0.0

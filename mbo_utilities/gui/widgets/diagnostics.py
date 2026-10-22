@@ -654,9 +654,10 @@ class DiagnosticsWidget:
             # Draw threshold line
             threshold_x = np.array([current_val, current_val], dtype=np.float64)
             threshold_y = np.array([0, np.max(counts) * 1.1], dtype=np.float64)
-            implot.push_style_color(implot.Col_.line, imgui.ImVec4(1.0, 0.3, 0.3, 1.0))
-            implot.plot_line("threshold", threshold_x, threshold_y)
-            implot.pop_style_color()
+            implot.plot_line(
+                "threshold", threshold_x, threshold_y,
+                implot.Spec(line_color=imgui.ImVec4(1.0, 0.3, 0.3, 1.0)),
+            )
 
             # Draw shaded region for excluded values
             if is_min_filter:
@@ -666,9 +667,10 @@ class DiagnosticsWidget:
                 # Shade right of threshold (excluded)
                 shade_x = np.array([current_val, hist_max, hist_max, current_val], dtype=np.float64)
             shade_y = np.array([0, 0, np.max(counts) * 1.1, np.max(counts) * 1.1], dtype=np.float64)
-            implot.push_style_color(implot.Col_.fill, imgui.ImVec4(1.0, 0.3, 0.3, 0.2))
-            implot.plot_shaded("excluded", shade_x[:2], shade_y[:2], shade_y[2:4])
-            implot.pop_style_color()
+            implot.plot_shaded(
+                "excluded", shade_x[:2], shade_y[:2], shade_y[2:4],
+                implot.Spec(fill_color=imgui.ImVec4(1.0, 0.3, 0.3, 0.2)),
+            )
 
             implot.end_plot()
 

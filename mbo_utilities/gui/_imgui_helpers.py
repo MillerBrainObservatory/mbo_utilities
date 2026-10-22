@@ -150,7 +150,6 @@ def draw_boxed_label(
             ImVec2(origin.x + box_w, origin.y + box_h),
             col,
             rounding,
-            0,
             thickness,
         )
         draw_list.add_text(
@@ -357,10 +356,6 @@ def style_seaborn_dark():
         if col is not None:
             style.set_color_(col.value, color)
 
-    # auto colors for lines and markers
-    for attr in ("line", "fill", "marker_outline", "marker_fill"):
-        _set(attr, implot.AUTO_COL)
-
     # backgrounds and axes
     _set("frame_bg", ImVec4(0.15, 0.17, 0.2, 1.00))
     _set("plot_bg", ImVec4(0.13, 0.15, 0.18, 1.00))
@@ -377,21 +372,11 @@ def style_seaborn_dark():
     _set("title_text", ImVec4(1.0, 1.0, 1.0, 1.00))
     _set("inlay_text", ImVec4(0.9, 0.9, 0.9, 1.00))
 
-    # Misc
-    style.set_color_(implot.Col_.error_bar.value, ImVec4(0.9, 0.9, 0.9, 1.00))
-    style.set_color_(implot.Col_.selection.value, ImVec4(1.00, 0.65, 0.00, 1.00))
-    style.set_color_(implot.Col_.crosshairs.value, ImVec4(0.8, 0.8, 0.8, 0.5))
+    # misc; line, fill, marker and error-bar style is per item now, passed
+    # to each plot call as an implot.Spec
+    _set("selection", ImVec4(1.00, 0.65, 0.00, 1.00))
+    _set("crosshairs", ImVec4(0.8, 0.8, 0.8, 0.5))
 
-    # Sizes
-    style.line_weight = 1.5
-    style.marker = implot.Marker_.none.value
-    style.marker_size = 4
-    style.marker_weight = 1
-    style.fill_alpha = 1.0
-    style.error_bar_size = 5
-    style.error_bar_weight = 1.5
-    style.digital_bit_height = 8
-    style.digital_bit_gap = 4
     style.plot_border_size = 0
     style.minor_alpha = 0.3
     style.major_tick_len = ImVec2(0, 0)

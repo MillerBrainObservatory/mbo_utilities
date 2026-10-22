@@ -16,6 +16,7 @@ The widget uses modular components:
 - _stats.py: Z-stats computation and display
 """
 
+import functools
 import logging
 import threading
 from pathlib import Path
@@ -47,6 +48,7 @@ from mbo_utilities.reader import MBO_AVAILABLE_FTYPES
 from mbo_utilities.arrays.features import PhaseCorrectionFeature
 from mbo_utilities.preferences import get_last_dir
 from mbo_utilities.arrays import ScanImageArray
+from mbo_utilities.arrays._base import temporal_mean
 from mbo_utilities.gui._availability import HAS_SUITE2P
 from mbo_utilities.gui._imgui_helpers import push_font_safe
 from mbo_utilities.gui.widgets.gui_logger import GuiLogger, GuiLogHandler
@@ -65,14 +67,15 @@ from mbo_utilities.gui._stats import (
     draw_stats_section,
     hydrate_zstats,
     refresh_zstats,
+    signal_quality_enabled,
 )
 from mbo_utilities.gui._help_viewer import draw_help_popup
 from mbo_utilities.gui._metadata_editor import draw_metadata_popup
 from mbo_utilities.gui._options_popup import draw_options_popup
 
 
-import fastplotlib as fpl
-from fastplotlib.ui import EdgeWindow
+from mbo_utilities.gui._edge_window import EdgeWindow
+from mbo_utilities.gui._ndviewer import MboNDViewer
 import contextlib
 
 __all__ = ["PreviewDataWidget"]
@@ -142,6 +145,25 @@ def _derive_suite2p_output_dir(fpath) -> str | None:
     return None
 
 
+def _base_5d(arr):
+    """Peel the viewer's display wrappers back to the 5D array."""
+    from mbo_utilities.gui.run_gui import _ScrubTimingProxy, _SqueezeSingletonDims
+
+    while True:
+        if isinstance(arr, _ScrubTimingProxy):
+            arr = arr._wrapped
+        elif isinstance(arr, _SqueezeSingletonDims):
+            arr = arr._arr
+        else:
+            return arr
+
+
+def _mean_key(arr) -> tuple:
+    """The read state a temporal mean depends on besides the array itself."""
+    pc = getattr(arr, "phase_correction", None)
+    return getattr(arr, "fix_phase", None), getattr(pc, "effective_shift", None)
+
+
 class PreviewDataWidget(EdgeWindow):
     """
     Main GUI widget for data preview and processing.
@@ -154,8 +176,8 @@ class PreviewDataWidget(EdgeWindow):
 
     Parameters
     ----------
-    iw : fastplotlib.ImageWidget
-        The ImageWidget to attach to.
+    iw : MboNDViewer
+        The viewer to attach to.
     fpath : str | list | None
         Path(s) to the data file(s).
     threading_enabled : bool
@@ -168,7 +190,7 @@ class PreviewDataWidget(EdgeWindow):
 
     def __init__(
         self,
-        iw: fpl.ImageWidget,
+        iw: MboNDViewer,
         fpath: str | None | list = None,
         threading_enabled: bool = True,
         size: int | None = None,
@@ -196,7 +218,8 @@ class PreviewDataWidget(EdgeWindow):
             figure=iw.figure,
             size=250 if size is None else size,
             location=location,
-            title=title,
+            # fastplotlib draws a title row for an edge window that has a title
+            title=title if show_title else None,
             window_flags=flags,
         )
 
@@ -257,18 +280,23 @@ class PreviewDataWidget(EdgeWindow):
         # Initialize viewer
         self._init_viewer()
 
-        # Hydrate cached stats from disk first; only compute the arrays that
-        # had no valid cache (recompute on shape/dims/series mismatch).
-        # compute_zstats runs its own single background worker, so call it
-        # directly (no extra wrapper thread).
         if threading_enabled:
-            hydrated = hydrate_zstats(self)
-            pending = [i for i in range(self.num_graphics) if not hydrated[i]]
-            if pending:
-                self.logger.debug(f"Starting zstats computation for {len(pending)} array(s)...")
-                for i in pending:
-                    self._zstats_running[i] = True
-                compute_zstats(self, only=pending)
+            self.start_zstats()
+
+    def start_zstats(self) -> None:
+        """Load cached z-stats and compute the rest, when Signal Quality is on."""
+        if not signal_quality_enabled():
+            return
+        hydrated = hydrate_zstats(self)
+        pending = [
+            i for i in range(self.num_graphics)
+            if not hydrated[i] and not self._zstats_running[i]
+        ]
+        if pending:
+            self.logger.debug(f"Starting zstats computation for {len(pending)} array(s)...")
+            for i in pending:
+                self._zstats_running[i] = True
+            compute_zstats(self, only=pending)
 
     def _init_logging(self):
         """Initialize logging system."""
@@ -396,8 +424,6 @@ class PreviewDataWidget(EdgeWindow):
 
     def _init_state(self):
         """Initialize widget state."""
-        for subplot in self.image_widget.figure:
-            subplot.toolbar = False
         self.image_widget._sliders_ui._loop = True
 
         # Determine nz and nc (z-planes and channels) using dims property
@@ -459,6 +485,8 @@ class PreviewDataWidget(EdgeWindow):
         # in load_new_data, so initial-launch defaults and reload defaults
         # never drift.
         self._auto_update = False  # not data-specific, kept here
+        self._mean_jobs: dict[int, list] = {}
+        self._mean_ready = False
         from mbo_utilities.gui._dialogs import _reset_per_data_state
         _reset_per_data_state(self)
 
@@ -667,14 +695,9 @@ class PreviewDataWidget(EdgeWindow):
 
     # === Properties ===
 
-    @property
-    def processors(self) -> list:
-        """Access to underlying NDImageProcessor instances."""
-        return self.image_widget._image_processors
-
     def _get_data_arrays(self) -> list:
-        """Get underlying data arrays from image processors."""
-        return [proc.data for proc in self.processors]
+        """The viewer's data arrays."""
+        return list(getattr(self.image_widget, "data", None) or [])
 
     @property
     def current_offset(self) -> list[float]:
@@ -846,6 +869,56 @@ class PreviewDataWidget(EdgeWindow):
         if value != self._mean_subtraction:
             self._mean_subtraction = value
             self._update_mean_subtraction()
+            self.image_widget.reset_vmin_vmax_frame()
+
+    def mean_image_progress(self) -> float | None:
+        """Progress of the slowest mean image still computing, or None."""
+        jobs = list(self._mean_jobs.values())
+        return min(job[1] for job in jobs) if jobs else None
+
+    def _mean_image(self, i: int) -> np.ndarray | None:
+        """Graphic ``i``'s per-pixel mean over T as ``(C, Z, Y, X)``, or None.
+
+        The first call for an array starts `temporal_mean` in a background
+        thread and answers None; `update` rebuilds the spatial function when
+        it lands. Keyed by the array and its scan-phase state, so a data swap
+        or a phase toggle recomputes.
+        """
+        base = _base_5d(self.image_widget.data[i])
+        entry = self._mean_images.get(i)
+        if entry is not None and entry[0] is base and entry[1] == _mean_key(base):
+            return entry[2]
+        running = self._mean_jobs.get(i)
+        if running is not None and running[0] is base:
+            return None
+        job = [base, 0.0]
+        self._mean_jobs[i] = job
+        threading.Thread(
+            target=self._compute_mean_image, args=(i, job), daemon=True
+        ).start()
+        return None
+
+    def _compute_mean_image(self, i: int, job: list) -> None:
+        base = job[0]
+        key = _mean_key(base)
+        t0 = time.perf_counter()
+        try:
+            mean = temporal_mean(
+                base, progress_callback=functools.partial(job.__setitem__, 1)
+            )
+            self.logger.info(
+                f"mean image {mean.shape} in {time.perf_counter() - t0:.1f}s"
+            )
+        except Exception:
+            self.logger.exception("mean image failed")
+            mean = None
+        # a job for data opened since supersedes this one
+        running = self._mean_jobs.get(i)
+        if running is not None and running is not job:
+            return
+        self._mean_images[i] = (base, key, mean)
+        self._mean_jobs.pop(i, None)
+        self._mean_ready = True
 
     @property
     def auto_contrast_on_z(self) -> bool:
@@ -870,13 +943,7 @@ class PreviewDataWidget(EdgeWindow):
             return
         self._window_size = value
         self.logger.debug(f"Window size set to {value}.")
-        if not self.processors:
-            return
-        n_slider_dims = self.processors[0].n_slider_dims
-        if n_slider_dims == 0:
-            return
-        per_processor_sizes = (self._window_size,) + (None,) * (n_slider_dims - 1)
-        self._set_processor_attr("window_sizes", per_processor_sizes)
+        self._update_window_funcs()
 
     # === Internal methods ===
 
@@ -884,50 +951,6 @@ class PreviewDataWidget(EdgeWindow):
         """Trigger a frame refresh on the ImageWidget."""
         current_indices = list(self.image_widget.indices)
         self.image_widget.indices = current_indices
-
-    def _set_processor_attr(self, attr: str, value):
-        """Set processor attribute without expensive histogram recomputation."""
-        if not self.processors:
-            return
-
-        # save histogram state and disable recomputation during update
-        saved = [(p._compute_histogram, p._histogram) for p in self.processors]
-        for proc in self.processors:
-            proc._compute_histogram = False
-
-        try:
-            if attr == "window_funcs":
-                if isinstance(value, tuple):
-                    value = [value] * len(self.processors)
-                self.image_widget.window_funcs = value
-            elif attr == "window_sizes":
-                if isinstance(value, (tuple, list)) and not isinstance(value[0], (tuple, list, type(None))):
-                    value = [value] * len(self.processors)
-                self.image_widget.window_sizes = value
-            elif attr == "spatial_func":
-                self.image_widget.spatial_func = value
-            else:
-                for proc in self.processors:
-                    setattr(proc, attr, value)
-                self._refresh_image_widget()
-        except Exception as e:
-            self.logger.exception(f"Error setting {attr}: {e}")
-        finally:
-            # restore histogram state
-            for proc, (orig_compute, orig_hist) in zip(self.processors, saved):
-                proc._compute_histogram = orig_compute
-                proc._histogram = orig_hist
-            # fix dock visibility (fastplotlib sets to 0 when histogram is None)
-            for subplot in self.image_widget.figure:
-                if subplot.docks["right"].size < 1:
-                    subplot.docks["right"].size = 80
-
-        # fpl's window_funcs/window_sizes/spatial_func setters refresh via
-        # `self.indices = self.indices`, but that runs *before* the histogram
-        # restore above and can leave the displayed graphic stale. Force a
-        # post-restore refresh so changes take effect immediately.
-        if attr in ("window_funcs", "window_sizes", "spatial_func"):
-            self._refresh_image_widget()
 
     def _refresh_widgets(self):
         """Refresh widgets based on current data capabilities."""
@@ -947,108 +970,51 @@ class PreviewDataWidget(EdgeWindow):
     def _rebuild_spatial_func(self):
         """Rebuild and apply the combined spatial function."""
         from mbo_utilities.arrays.features import find_slider_name
+
         names = self.image_widget._slider_dim_names or ()
-        # fastplotlib's `indices` is case-sensitive; isoview uses
-        # descriptive labels (Tile/Timepoint, Cam/View, Zplane), LBM
-        # uses lowercase. find_slider_name resolves both via aliases.
-        z_name = find_slider_name(names, "z")
-        try:
-            z_idx = self.image_widget.indices[z_name] if z_name else 0
-        except (IndexError, KeyError):
-            z_idx = 0
+        positions = {}
+        for role in ("c", "z"):
+            name = find_slider_name(names, role)
+            try:
+                positions[role] = self.image_widget.indices[name] if name else 0
+            except (IndexError, KeyError):
+                positions[role] = 0
 
         sigma = self.gaussian_sigma if self.gaussian_sigma > 0 else None
 
-        # Pick the breakout combo matching the current sliders so mean
-        # subtraction matches what the user sees. `_zstats_means[i]` is now
-        # `dict[combo_tuple, (n_slices, Yb, Xb)]`; fall back to the
-        # no-breakout slot, then the first computed combo.
-        from mbo_utilities.gui._stats import current_breakout_key
+        mean_imgs = []
+        for i in range(self.num_graphics):
+            mean = self._mean_image(i) if self._mean_subtraction else None
+            if mean is not None:
+                c, z = positions["c"], positions["z"]
+                mean = mean[min(c, mean.shape[0] - 1), min(z, mean.shape[1] - 1)]
+            mean_imgs.append(mean)
 
-        def _means_for(i):
-            slot = self._zstats_means[i] if i < len(self._zstats_means) else None
-            if not isinstance(slot, dict) or not slot:
-                return None
-            key = current_breakout_key(self, i)
-            out = slot.get(key)
-            if out is None:
-                out = slot.get(())
-            if out is None:
-                out = next(iter(slot.values()))
-            return out
-
-        any_mean_sub = self._mean_subtraction and any(
-            self._zstats_done[i] and _means_for(i) is not None
-            for i in range(self.num_graphics)
-        )
-
-        if not any_mean_sub and sigma is None:
-            def identity(frame):
-                return frame
-            self._set_processor_attr("spatial_func", identity)
+        if sigma is None and all(m is None for m in mean_imgs):
+            self.image_widget.spatial_func = None
             return
 
-        spatial_funcs = []
-        for i in range(self.num_graphics):
-            mean_img = None
-            if self._mean_subtraction and self._zstats_done[i]:
-                means_arr = _means_for(i)
-                if means_arr is not None:
-                    # means_arr rows follow the sampled planes, which may be
-                    # a strided subset for deep stacks. map the displayed
-                    # plane to its nearest sampled row instead of indexing by
-                    # the absolute plane (which would be out of range).
-                    pos = self._sampled_mean_pos(i, z_idx, means_arr.shape[0])
-                    mean_img = means_arr[pos].astype(np.float32)
-
-            spatial_funcs.append(self._make_spatial_func(mean_img, sigma))
-
-        self._set_processor_attr("spatial_func", spatial_funcs)
-
-    def _sampled_mean_pos(self, i: int, z_idx: int, n_rows: int) -> int:
-        """Row in graphic ``i``'s mean-images stack for displayed plane z_idx.
-
-        When z is subsampled the stack has fewer rows than the volume has
-        planes; map the absolute plane to the nearest sampled plane. Falls
-        back to a clamped index when no sampling record is available.
-        """
-        idxs = getattr(self, "_zstats_z_indices", None)
-        if idxs and i < len(idxs) and idxs[i] and len(idxs[i]) == n_rows:
-            target = int(z_idx) + 1  # records are 1-based plane numbers
-            planes = idxs[i]
-            return min(range(n_rows), key=lambda k: abs(planes[k] - target))
-        return max(0, min(int(z_idx), n_rows - 1))
+        self.image_widget.spatial_func = [
+            self._make_spatial_func(mean, sigma) for mean in mean_imgs
+        ]
 
     def _make_spatial_func(self, mean_img: np.ndarray | None, sigma: float | None):
-        """Create a spatial function that applies mean subtraction and/or gaussian blur."""
+        """Create a spatial function that applies mean subtraction and/or gaussian blur.
+
+        The frame is copied to float32 first, so the source is never written.
+        """
         # precompute kernel size for opencv (6*sigma, rounded to odd)
         ksize = (int(sigma * 6) | 1) if sigma else 0
-        # zstats mean-images are spatially binned (strided) to save memory;
-        # block-upsample back to the frame grid before subtracting. cached
-        # per frame shape so it is computed once, not every frame.
-        _fitted: dict = {}
-
-        def _fit_mean(shape):
-            if mean_img.shape == shape:
-                return mean_img
-            cached = _fitted.get(shape)
-            if cached is None:
-                fy = -(-shape[0] // mean_img.shape[0])
-                fx = -(-shape[1] // mean_img.shape[1])
-                up = np.repeat(np.repeat(mean_img, fy, axis=0), fx, axis=1)
-                cached = np.ascontiguousarray(up[: shape[0], : shape[1]])
-                _fitted[shape] = cached
-            return cached
 
         def spatial_func(frame):
             # fastplotlib passes the raw data object when n_slider_dims==0,
             # which for our lazy arrays is not yet a numpy array.
             # materialize first so arithmetic/ufuncs work.
             result = np.asarray(frame)
-            if mean_img is not None and result.ndim == 2:
-                # only subtract when frame is 2D (Y, X); skip if 3D since
-                # mean_img is z-specific and can't be applied to a full stack
-                result = result.astype(np.float32) - _fit_mean(result.shape)
+            # a windowed projection over a 3D block, or a view that reshaped
+            # Y/X, has no matching mean plane
+            if mean_img is not None and result.shape == mean_img.shape:
+                result = result.astype(np.float32) - mean_img
             if sigma is not None and sigma > 0 and result.ndim == 2:
                 try:
                     import cv2
@@ -1056,37 +1022,28 @@ class PreviewDataWidget(EdgeWindow):
                 except ImportError:
                     result = gaussian_filter(result, sigma=sigma)
             return result
+
         return spatial_func
 
     def _update_window_funcs(self):
-        """Update window_funcs on image widget based on current projection mode."""
-        if not self.processors:
+        """Map projection mode + window size onto the viewer's
+        ``window_funcs`` ({"t": (func, size)}). Sizes are odd-ified so the
+        window is centered on the current frame; size<=1 clears the
+        projection (raw frame).
+        """
+        iw = self.image_widget
+        if "t" not in (getattr(iw, "slider_dims", None) or ()):
             return
-
-        def mean_wrapper(data, axis, keepdims):
-            return np.mean(data, axis=axis, keepdims=keepdims)
-
-        def max_wrapper(data, axis, keepdims):
-            return np.max(data, axis=axis, keepdims=keepdims)
-
-        def std_wrapper(data, axis, keepdims):
-            return np.std(data, axis=axis, keepdims=keepdims)
-
-        proj_funcs = {"mean": mean_wrapper, "max": max_wrapper, "std": std_wrapper}
-        proj_func = proj_funcs.get(self._proj, mean_wrapper)
-
-        n_slider_dims = self.processors[0].n_slider_dims
-
-        if n_slider_dims == 0:
-            return
-        elif n_slider_dims == 1:
-            window_funcs = (proj_func,)
-        elif n_slider_dims == 2:
-            window_funcs = (proj_func, None)
-        else:
-            window_funcs = (proj_func,) + (None,) * (n_slider_dims - 1)
-
-        self._set_processor_attr("window_funcs", window_funcs)
+        try:
+            size = int(self._window_size)
+            if size <= 1:
+                iw.window_funcs = None
+                return
+            proj_funcs = {"mean": np.mean, "max": np.max, "std": np.std}
+            func = proj_funcs.get(self._proj, np.mean)
+            iw.window_funcs = {"t": (func, max(3, size | 1))}
+        except Exception as e:
+            self.logger.exception(f"Error applying window funcs: {e}")
 
     def gui_progress_callback(self, frac, meta=None):
         """Handle progress callbacks from save operations."""
@@ -1126,8 +1083,8 @@ class PreviewDataWidget(EdgeWindow):
 
     # === Rendering ===
 
-    def draw_window(self):
-        """Override parent to handle keyboard shortcuts and global popups."""
+    def draw(self):
+        """Keyboard shortcuts and the global popups, then the edge window."""
         handle_keyboard_shortcuts(self)
         check_file_dialogs(self)
 
@@ -1157,7 +1114,7 @@ class PreviewDataWidget(EdgeWindow):
         except Exception:
             pass
 
-        super().draw_window()
+        super().draw()
 
     def update(self):
         """Main render callback."""
@@ -1195,12 +1152,14 @@ class PreviewDataWidget(EdgeWindow):
                 f"SLOW FRAME: gap={gap_ms:.0f}ms menu={menu_ms:.1f}ms draw={draw_ms:.1f}ms"
             )
 
-        # Update mean subtraction when z-plane or channel changes. With
-        # all channels precomputed by zstats, a C change just rebinds the
-        # mean image from the per-channel cache — no recompute needed.
-        # `indices` is case-sensitive; resolve canonical names from the
-        # slider list before indexing (isoview uses descriptive labels,
-        # LBM uses lowercase t/c/z).
+        if self._mean_ready:
+            self._mean_ready = False
+            if self._mean_subtraction:
+                self._update_mean_subtraction()
+                self.image_widget.reset_vmin_vmax_frame()
+
+        # a z or c change picks that plane of the mean image; `indices` is
+        # case-sensitive, so resolve the slider names first
         from mbo_utilities.arrays.features import find_slider_name
         names = self.image_widget._slider_dim_names or ()
         z_name = find_slider_name(names, "z")

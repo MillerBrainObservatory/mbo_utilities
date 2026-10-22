@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from fastplotlib.widgets import ImageWidget
+    from mbo_utilities.gui._ndviewer import MboNDViewer
 
 __all__ = [
     "BaseViewer",
@@ -27,7 +27,7 @@ class BaseViewer(ABC):
 
     def __init__(
         self,
-        image_widget: ImageWidget,
+        image_widget: MboNDViewer,
         fpath: str | list[str],
         parent=None,
         **kwargs,

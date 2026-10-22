@@ -167,6 +167,20 @@ _SLIDER_NAME_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+# a 5D array's sliders are T, C, Z in that order; t/z/c would put z on the C axis
+SLIDER_LETTERS_BY_COUNT: dict[int, tuple[str, ...]] = {
+    1: ("t",),
+    2: ("t", "z"),
+    3: ("t", "c", "z"),
+}
+
+
+def default_dim_letters(n: int) -> tuple[str, ...]:
+    """The letters for ``n`` unnamed slider axes (``dimN`` beyond 3)."""
+    base = SLIDER_LETTERS_BY_COUNT.get(min(n, 3), ())
+    return tuple(base) + tuple(f"dim{j}" for j in range(3, n))
+
+
 def find_slider_name(names, canonical: str) -> str | None:
     """Return the slider name in ``names`` matching a canonical T/C/Z key.
 

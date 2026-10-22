@@ -36,13 +36,14 @@ dependencies = [
 	"glfw ; sys_platform != 'linux'",
 	"pyqt6>=6.7 ; sys_platform == 'linux'",
 	"pyqt6-sip ; sys_platform == 'linux'",
-	"pygfx>=0.15.2",
 	"llvmlite>=0.43.0",
 	"numba>=0.60.0",
-	"mbo-fastplotlib>=0.7.3",
-	"rendercanvas>=2.4.2,<2.5",
-	"imgui-bundle==1.92.5",
-	"wgpu>=0.28.1,<0.29",
+	# fastplotlib pins pygfx; its imgui code needs imgui-bundle 1.92.8xx and
+	# the wgpu imgui backend breaks on 1.92.900
+	"fastplotlib[imgui]>=0.7.0,<0.8",
+	"rendercanvas>=2.7.2",
+	"imgui-bundle>=1.92.801,<1.92.900",
+	"wgpu>=0.30.1",
 	"submitit>=1.5.0",
 	"imagecodecs>=2026.6.6",
 ]
@@ -205,6 +206,9 @@ mbo_utilities = ["assets/**/*"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["data/*"]
+
+[tool.pytest.ini_options]
+markers = ["critical: contracts kept when the test suite is pruned"]
 
 [tool.coverage.report]
 exclude_lines = [

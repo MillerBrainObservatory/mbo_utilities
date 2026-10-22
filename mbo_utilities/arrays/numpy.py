@@ -394,8 +394,8 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
         )
 
     def imshow(self, **kwargs):
-        """Display array using fastplotlib ImageWidget."""
-        import fastplotlib as fpl
+        """Display the array in the viewer (fastplotlib NDWidget)."""
+        from mbo_utilities.gui._ndviewer import MboNDViewer
 
         histogram_widget = kwargs.pop("histogram_widget", True)
         figure_kwargs = kwargs.pop("figure_kwargs", {"size": (800, 800)})
@@ -410,7 +410,7 @@ class NumpyArray(ReductionMixin, Shape5DMixin):
         window_funcs = kwargs.pop("window_funcs", (np.mean, None, None))
         window_sizes = kwargs.pop("window_sizes", (1, None, None))
 
-        return fpl.ImageWidget(
+        return MboNDViewer(
             data=self.data,
             slider_dim_names=slider_dim_names,
             window_funcs=window_funcs,

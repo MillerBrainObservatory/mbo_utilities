@@ -11,7 +11,12 @@ from imgui_bundle import imgui, hello_imgui
 
 from mbo_utilities.gui.widgets._base import Widget
 from mbo_utilities.gui._imgui_helpers import set_tooltip
-from mbo_utilities.gui._colormaps import DEFAULT_COLORMAPS, DEFAULT_COLORMAP
+from mbo_utilities.gui.widgets.preview_data import _base_5d
+from mbo_utilities.gui._colormaps import (
+    DEFAULT_COLORMAP,
+    DEFAULT_COLORMAPS,
+    listed_name,
+)
 
 
 class WindowFunctionsWidget(Widget):
@@ -96,7 +101,7 @@ class SpatialFunctionsWidget(Widget):
         if iw is None:
             return
         try:
-            cmap_name = str(list(iw.graphics)[0].cmap or "")
+            cmap_name = listed_name(list(iw.graphics)[0].cmap)
         except Exception:
             return
         if not cmap_name:
@@ -142,24 +147,19 @@ class SpatialFunctionsWidget(Widget):
         if gaussian_changed:
             parent.gaussian_sigma = max(0.0, new_sigma)
 
-        # mean subtraction checkbox
-        zstats_ready = all(parent._zstats_done)
-        if not zstats_ready:
-            imgui.begin_disabled()
-
-        mean_sub_changed, mean_sub_value = imgui.checkbox(
-            "Mean Subtraction", parent.mean_subtraction
-        )
-        if not zstats_ready:
-            set_tooltip("Mean subtraction requires z-stats to be computed first (in progress...)")
-            imgui.end_disabled()
-        else:
-            set_tooltip(
-                "Subtract the mean image from each frame. Useful for visualizing activity changes."
+        if _base_5d(parent.image_widget.data[0]).shape[0] > 1:
+            mean_sub_changed, mean_sub_value = imgui.checkbox(
+                "Mean Subtraction", parent.mean_subtraction
             )
-
-        if mean_sub_changed and zstats_ready:
-            parent.mean_subtraction = mean_sub_value
+            set_tooltip(
+                "Subtract each pixel's mean over the whole recording from every "
+                "frame. Display only; saved files read the raw data."
+            )
+            if mean_sub_changed:
+                parent.mean_subtraction = mean_sub_value
+            progress = parent.mean_image_progress()
+            if progress is not None:
+                imgui.text_disabled(f"computing mean image {progress:.0%}")
 
         # colormap selector
         self._sync_cmap_from_fpl()

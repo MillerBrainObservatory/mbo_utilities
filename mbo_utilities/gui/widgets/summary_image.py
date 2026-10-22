@@ -72,6 +72,7 @@ _PRIORITY_KEYS = (
 from mbo_utilities.gui._colormaps import (
     DEFAULT_COLORMAPS as _DEFAULT_COLORMAPS,
     DEFAULT_COLORMAP as _DEFAULT_COLORMAP,
+    listed_name,
 )
 
 _CONTRAST_MODES = ("Full", "Auto", "Manual")
@@ -352,7 +353,7 @@ class SummaryImageViewer(Widget):
         if not graphics:
             return
         try:
-            cmap_name = str(graphics[0].cmap)
+            cmap_name = listed_name(graphics[0].cmap)
         except Exception:
             return
         if not cmap_name:
@@ -642,7 +643,7 @@ class SummaryImageViewer(Widget):
                     break
                 pts.append(imgui.ImVec2(sx, sy))
             if len(pts) >= 3:
-                draw_list.add_polyline(pts, color, imgui.ImDrawFlags_.closed, 1.5)
+                draw_list.add_polyline(pts, color, 1.5, imgui.ImDrawFlags_.closed)
 
     def _open_save_dialog(self, key: str, arr: np.ndarray) -> None:
         if self._save_dialog is not None:

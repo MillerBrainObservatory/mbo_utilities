@@ -28,6 +28,7 @@ from mbo_utilities.gui._imgui_helpers import (
     style_seaborn_dark,
 )
 from mbo_utilities.gui.widgets.progress_bar import reset_progress_state
+from mbo_utilities.preferences import get_signal_quality
 from mbo_utilities.reader import imread
 
 
@@ -351,6 +352,11 @@ def hydrate_zstats(parent: Any) -> list[bool]:
     return out
 
 
+def signal_quality_enabled() -> bool:
+    """Whether Signal Quality is on; off, its stats are never read."""
+    return get_signal_quality()
+
+
 def compute_zstats(parent: Any, only: list[int] | None = None):
     """Compute z-stats for all graphics (or only the given 0-based indices).
 
@@ -359,6 +365,8 @@ def compute_zstats(parent: Any, only: list[int] | None = None):
     main render/event loop low so the UI stays responsive during compute.
     Non-blocking: returns immediately, safe to call from the main thread.
     """
+    if not signal_quality_enabled():
+        return
     if not parent.image_widget or not parent.image_widget.data:
         return
 
@@ -435,11 +443,10 @@ def refresh_zstats(parent: Any):
 
     parent.logger.debug(f"Refreshing z-stats for {n} arrays, nz={parent.nz}")
 
-    # Mark all as running before starting
+    if not signal_quality_enabled():
+        return
     for i in range(n):
         parent._zstats_running[i] = True
-
-    # Recompute z-stats
     compute_zstats(parent)
 
 
@@ -872,24 +879,18 @@ def _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane, stat_label=
                 # series-point 1 bars (offset left)
                 x_z1 = x_pos - bar_width / 2
                 heights_z1 = np.array(graphic_means_z1, dtype=np.float64)
-                implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                implot.push_style_color(
-                    implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                implot.plot_bars(
+                    f"{short}1", x_z1, heights_z1, bar_width,
+                    implot.Spec(fill_alpha=0.8, fill_color=(0.2, 0.6, 0.9, 0.8)),
                 )
-                implot.plot_bars(f"{short}1", x_z1, heights_z1, bar_width)
-                implot.pop_style_color()
-                implot.pop_style_var()
 
                 # series-point 2 bars (offset right)
                 x_z2 = x_pos + bar_width / 2
                 heights_z2 = np.array(graphic_means_z2, dtype=np.float64)
-                implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                implot.push_style_color(
-                    implot.Col_.fill.value, (0.9, 0.4, 0.2, 0.8)
+                implot.plot_bars(
+                    f"{short}2", x_z2, heights_z2, bar_width,
+                    implot.Spec(fill_alpha=0.8, fill_color=(0.9, 0.4, 0.2, 0.8)),
                 )
-                implot.plot_bars(f"{short}2", x_z2, heights_z2, bar_width)
-                implot.pop_style_color()
-                implot.pop_style_var()
 
             finally:
                 implot.end_plot()
@@ -924,28 +925,20 @@ def _draw_signal_comparison_chart(parent, mean_vals, is_dual_zplane, stat_label=
                     implot.ImAxis_.x1.value, x_pos.tolist(), labels, False
                 )
 
-                implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                implot.push_style_color(
-                    implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
-                )
                 implot.plot_bars(
                     "Graphic Signal",
                     x_pos,
                     heights,
                     0.6,
+                    implot.Spec(fill_alpha=0.8, fill_color=(0.2, 0.6, 0.9, 0.8)),
                 )
-                implot.pop_style_color()
-                implot.pop_style_var()
 
                 # Add mean line
                 mean_line = np.full_like(heights, mean_vals[0])
-                implot.push_style_var(implot.StyleVar_.line_weight.value, 2)
-                implot.push_style_color(
-                    implot.Col_.line.value, (1.0, 0.4, 0.2, 0.8)
+                implot.plot_line(
+                    "Average", x_pos, mean_line,
+                    implot.Spec(line_weight=2, line_color=(1.0, 0.4, 0.2, 0.8)),
                 )
-                implot.plot_line("Average", x_pos, mean_line)
-                implot.pop_style_color()
-                implot.pop_style_var()
             finally:
                 implot.end_plot()
 
@@ -990,32 +983,23 @@ def _draw_signal_metrics_chart(
                 heights_z1 = np.array([mean_vals[0], std_vals[0], snr_vals[0]], dtype=np.float64)
                 heights_z2 = np.array([mean_vals[1], std_vals[1], snr_vals[1]], dtype=np.float64)
 
-                implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                implot.push_style_color(
-                    implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                implot.plot_bars(
+                    f"{short}1", x_z1, heights_z1, bar_width,
+                    implot.Spec(fill_alpha=0.8, fill_color=(0.2, 0.6, 0.9, 0.8)),
                 )
-                implot.plot_bars(f"{short}1", x_z1, heights_z1, bar_width)
-                implot.pop_style_color()
-                implot.pop_style_var()
 
-                implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                implot.push_style_color(
-                    implot.Col_.fill.value, (0.9, 0.4, 0.2, 0.8)
+                implot.plot_bars(
+                    f"{short}2", x_z2, heights_z2, bar_width,
+                    implot.Spec(fill_alpha=0.8, fill_color=(0.9, 0.4, 0.2, 0.8)),
                 )
-                implot.plot_bars(f"{short}2", x_z2, heights_z2, bar_width)
-                implot.pop_style_color()
-                implot.pop_style_var()
             else:
                 # Single bars for single series point
                 heights = np.array([mean_vals[0], std_vals[0], snr_vals[0]], dtype=np.float64)
 
-                implot.push_style_var(implot.StyleVar_.fill_alpha.value, 0.8)
-                implot.push_style_color(
-                    implot.Col_.fill.value, (0.2, 0.6, 0.9, 0.8)
+                implot.plot_bars(
+                    "Signal Metrics", x_pos, heights, 0.6,
+                    implot.Spec(fill_alpha=0.8, fill_color=(0.2, 0.6, 0.9, 0.8)),
                 )
-                implot.plot_bars("Signal Metrics", x_pos, heights, 0.6)
-                implot.pop_style_color()
-                implot.pop_style_var()
         finally:
             implot.end_plot()
 
@@ -1100,49 +1084,36 @@ def _draw_combined_zplane_plot(
             # don't disappear into the dark background.
             for i, ys in enumerate(graphic_series):
                 label = f"ROI {i + 1}##roi{i}"
-                implot.push_style_var(implot.StyleVar_.line_weight.value, 1)
-                implot.push_style_color(
-                    implot.Col_.line.value, (0.65, 0.70, 0.78, 0.55)
+                implot.plot_line(
+                    label, z, ys,
+                    implot.Spec(line_weight=1, line_color=(0.65, 0.70, 0.78, 0.55)),
                 )
-                implot.plot_line(label, z, ys)
-                implot.pop_style_color()
-                implot.pop_style_var()
 
             # shaded mean±std band
-            implot.push_style_color(
-                implot.Col_.fill.value, (0.30, 0.55, 0.95, 0.28)
+            implot.plot_shaded(
+                "Mean ± Std##band", z, lower, upper,
+                implot.Spec(fill_color=(0.30, 0.55, 0.95, 0.28)),
             )
-            implot.plot_shaded("Mean ± Std##band", z, lower, upper)
-            implot.pop_style_color()
 
             # mean line — heavier and brighter, with circle markers when the
             # plane count is small enough that markers don't clutter.
-            implot.push_style_var(implot.StyleVar_.line_weight.value, 2.5)
-            implot.push_style_color(
-                implot.Col_.line.value, (0.40, 0.75, 1.00, 1.00)
+            mean_spec = implot.Spec(
+                line_weight=2.5, line_color=(0.40, 0.75, 1.00, 1.00)
             )
             if len(z) <= 24:
-                implot.set_next_marker_style(
-                    implot.Marker_.circle.value, 4,
-                    imgui.ImVec4(0.40, 0.75, 1.00, 1.00), 1.5,
-                    imgui.ImVec4(0.13, 0.15, 0.18, 1.00),
-                )
-            implot.plot_line("Mean##line", z, mean_vals)
-            implot.pop_style_color()
-            implot.pop_style_var()
+                mean_spec.marker = implot.Marker_.circle.value
+                mean_spec.marker_size = 4
+                mean_spec.marker_fill_color = imgui.ImVec4(0.40, 0.75, 1.00, 1.00)
+                mean_spec.marker_line_color = imgui.ImVec4(0.13, 0.15, 0.18, 1.00)
+            implot.plot_line("Mean##line", z, mean_vals, mean_spec)
 
             # accent line + annotation for the active z-plane
             if active_z is not None and z[0] <= active_z <= z[-1]:
-                implot.push_style_var(implot.StyleVar_.line_weight.value, 2.0)
-                implot.push_style_color(
-                    implot.Col_.line.value, _ACTIVE_Z_COLOR
-                )
                 implot.plot_inf_lines(
                     "Active plane##active_z",
                     np.array([float(active_z)], dtype=np.float64),
+                    implot.Spec(line_weight=2.0, line_color=_ACTIVE_Z_COLOR),
                 )
-                implot.pop_style_color()
-                implot.pop_style_var()
                 # find y for annotation — clamp to series so the label
                 # sits on the curve rather than floating in the void.
                 _idx = int(min(max(active_z - 1, 0), len(mean_vals) - 1))
@@ -1210,19 +1181,15 @@ def _draw_zplane_signal_plot(
 
             # mean line — match the combined plot palette (sky-blue, heavier)
             # so both plots feel like the same family.
-            implot.push_style_var(implot.StyleVar_.line_weight.value, 2.5)
-            implot.push_style_color(
-                implot.Col_.line.value, (0.40, 0.75, 1.00, 1.00)
+            mean_spec = implot.Spec(
+                line_weight=2.5, line_color=(0.40, 0.75, 1.00, 1.00)
             )
             if len(z) <= 24:
-                implot.set_next_marker_style(
-                    implot.Marker_.circle.value, 4,
-                    imgui.ImVec4(0.40, 0.75, 1.00, 1.00), 1.5,
-                    imgui.ImVec4(0.13, 0.15, 0.18, 1.00),
-                )
-            implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals)
-            implot.pop_style_color()
-            implot.pop_style_var()
+                mean_spec.marker = implot.Marker_.circle.value
+                mean_spec.marker_size = 4
+                mean_spec.marker_fill_color = imgui.ImVec4(0.40, 0.75, 1.00, 1.00)
+                mean_spec.marker_line_color = imgui.ImVec4(0.13, 0.15, 0.18, 1.00)
+            implot.plot_line(f"Mean {array_idx}", z_vals, mean_vals, mean_spec)
 
             # accent line + annotation for the active z-plane
             if (
@@ -1230,16 +1197,11 @@ def _draw_zplane_signal_plot(
                 and len(z) > 0
                 and float(z[0]) <= active_z <= float(z[-1])
             ):
-                implot.push_style_var(implot.StyleVar_.line_weight.value, 2.0)
-                implot.push_style_color(
-                    implot.Col_.line.value, _ACTIVE_Z_COLOR
-                )
                 implot.plot_inf_lines(
                     f"Active plane##active_z_{array_idx}",
                     np.array([float(active_z)], dtype=np.float64),
+                    implot.Spec(line_weight=2.0, line_color=_ACTIVE_Z_COLOR),
                 )
-                implot.pop_style_color()
-                implot.pop_style_var()
                 _idx = int(min(max(active_z - 1, 0), len(mean_vals) - 1))
                 implot.annotation(
                     float(active_z), float(mean_vals[_idx]),

@@ -27,7 +27,7 @@ from mbo_utilities.metadata.scanimage import (
 )
 
 if TYPE_CHECKING:
-    from fastplotlib.widgets import ImageWidget
+    from mbo_utilities.gui._ndviewer import MboNDViewer
 
 __all__ = ["PollenCalibrationViewer"]
 
@@ -93,7 +93,7 @@ class PollenCalibrationViewer(BaseViewer):
 
     def __init__(
         self,
-        image_widget: ImageWidget,
+        image_widget: MboNDViewer,
         fpath: str | list[str],
         parent=None,
         **kwargs,
@@ -1229,12 +1229,14 @@ class PollenCalibrationViewer(BaseViewer):
                     ys_auto = np.asarray(data_auto["ys_um"], dtype=np.float64)
                     xs_auto = xs_auto - xs_auto.mean()
                     ys_auto = ys_auto - ys_auto.mean()
-                    implot.push_style_color(implot.Col_.marker_fill, color_auto)
-                    implot.push_style_var(implot.StyleVar_.marker_size, 6.0)
-                    implot.set_next_marker_style(implot.Marker_.circle)
-                    implot.plot_scatter("Auto", xs_auto, ys_auto)
-                    implot.pop_style_var()
-                    implot.pop_style_color()
+                    implot.plot_scatter(
+                        "Auto", xs_auto, ys_auto,
+                        implot.Spec(
+                            marker=implot.Marker_.circle.value,
+                            marker_size=6.0,
+                            marker_fill_color=color_auto,
+                        ),
+                    )
 
                 # Plot manual data - normalized
                 if has_manual:
@@ -1242,12 +1244,14 @@ class PollenCalibrationViewer(BaseViewer):
                     ys_manual = np.asarray(data_manual["ys_um"], dtype=np.float64)
                     xs_manual = xs_manual - xs_manual.mean()
                     ys_manual = ys_manual - ys_manual.mean()
-                    implot.push_style_color(implot.Col_.marker_fill, color_manual)
-                    implot.push_style_var(implot.StyleVar_.marker_size, 6.0)
-                    implot.set_next_marker_style(implot.Marker_.square)
-                    implot.plot_scatter("Manual", xs_manual, ys_manual)
-                    implot.pop_style_var()
-                    implot.pop_style_color()
+                    implot.plot_scatter(
+                        "Manual", xs_manual, ys_manual,
+                        implot.Spec(
+                            marker=implot.Marker_.square.value,
+                            marker_size=6.0,
+                            marker_fill_color=color_manual,
+                        ),
+                    )
 
                 implot.end_plot()
 
@@ -1272,17 +1276,19 @@ class PollenCalibrationViewer(BaseViewer):
                     if has_auto and "diffx" in data_auto:
                         diffx_auto = np.asarray(data_auto["diffx"], dtype=np.float64)
                         diffx_auto = diffx_auto - diffx_auto[0]
-                        implot.push_style_color(implot.Col_.fill, color_auto)
-                        implot.plot_bars("dX Auto", beam_nums - bar_width/2, diffx_auto, bar_width)
-                        implot.pop_style_color()
+                        implot.plot_bars(
+                            "dX Auto", beam_nums - bar_width/2, diffx_auto, bar_width,
+                            implot.Spec(fill_color=color_auto),
+                        )
 
                     # Manual X offsets - normalize to first beam
                     if has_manual and "diffx" in data_manual:
                         diffx_manual = np.asarray(data_manual["diffx"], dtype=np.float64)
                         diffx_manual = diffx_manual - diffx_manual[0]
-                        implot.push_style_color(implot.Col_.fill, color_manual)
-                        implot.plot_bars("dX Manual", beam_nums + bar_width/2, diffx_manual, bar_width)
-                        implot.pop_style_color()
+                        implot.plot_bars(
+                            "dX Manual", beam_nums + bar_width/2, diffx_manual, bar_width,
+                            implot.Spec(fill_color=color_manual),
+                        )
 
                 implot.end_plot()
 
